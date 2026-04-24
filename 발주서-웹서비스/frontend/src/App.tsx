@@ -1,45 +1,53 @@
-import { useState, useEffect, createContext, useContext } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import Login from './pages/Login';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+
+import { checkAuthConfig, fetchMe, UserMe } from './api';
 import AppShell from './components/AppShell';
-import DashboardHome from './components/mvp/DashboardHome';
-import OrderTools from './pages/OrderTools';
-import ProcessPage from './pages/ProcessPage';
-import GogumaAutoPage from './pages/GogumaAutoPage';
-import TossAutoPage from './pages/TossAutoPage';
-import GogumaUnifiedPage from './pages/GogumaUnifiedPage';
-import UnifiedProcessPage from './pages/UnifiedProcessPage';
-import PricingDashboard from './pages/PricingDashboard';
 import PlaceholderTab from './components/mvp/PlaceholderTab';
 import AdminPanel from './pages/AdminPanel';
-import TenantProductConfig from './pages/TenantProductConfig';
-import TenantOrderPage from './pages/TenantOrderPage';
-import SignupPage from './pages/SignupPage';
-import PricingPage from './pages/PricingPage';
-import BillingDashboard from './pages/BillingDashboard';
-import SalesDashboard from './pages/SalesDashboard';
-import ToolSettings from './pages/ToolSettings';
 import BatchTrackingPage from './pages/BatchTrackingPage';
+import BillingDashboard from './pages/BillingDashboard';
+import GogumaAutoPage from './pages/GogumaAutoPage';
+import GogumaUnifiedPage from './pages/GogumaUnifiedPage';
+import Login from './pages/Login';
 import NotFound from './pages/NotFound';
-import { checkAuthConfig, fetchMe, UserMe } from './api';
+import OrderAutomationDashboard from './pages/OrderAutomationDashboard';
+import OrderTools from './pages/OrderTools';
+import PricingDashboard from './pages/PricingDashboard';
+import PricingPage from './pages/PricingPage';
+import ProcessPage from './pages/ProcessPage';
+import SalesDashboard from './pages/SalesDashboard';
+import SignupPage from './pages/SignupPage';
+import TenantOrderPage from './pages/TenantOrderPage';
+import TenantProductConfig from './pages/TenantProductConfig';
+import ToolSettings from './pages/ToolSettings';
+import TossAutoPage from './pages/TossAutoPage';
+import UnifiedProcessPage from './pages/UnifiedProcessPage';
 
-// Global auth state
-let _authDisabled = false;
-export function isAuthDisabled() { return _authDisabled; }
+let authDisabled = false;
+export function isAuthDisabled() {
+  return authDisabled;
+}
 
-// User context
 interface UserContextType {
   user: UserMe | null;
-  setUser: (u: UserMe | null) => void;
+  setUser: (nextUser: UserMe | null) => void;
 }
-const UserContext = createContext<UserContextType>({ user: null, setUser: () => {} });
-export function useUser() { return useContext(UserContext); }
+
+const UserContext = createContext<UserContextType>({
+  user: null,
+  setUser: () => undefined,
+});
+
+export function useUser() {
+  return useContext(UserContext);
+}
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('token');
   const location = useLocation();
 
-  if (_authDisabled) {
+  if (authDisabled) {
     return <>{children}</>;
   }
 
@@ -50,22 +58,21 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function App() {
+export default function App() {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<UserMe | null>(null);
 
   useEffect(() => {
     checkAuthConfig()
       .then((config) => {
-        _authDisabled = config.auth_disabled;
+        authDisabled = config.auth_disabled;
       })
       .catch(() => {
-        _authDisabled = false;
+        authDisabled = false;
       })
       .finally(() => {
-        // Try to fetch user info if token exists
         const token = localStorage.getItem('token');
-        if (token && !_authDisabled) {
+        if (token && !authDisabled) {
           fetchMe()
             .then(setUser)
             .catch(() => {
@@ -80,8 +87,8 @@ function App() {
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="animate-spin w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full" />
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-amber-200 border-t-amber-500" />
       </div>
     );
   }
@@ -89,10 +96,7 @@ function App() {
   return (
     <UserContext.Provider value={{ user, setUser }}>
       <Routes>
-        <Route
-          path="/login"
-          element={_authDisabled ? <Navigate to="/" replace /> : <Login />}
-        />
+        <Route path="/login" element={authDisabled ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/pricing" element={<PricingPage />} />
         <Route
@@ -103,7 +107,7 @@ function App() {
             </PrivateRoute>
           }
         >
-          <Route index element={<DashboardHome />} />
+          <Route index element={<OrderAutomationDashboard />} />
           <Route path="orders" element={<OrderTools />} />
           <Route path="orders/batch-tracking" element={<BatchTrackingPage />} />
           <Route path="orders/settings" element={<ToolSettings />} />
@@ -117,12 +121,10 @@ function App() {
           <Route path="cs" element={<PlaceholderTab />} />
           <Route path="ai-content" element={<PlaceholderTab />} />
           <Route path="roas" element={<PlaceholderTab />} />
-          {/* Tenant routes */}
           <Route path="my/products" element={<TenantProductConfig />} />
           <Route path="my/process" element={<TenantOrderPage />} />
           <Route path="billing" element={<BillingDashboard />} />
           <Route path="sales" element={<SalesDashboard />} />
-          {/* Admin route */}
           <Route path="admin" element={<AdminPanel />} />
         </Route>
         <Route path="*" element={<NotFound />} />
@@ -130,5 +132,3 @@ function App() {
     </UserContext.Provider>
   );
 }
-
-export default App;

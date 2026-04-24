@@ -1,0 +1,26 @@
+app = "danharu-ops-hub"
+primary_region = "nrt"
+
+[build]
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[env]
+  DATABASE_PATH = "/data/danharu.db"
+  DEPLOYMENT_MODE = "onprem"
+  APP_BASE_URL = "https://danharu-ops-hub.fly.dev"
+  TOSS_PAY_API_BASE = "https://api.tosspayments.com"
+
+[mounts]
+  source = "data"
+  destination = "/data"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

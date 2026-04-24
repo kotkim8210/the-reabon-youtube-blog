@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - TEAM_PASSWORD=${TEAM_PASSWORD:-rjsystems2024}
+      - TOSS_ACCESS_KEY=${TOSS_ACCESS_KEY}
+      - TOSS_SECRET_KEY=${TOSS_SECRET_KEY}
+    volumes:
+      - ./backend/templates:/app/templates
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
