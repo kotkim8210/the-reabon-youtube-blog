@@ -1,5 +1,6 @@
 import logging
 import re
+from hashlib import sha1
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
@@ -20,6 +21,21 @@ def normalize(value) -> str:
     s = str(value).strip()
     s = re.sub(r"\s+", " ", s)
     return s
+
+
+def stable_order_id(prefix: str, *values) -> str:
+    raw = "|".join(normalize(value) for value in values if normalize(value))
+    if not raw:
+        return ""
+    return f"{prefix}:{sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+
+
+def toss_order_id(item: dict) -> str:
+    for key in ("orderNo", "orderId", "orderNumber", "orderSheetId", "paymentKey"):
+        value = item.get(key)
+        if value:
+            return str(value)
+    return ""
 
 
 def transform_option(option_text: str) -> str:
@@ -53,6 +69,48 @@ def transform_alwayz_option(option_text: str) -> str:
     return text
 
 
+def canonical_goguma_option(*values: str) -> str:
+    """Normalize marketplace 고구마 option text to the 해달 발주서 품목명."""
+    texts = [normalize(value) for value in values if normalize(value)]
+    text = " ".join(texts)
+    if not text:
+        return ""
+
+    compact = re.sub(r"\s+", "", text).lower()
+    weight_match = re.search(r"(10|5|3|2)\s*(?:kg|키로)", text, re.IGNORECASE)
+    weight = weight_match.group(1) if weight_match else ""
+
+    grade = ""
+    grade_patterns = [
+        ("중상", r"중\s*상"),
+        ("특상", r"특\s*상"),
+        ("한입", r"한\s*입|꼬마|미니"),
+    ]
+    for label, pattern in grade_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            grade = label
+            break
+
+    if not grade:
+        # '대'는 상품명 안에 자주 들어가는 조사/단어와 섞이므로 무게 주변의 등급 표기만 인정한다.
+        large_patterns = [
+            r"\(\s*대\s*\)",
+            r"(?:^|[\s:/_\-\[\]])대(?:$|[\s:/_\-\]\[])",
+            r"(?:kg|키로)\s*대(?:$|[\s:/_\-\]\[])",
+        ]
+        if any(re.search(pattern, text, re.IGNORECASE) for pattern in large_patterns):
+            grade = "대"
+
+    if weight and grade:
+        return f"꿀고구마 {weight}Kg ({grade})"
+
+    # Fallback: keep legacy cleanup, but remove noisy market prefixes.
+    cleaned = re.sub(r"^\d+\.\s*", "", text)
+    cleaned = re.sub(r"^1박스\s*황금\s*", "", cleaned)
+    cleaned = re.sub(r"\[추천\]$", "", cleaned).strip()
+    return cleaned
+
+
 def build_alwayz_memo(delivery_method: str, door_password: str) -> str:
     """Build memo from 올웨이즈 수령방법(R열) + 공동현관비밀번호(Q열).
 
@@ -67,6 +125,66 @@ def build_alwayz_memo(delivery_method: str, door_password: str) -> str:
 
 
 GOGUMA_KEYWORDS = ["고구마", "꿀고구마"]
+
+HAEDAL_HEADERS = [
+    "받으시는 분",
+    "받으시는 분 전화",
+    "받는분담당자(선택)",
+    "받는분핸드폰(선택)",
+    "받는분우편번호(선택)",
+    "받는분총주소",
+    "보내시는 분",
+    "보내시는 분 전화",
+    "보내는분담당자(선택)",
+    "보내는분담당자HP(선택)",
+    "보내는분우편번호(선택)",
+    "보내는분총주소",
+    "수량",
+    "품목명",
+    "운임Type",
+    "지불조건",
+    "출고번호",
+    "특기사항",
+    "메모1",
+    "메모2",
+    "메모3",
+    "메모4",
+]
+
+HAEDAL_COLUMN_WIDTHS = {
+    "A": 18,
+    "B": 27,
+    "C": 18,
+    "D": 18,
+    "E": 21,
+    "F": 18,
+    "G": 13,
+    "H": 27,
+    "I": 21,
+    "J": 27,
+    "K": 24,
+    "L": 21,
+    "M": 10,
+    "N": 10,
+    "O": 18,
+    "P": 12,
+    "Q": 13,
+    "R": 13,
+    "S": 10,
+    "T": 13,
+    "U": 13,
+    "V": 13,
+}
+
+
+def ensure_haedal_header(ws) -> None:
+    """해달 한진 발주서 1행이 다른 양식에 의해 깨져도 출력 직전에 복구한다."""
+    header_font = Font(size=11, bold=True)
+    for col, value in enumerate(HAEDAL_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col, value=value)
+        cell.font = header_font
+    for column_letter, width in HAEDAL_COLUMN_WIDTHS.items():
+        ws.column_dimensions[column_letter].width = width
 
 
 def is_goguma_order(item: dict) -> bool:
@@ -85,10 +203,8 @@ def transform_toss_option(product_name: str, option_name: str) -> str:
     Uses optionName if available, falls back to productName.
     Applies same normalization as other sources.
     """
-    text = normalize(option_name) if option_name else normalize(product_name)
-    # Remove common prefixes like "1박스 황금 "
-    text = re.sub(r"^1박스\s*황금\s*", "", text)
-    return text
+    # Toss optionName is usually the selected option, so prefer it over the listing title.
+    return canonical_goguma_option(option_name, product_name)
 
 
 def parse_toss_excel(file_bytes: bytes) -> list[dict]:
@@ -114,6 +230,7 @@ def parse_toss_excel(file_bytes: bytes) -> list[dict]:
 
         option = normalize(row[13].value) if len(row) > 13 else ""  # N = index 13
         product = transform_toss_option("", option)
+        order_id = normalize(row[0].value) if len(row) > 0 else ""
 
         entries.append({
             "name": name,
@@ -123,6 +240,7 @@ def parse_toss_excel(file_bytes: bytes) -> list[dict]:
             "qty": normalize(row[16].value) if len(row) > 16 else "",    # Q = index 16
             "product": product,
             "memo": "",
+            "order_id": order_id or stable_order_id("toss-excel", name, row[8].value, row[6].value, product, row[16].value),
         })
 
     logger.info(f"토스 엑셀 파싱: {len(entries)}건")
@@ -176,6 +294,14 @@ async def collect_toss_orders(from_date: str, to_date: str) -> list[dict]:
             "qty": str(item.get("quantity") or 1),
             "product": product,
             "memo": item.get("shippingNote") or "",
+            "order_id": toss_order_id(item) or stable_order_id(
+                "toss-api",
+                item.get("receiverName"),
+                item.get("receiverRealPhone") or item.get("receiverPhone"),
+                full_address,
+                product,
+                item.get("quantity") or 1,
+            ),
         })
 
     logger.info(f"토스 고구마 주문 수집: {len(entries)}건 ({from_date} ~ {to_date})")
@@ -212,11 +338,13 @@ def process(
     dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes), data_only=True)
     dl_ws = dl_wb.active
 
-    # Extract ALL rows with a name in column AA (no product filter)
+    # Extract Coupang sweet-potato rows only. Some bulk workflows upload a
+    # mixed DeliveryList, so do not let unrelated products leak into this file.
     filtered_rows = []
     for row in dl_ws.iter_rows(min_row=2):
         name_val = normalize(row[26].value) if len(row) > 26 else ""  # AA = index 26
-        if name_val:
+        product_name = normalize(row[10].value) if len(row) > 10 else ""  # K = index 10
+        if name_val and "고구마" in product_name:
             filtered_rows.append(row)
 
     # Parse 올웨이즈 orders if provided
@@ -235,6 +363,7 @@ def process(
             option = normalize(az_row[5].value) if len(az_row) > 5 else ""  # F(6)=idx5
             door_pw = normalize(az_row[16].value) if len(az_row) > 16 else ""  # Q(17)=idx16
             recv_method = normalize(az_row[17].value) if len(az_row) > 17 else ""  # R(18)=idx17
+            order_id = normalize(az_row[0].value) if len(az_row) > 0 else ""
 
             product = transform_alwayz_option(option)
             memo = build_alwayz_memo(recv_method, door_pw)
@@ -253,6 +382,7 @@ def process(
                 "qty": qty,
                 "product": product,
                 "memo": memo,
+                "order_id": order_id or stable_order_id("alwayz", name, phone, address, product, qty),
             })
 
     # Load template
@@ -272,6 +402,7 @@ def process(
     for name in tmpl_wb.sheetnames[1:]:
         del tmpl_wb[name]
     ws = tmpl_wb[first_sheet_name]
+    ensure_haedal_header(ws)
 
     font11 = Font(size=11)
 
@@ -281,6 +412,8 @@ def process(
         if ws.cell(row=r, column=1).value is None:
             start_row = r
             break
+
+    option_totals: dict[str, dict] = {}
 
     # Write DeliveryList rows
     row_idx = start_row
@@ -302,8 +435,13 @@ def process(
         qty = normalize(qty_val)
         option = normalize(row[11].value) if len(row) > 11 else ""
         memo = normalize(row[30].value) if len(row) > 30 else ""
+        order_no = normalize(row[2].value) if len(row) > 2 else ""
 
         product = transform_option(option)
+        try:
+            qty_int = int(float(qty_val)) if qty_val not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
 
         # Zipcode with zero-fill to 5 digits
         if zipcode:
@@ -331,6 +469,19 @@ def process(
             cell.font = font11
         row_idx += 1
 
+        bucket = option_totals.setdefault(
+            option or product or "고구마",
+            {
+                "coupang_option_keyword": option or product or "고구마",
+                "vendor_option_name": product or "고구마",
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order_no:
+            bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
     # Write 올웨이즈 rows
     for entry in alwayz_entries:
         mapping = {
@@ -351,6 +502,23 @@ def process(
             cell = ws.cell(row=row_idx, column=col, value=value)
             cell.font = font11
         row_idx += 1
+
+        try:
+            qty_int = int(float(entry["qty"])) if entry["qty"] not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+        bucket = option_totals.setdefault(
+            entry["product"] or "고구마",
+            {
+                "coupang_option_keyword": entry["product"] or "고구마",
+                "vendor_option_name": entry["product"] or "고구마",
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if entry.get("order_id"):
+            bucket["orders"].append({"order_id": entry["order_id"], "quantity": qty_int})
 
     # Write 토스 rows
     for entry in toss_entries:
@@ -373,6 +541,23 @@ def process(
             cell.font = font11
         row_idx += 1
 
+        try:
+            qty_int = int(float(entry["qty"])) if entry["qty"] not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+        bucket = option_totals.setdefault(
+            entry["product"] or "고구마",
+            {
+                "coupang_option_keyword": entry["product"] or "고구마",
+                "vendor_option_name": entry["product"] or "고구마",
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if entry.get("order_id"):
+            bucket["orders"].append({"order_id": entry["order_id"], "quantity": qty_int})
+
     # Save to bytes
     output = BytesIO()
     tmpl_wb.save(output)
@@ -386,6 +571,8 @@ def process(
         "coupang": len(filtered_rows),
         "alwayz": len(alwayz_entries),
         "toss": len(toss_entries),
+        "product": "고구마",
+        "options": list(option_totals.values()),
     }
 
     return output.read(), filename, stats

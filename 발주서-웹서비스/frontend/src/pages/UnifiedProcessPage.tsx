@@ -12,6 +12,7 @@ interface SectionConfig {
   apiToolId: string;
   files: FileConfig[];
   buttonLabel: string;
+  tossDateRange?: boolean;
 }
 
 interface ProductConfig {
@@ -49,19 +50,19 @@ const productConfigs: Record<string, ProductConfig> = {
     },
   },
   kolrabi: {
-    title: '콜라비',
+    title: '콜라비+성주참외 알뜰과(제주다팜)',
     description: '발주서 생성 + 운송장번호 입력',
     icon: '🥬',
     bgClass: 'bg-green-50',
     order: {
-      title: '발주서 생성',
+      title: '콜라비+성주참외 알뜰과 발주서 생성',
       icon: '📋',
       apiToolId: 'kolrabi-order',
       files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
       buttonLabel: '발주서 생성',
     },
     tracking: {
-      title: '콜라비+성주참외 혼합(알뜰)과 운송장번호 입력',
+      title: '콜라비+성주참외 알뜰과 운송장번호 입력',
       icon: '📦',
       apiToolId: 'tracking-input',
       files: [
@@ -72,19 +73,19 @@ const productConfigs: Record<string, ProductConfig> = {
     },
   },
   myeongi: {
-    title: '명이나물',
-    description: '발주서 생성 + 운송장번호 입력',
+    title: '명이나물+애플초당옥수수',
+    description: '쥬얼리프룻 발주서 생성 + 운송장번호 입력',
     icon: '🌿',
     bgClass: 'bg-green-50',
     order: {
-      title: '발주서 생성',
+      title: '명이나물+애플초당옥수수 발주서 생성',
       icon: '📋',
       apiToolId: 'myeongi-order',
       files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
       buttonLabel: '발주서 생성',
     },
     tracking: {
-      title: '운송장번호 입력',
+      title: '명이나물+애플초당옥수수 운송장번호 입력',
       icon: '📦',
       apiToolId: 'myeongi-tracking',
       files: [
@@ -95,7 +96,7 @@ const productConfigs: Record<string, ProductConfig> = {
     },
   },
   tomato: {
-    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅',
+    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박 6/7/8kg·초당옥수수',
     description: '발주서 생성 + 운송장번호 입력',
     icon: '🍅',
     bgClass: 'bg-red-50',
@@ -105,13 +106,14 @@ const productConfigs: Record<string, ProductConfig> = {
       apiToolId: 'tomato-order',
       files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
       buttonLabel: '발주서 생성',
+      tossDateRange: true,
     },
     tracking: {
-      title: '대저토마토·성주참외(중소/로얄)·남해땅두릅 운송장번호 입력',
+      title: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박 6/7/8kg·초당옥수수 운송장번호 입력',
       icon: '📦',
       apiToolId: 'tomato-tracking',
       files: [
-        { key: 'tomato_reply', label: '대저토마토·성주참외(중소/로얄) 회신 파일' },
+        { key: 'tomato_reply', label: '제이비티 회신 파일' },
         { key: 'delivery', label: 'DeliveryList 파일' },
       ],
       buttonLabel: '운송장 입력',
@@ -126,9 +128,20 @@ function formatStats(stats: Record<string, unknown>): string[] {
   );
 }
 
+function localDateString(offsetDays = 0): string {
+  const current = new Date();
+  current.setDate(current.getDate() + offsetDays);
+  const localTime = current.getTime() - current.getTimezoneOffset() * 60 * 1000;
+  return new Date(localTime).toISOString().slice(0, 10);
+}
+
 // ── 섹션 컴포넌트 ─────────────────────────────────────────────────
 function ProcessSection({ section }: { section: SectionConfig }) {
   const [files, setFiles] = useState<Record<string, File | null>>({});
+  const [extraValues, setExtraValues] = useState<Record<string, string>>(() => {
+    if (!section.tossDateRange) return {} as Record<string, string>;
+    return { toss_from_date: localDateString(), toss_to_date: localDateString() };
+  });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [error, setError] = useState('');
@@ -150,7 +163,7 @@ function ProcessSection({ section }: { section: SectionConfig }) {
       for (const [k, f] of Object.entries(files)) {
         if (f) fileMap[k] = f;
       }
-      const res = await processFile(section.apiToolId, fileMap, {});
+      const res = await processFile(section.apiToolId, fileMap, extraValues);
       setResult(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : '처리 중 오류가 발생했습니다.');
@@ -188,6 +201,66 @@ function ProcessSection({ section }: { section: SectionConfig }) {
           />
         ))}
       </div>
+
+      {section.tossDateRange && (
+        <div className="rounded-xl border border-orange-200 bg-orange-50/70 p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-bold text-gray-900">토스 수박 6/7/8kg 주문 수집</p>
+              <p className="mt-0.5 text-xs text-gray-500">날짜가 있으면 토스 API 수박 6/7/8kg 주문만 제이비티 발주서에 합칩니다.</p>
+            </div>
+            <div className="flex gap-1.5">
+              {[
+                { label: '오늘', days: 0 },
+                { label: '2일', days: 1 },
+                { label: '3일', days: 2 },
+                { label: '4일', days: 3 },
+                { label: '수집안함', days: -1 },
+              ].map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => {
+                    if (preset.days < 0) {
+                      setExtraValues((prev) => ({ ...prev, toss_from_date: '', toss_to_date: '' }));
+                      return;
+                    }
+                    setExtraValues((prev) => ({
+                      ...prev,
+                      toss_from_date: localDateString(-preset.days),
+                      toss_to_date: localDateString(),
+                    }));
+                  }}
+                  className="rounded-lg border border-orange-300 px-2 py-1 text-xs font-semibold text-orange-700 transition hover:bg-orange-100"
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">시작일</span>
+              <input
+                type="date"
+                value={extraValues.toss_from_date || ''}
+                onChange={(event) => setExtraValues((prev) => ({ ...prev, toss_from_date: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-200"
+              />
+            </label>
+            <span className="hidden pb-2 text-gray-400 sm:block">~</span>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-gray-500">종료일</span>
+              <input
+                type="date"
+                value={extraValues.toss_to_date || ''}
+                onChange={(event) => setExtraValues((prev) => ({ ...prev, toss_to_date: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-200"
+              />
+            </label>
+          </div>
+        </div>
+      )}
 
       {/* 버튼 */}
       <div className="flex items-center gap-3">

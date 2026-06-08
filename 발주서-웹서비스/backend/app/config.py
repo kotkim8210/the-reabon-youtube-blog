@@ -47,3 +47,12 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_SCHEMA = os.getenv("SUPABASE_SCHEMA", "public")
 SUPABASE_BATCHES_TABLE = os.getenv("SUPABASE_BATCHES_TABLE", "automation_batches")
 SUPABASE_BATCH_ITEMS_TABLE = os.getenv("SUPABASE_BATCH_ITEMS_TABLE", "automation_batch_items")
+
+# AdminPlus supplier sourcing monitor
+PBF_PARTNER_ID = os.getenv("PBF_PARTNER_ID", "")
+PBF_PARTNER_PASSWORD = os.getenv("PBF_PARTNER_PASSWORD", "")
+
+# Internal bridge used when a deployment's outbound IP is not allowlisted by
+# marketplace APIs. Keep this empty except on apps that should proxy requests.
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
+GOGUMA_API_PROXY_BASE_URL = os.getenv("GOGUMA_API_PROXY_BASE_URL", "").rstrip("/")

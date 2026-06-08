@@ -5,6 +5,15 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
+from app.processors.myeongi_order import convert_option, is_apple_corn_order
+from app.processors.tracking_match import (
+    name_counts,
+    normalize_courier_name,
+    option_key_set,
+    options_match,
+    requires_option_guard,
+)
+
 
 KST = timezone(timedelta(hours=9))
 
@@ -14,6 +23,11 @@ def normalize(value) -> str:
     if value is None:
         return ""
     return re.sub(r'\s+', '', str(value).strip())
+
+
+def is_jewelryfruit_tracking_target(product_name: str, option_text: str) -> bool:
+    product = str(product_name or "")
+    return "명이나물" in product or is_apple_corn_order(product_name, option_text)
 
 
 def process(
@@ -37,6 +51,16 @@ def process(
         address = normalize(row[14].value) if len(row) > 14 else ""     # O = 주소
         courier = normalize(row[16].value) if len(row) > 16 else ""     # Q = 택배사
         tracking = normalize(row[17].value) if len(row) > 17 else ""    # R = 운송장번호
+        converted_option = convert_option(
+            str(row[11].value if len(row) > 11 else ""),
+            str(row[6].value if len(row) > 6 else ""),
+        )
+        option_keys = option_key_set(
+            row[6].value if len(row) > 6 else "",
+            row[8].value if len(row) > 8 else "",
+            row[11].value if len(row) > 11 else "",
+            converted_option,
+        )
 
         if tracking:
             order_entries.append({
@@ -46,6 +70,7 @@ def process(
                 "address": address,
                 "courier": courier,
                 "tracking": tracking,
+                "option_keys": option_keys,
             })
 
     # Build indexes
@@ -69,6 +94,12 @@ def process(
     used_entries = set()
     filled = 0
     skipped = 0
+    has_myeongi = False
+    has_apple_corn = False
+    delivery_name_counts = name_counts(
+        normalize(dl_ws.cell(row=row_idx, column=27).value)
+        for row_idx in range(2, dl_ws.max_row + 1)
+    )
 
     for row_idx in range(2, dl_ws.max_row + 1):
         e_cell = dl_ws.cell(row=row_idx, column=5)  # E = 운송장번호
@@ -80,6 +111,13 @@ def process(
         dl_name = normalize(dl_ws.cell(row=row_idx, column=27).value)      # AA = 수취인이름
         dl_phone = normalize(dl_ws.cell(row=row_idx, column=28).value)     # AB = 수취인전화번호
         dl_address = normalize(dl_ws.cell(row=row_idx, column=30).value)   # AD = 수취인주소
+        dl_product = dl_ws.cell(row=row_idx, column=11).value
+        dl_option = dl_ws.cell(row=row_idx, column=12).value
+        if not is_jewelryfruit_tracking_target(str(dl_product or ""), str(dl_option or "")):
+            continue
+        dl_option_keys = option_key_set(dl_option, convert_option(str(dl_option or ""), str(dl_product or "")))
+        if not dl_option_keys:
+            dl_option_keys = option_key_set(dl_product)
 
         if not dl_name and not dl_order_no:
             continue
@@ -108,6 +146,15 @@ def process(
             available = [c for c in candidates if id(c) not in used_entries]
 
             if available:
+                if requires_option_guard(dl_name, delivery_name_counts, len(candidates)):
+                    available = [
+                        c for c in available
+                        if options_match(c.get("option_keys"), dl_option_keys)
+                    ]
+                    if not available:
+                        skipped += 1
+                        continue
+
                 for c in available:
                     if c["phone"] == dl_phone and c["address"] == dl_address:
                         matched = c
@@ -127,11 +174,14 @@ def process(
 
         if matched:
             e_cell.value = matched["tracking"]
-            # 택배사 D열이 비어있으면 채우기
             d_cell = dl_ws.cell(row=row_idx, column=4)
-            d_cell.value = "롯데택배"
+            d_cell.value = normalize_courier_name(matched.get("courier"), "롯데택배")
             used_entries.add(id(matched))
             filled += 1
+            if "명이나물" in str(dl_product or ""):
+                has_myeongi = True
+            if is_apple_corn_order(dl_product, dl_option):
+                has_apple_corn = True
         else:
             skipped += 1
 
@@ -140,7 +190,13 @@ def process(
     output.seek(0)
 
     now = datetime.now(KST)
-    filename = f"DeliveryList_명이나물_운송장입력완료_{now.strftime('%Y%m%d')}.xlsx"
+    product_parts = []
+    if has_myeongi:
+        product_parts.append("명이나물")
+    if has_apple_corn:
+        product_parts.append("애플초당옥수수")
+    product_label = "_".join(product_parts) if product_parts else "쥬얼리프룻"
+    filename = f"DeliveryList_{product_label}_운송장입력완료_{now.strftime('%Y%m%d')}.xlsx"
     stats = {"filled": filled, "skipped": skipped}
 
     return output.read(), filename, stats

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from app.db import get_db, log_option_sales
+from app.db import get_db
 
 KST = timezone(timedelta(hours=9))
 
@@ -97,27 +96,6 @@ async def create_order_batch(
         )
 
     await db.commit()
-
-    grouped: dict[str, dict[tuple[str, str], dict]] = defaultdict(dict)
-    for item in items:
-        product_name = item.get("product_name", "").strip() or "미분류"
-        option_key = (
-            item.get("platform_option_name", "").strip(),
-            item.get("supply_option_name", "").strip(),
-        )
-        bucket = grouped[product_name].setdefault(
-            option_key,
-            {
-                "coupang_option_keyword": option_key[0],
-                "vendor_option_name": option_key[1],
-                "quantity": 0,
-            },
-        )
-        bucket["quantity"] += int(item.get("quantity", 0) or 0)
-
-    ymd = processed_at[:10]
-    for product_name, option_map in grouped.items():
-        await log_option_sales(user_id, product_name, list(option_map.values()), ymd=ymd)
 
     return {
         "id": batch_id,
@@ -248,4 +226,3 @@ async def get_order_automation_overview(user_id: int, date_from: str, date_to: s
         "top_options": top_options,
         "recent_batches": recent_batches,
     }
-

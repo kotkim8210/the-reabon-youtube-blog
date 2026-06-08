@@ -145,8 +145,12 @@ async def collect_orders(from_date: str, to_date: str) -> list[dict]:
     return all_orders
 
 
-async def process_from_api(from_date: str, to_date: str) -> tuple[bytes, str, dict]:
-    """Collect 고구마 orders from Coupang API + Toss API and generate 해달 발주서.
+async def process_from_api(
+    from_date: str,
+    to_date: str,
+    include_toss: bool = False,
+) -> tuple[bytes, str, dict]:
+    """Collect 고구마 orders from Coupang API and generate 해달 발주서.
 
     Args:
         from_date: Start date (YYYY-MM-DD).
@@ -157,12 +161,12 @@ async def process_from_api(from_date: str, to_date: str) -> tuple[bytes, str, di
     """
     orders = await collect_orders(from_date, to_date)
 
-    # Toss 주문도 수집
     toss_entries = []
-    try:
-        toss_entries = await goguma_order.collect_toss_orders(from_date, to_date)
-    except Exception as e:
-        logger.warning(f"토스 주문 수집 실패 (계속 진행): {e}")
+    if include_toss:
+        try:
+            toss_entries = await goguma_order.collect_toss_orders(from_date, to_date)
+        except Exception as e:
+            logger.warning(f"토스 주문 수집 실패 (계속 진행): {e}")
 
     if not orders and not toss_entries:
         raise ValueError("해당 기간에 고구마 주문이 없습니다.")
@@ -191,6 +195,8 @@ async def process_from_api(from_date: str, to_date: str) -> tuple[bytes, str, di
         if ws.cell(row=r, column=1).value is None:
             start_row = r
             break
+
+    option_totals: dict[str, dict] = {}
 
     # Write 쿠팡 orders
     row_idx = start_row
@@ -221,6 +227,23 @@ async def process_from_api(from_date: str, to_date: str) -> tuple[bytes, str, di
             cell.font = font11
         row_idx += 1
 
+        try:
+            qty_int = int(float(order["quantity"])) if order["quantity"] not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+        bucket = option_totals.setdefault(
+            order["product"] or "고구마",
+            {
+                "coupang_option_keyword": order["product"] or "고구마",
+                "vendor_option_name": order["product"] or "고구마",
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order.get("order_id"):
+            bucket["orders"].append({"order_id": order["order_id"], "quantity": qty_int})
+
     # Write 토스 orders
     for entry in toss_entries:
         mapping = {
@@ -242,6 +265,23 @@ async def process_from_api(from_date: str, to_date: str) -> tuple[bytes, str, di
             cell.font = font11
         row_idx += 1
 
+        try:
+            qty_int = int(float(entry["qty"])) if entry["qty"] not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+        bucket = option_totals.setdefault(
+            entry["product"] or "고구마",
+            {
+                "coupang_option_keyword": entry["product"] or "고구마",
+                "vendor_option_name": entry["product"] or "고구마",
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if entry.get("order_id"):
+            bucket["orders"].append({"order_id": entry["order_id"], "quantity": qty_int})
+
     # Save
     output = BytesIO()
     tmpl_wb.save(output)
@@ -255,6 +295,8 @@ async def process_from_api(from_date: str, to_date: str) -> tuple[bytes, str, di
         "coupang": len(orders),
         "toss": len(toss_entries),
         "period": f"{from_date} ~ {to_date}",
+        "product": "고구마",
+        "options": list(option_totals.values()),
     }
 
     return output.read(), filename, stats

@@ -62,6 +62,8 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
             start_row = r
             break
 
+    option_totals: dict[str, dict] = {}
+
     for i, row in enumerate(filtered_rows):
         out_row = start_row + i
 
@@ -78,6 +80,10 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
         qty = normalize(qty_val)
 
         option_converted = convert_option(option)
+        try:
+            qty_int = int(float(qty_val)) if qty_val not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
 
         mapping = {
             1: order_no,            # A - 주문번호
@@ -97,12 +103,29 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
             cell = ws.cell(row=out_row, column=col, value=value)
             cell.font = font11
 
+        bucket = option_totals.setdefault(
+            option or option_converted or product_name,
+            {
+                "coupang_option_keyword": option or option_converted or product_name,
+                "vendor_option_name": option_converted or product_name,
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order_no:
+            bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
     output = BytesIO()
     tmpl_wb.save(output)
     output.seek(0)
 
     now = datetime.now(KST)
     filename = f"참두릅_발주({now.strftime('%Y%m%d')}).xlsx"
-    stats = {"total": len(filtered_rows)}
+    stats = {
+        "total": len(filtered_rows),
+        "product": "참두릅",
+        "options": list(option_totals.values()),
+    }
 
     return output.read(), filename, stats

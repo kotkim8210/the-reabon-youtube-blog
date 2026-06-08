@@ -1,7 +1,9 @@
 """Coupang Open API async HTTP client."""
 
 import asyncio
+import json
 import logging
+import re
 
 import httpx
 
@@ -13,6 +15,42 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api-gateway.coupang.com"
 MAX_RETRIES = 3
 RATE_LIMIT = asyncio.Semaphore(10)
+BLOCKED_IP_RE = re.compile(r"ip address\s+([0-9.]+)\s+is not allowed", re.IGNORECASE)
+
+
+class CoupangApiError(RuntimeError):
+    """Coupang returned an authenticated API error that should be shown clearly."""
+
+    def __init__(
+        self,
+        status_code: int,
+        message: str,
+        response_text: str = "",
+        blocked_ip: str | None = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+        self.response_text = response_text
+        self.blocked_ip = blocked_ip
+
+
+def _parse_coupang_error(response: httpx.Response) -> tuple[str, str | None]:
+    """Extract Coupang's useful error text and blocked egress IP when present."""
+    text = response.text or ""
+    message = text[:500] or f"HTTP {response.status_code}"
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            message = str(data.get("message") or data.get("error") or message)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    blocked_ip = None
+    match = BLOCKED_IP_RE.search(message) or BLOCKED_IP_RE.search(text)
+    if match:
+        blocked_ip = match.group(1)
+    return message, blocked_ip
 
 
 def _build_query_string(params: dict | None) -> str:
@@ -97,14 +135,17 @@ class CoupangClient:
                         continue
 
                     if response.status_code in (401, 403):
-                        logger.error(f"Coupang API {response.status_code}: {response.text}")
-                        if attempt < MAX_RETRIES - 1:
-                            await asyncio.sleep(1)
-                            continue
-                        raise httpx.HTTPStatusError(
-                            f"{response.status_code}",
-                            request=response.request,
-                            response=response,
+                        message, blocked_ip = _parse_coupang_error(response)
+                        logger.error(
+                            "Coupang API %s: %s",
+                            response.status_code,
+                            response.text,
+                        )
+                        raise CoupangApiError(
+                            response.status_code,
+                            message,
+                            response.text,
+                            blocked_ip,
                         )
 
                     response.raise_for_status()

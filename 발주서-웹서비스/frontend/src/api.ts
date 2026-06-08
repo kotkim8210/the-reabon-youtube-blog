@@ -12,6 +12,31 @@ function authHeaders(): HeadersInit {
   return {};
 }
 
+function apiErrorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const message = detail
+      .map((item) => apiErrorMessage(item, ''))
+      .filter(Boolean)
+      .join(' / ');
+    return message || fallback;
+  }
+  if (detail && typeof detail === 'object') {
+    const record = detail as Record<string, unknown>;
+    for (const key of ['message', 'msg', 'reason', 'error']) {
+      if (typeof record[key] === 'string' && String(record[key]).trim()) {
+        return String(record[key]);
+      }
+    }
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 // --- Core API helpers ---
 
 async function apiGet<T>(path: string): Promise<T> {
@@ -267,6 +292,44 @@ export async function processTenantOrder(deliveryFile: File): Promise<ProcessRes
   return { blob, filename, stats };
 }
 
+export async function processTenantTracking(replyFiles: File[], deliveryFile: File): Promise<ProcessResult> {
+  const formData = new FormData();
+  replyFiles.forEach((file) => {
+    formData.append('reply_files', file);
+  });
+  formData.append('delivery_file', deliveryFile);
+
+  const res = await fetch(`${BASE_URL}/automation/tracking/unified`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('인증이 만료되었습니다.');
+    }
+    const data = await res.json().catch(() => ({ detail: '송장번호를 입력하지 못했습니다.' }));
+    throw new Error(apiErrorMessage(data.detail, '송장번호를 입력하지 못했습니다.'));
+  }
+
+  const blob = await res.blob();
+  const contentDisposition = res.headers.get('Content-Disposition') || '';
+  let filename = 'tracking-result.xlsx';
+  const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
+  if (filenameMatch) filename = decodeURIComponent(filenameMatch[1]);
+
+  let stats: Record<string, unknown> | null = null;
+  const statsHeader = res.headers.get('X-Stats');
+  if (statsHeader) {
+    try { stats = JSON.parse(statsHeader); } catch { /* ignore */ }
+  }
+
+  return { blob, filename, stats };
+}
+
 export interface ProcessResult {
   blob: Blob;
   filename: string;
@@ -293,6 +356,8 @@ export async function processFile(
     alwayz: 'alwayz_file',
     toss: 'toss_file',
     tracking: 'tracking_file',
+    tracking2: 'tracking_file2',
+    order_export: 'order_export_file',
   };
 
   const formData = new FormData();
@@ -345,6 +410,31 @@ export async function processFile(
   }
 
   return { blob, filename, stats };
+}
+
+export async function processTossWatermelonTracking(
+  tomatoReplyFile: File
+): Promise<Record<string, unknown>> {
+  const formData = new FormData();
+  formData.append('tomato_reply_file', tomatoReplyFile);
+
+  const res = await fetch(`${BASE_URL}/process/toss-watermelon-tracking`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
+    }
+    const data = await res.json().catch(() => ({ detail: '운송장 등록 중 오류가 발생했습니다.' }));
+    throw new Error(apiErrorMessage(data.detail, '운송장 등록 중 오류가 발생했습니다.'));
+  }
+
+  return res.json();
 }
 
 export async function mergeBatchTrackingResults(
@@ -489,14 +579,17 @@ export async function processDanharuOrder(
 }
 
 export async function processDanharuTracking(
-  replyFile: File,
+  replyFiles: File | File[],
   deliveryFile: File,
 ): Promise<ProcessResult> {
   const formData = new FormData();
-  formData.append('reply_file', replyFile);
+  const files = Array.isArray(replyFiles) ? replyFiles : [replyFiles];
+  for (const f of files) {
+    formData.append('reply_files', f);
+  }
   formData.append('delivery_file', deliveryFile);
 
-  const res = await fetch(`${BASE_URL}/automation/tracking/danharu`, {
+  const res = await fetch(`${BASE_URL}/automation/tracking/unified`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,
@@ -509,7 +602,7 @@ export async function processDanharuTracking(
       throw new Error('?몄쬆??留뚮즺?섏뿀?듬땲??');
     }
     const data = await res.json().catch(() => ({ detail: '운송장번호를 입력하지 못했습니다.' }));
-    throw new Error(data.detail || '운송장번호를 입력하지 못했습니다.');
+    throw new Error(apiErrorMessage(data.detail, '운송장번호를 입력하지 못했습니다.'));
   }
 
   const blob = await res.blob();
@@ -647,7 +740,61 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export type BrowserSaveFileHandle = {
+  createWritable: () => Promise<{
+    write: (data: Blob) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+
+export async function chooseExcelSaveFile(
+  suggestedName: string,
+): Promise<{ handle: BrowserSaveFileHandle | null; supported: boolean; canceled: boolean }> {
+  const picker = (window as Window & {
+    showSaveFilePicker?: (options: {
+      suggestedName?: string;
+      types?: Array<{
+        description: string;
+        accept: Record<string, string[]>;
+      }>;
+    }) => Promise<BrowserSaveFileHandle>;
+  }).showSaveFilePicker;
+
+  if (!picker) {
+    return { handle: null, supported: false, canceled: false };
+  }
+
+  try {
+    const handle = await picker({
+      suggestedName,
+      types: [
+        {
+          description: 'Excel workbook',
+          accept: {
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+          },
+        },
+      ],
+    });
+    return { handle, supported: true, canceled: false };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return { handle: null, supported: true, canceled: true };
+    }
+    if (error instanceof DOMException && ['SecurityError', 'NotAllowedError'].includes(error.name)) {
+      return { handle: null, supported: false, canceled: false };
+    }
+    throw error;
+  }
+}
+
+export async function saveBlobToFileHandle(blob: Blob, handle: BrowserSaveFileHandle): Promise<void> {
+  const writable = await handle.createWritable();
+  await writable.write(blob);
+  await writable.close();
 }
 
 // Dashboard
@@ -656,6 +803,73 @@ export const fetchRecentOrders = () => apiGet<{ orders: OrderData[] }>('/dashboa
 export const fetchInventoryAlerts = () => apiGet<{ alerts: InventoryAlertData[] }>('/dashboard/inventory-alerts');
 export const fetchDashboardSummary = () => apiGet<DashboardSummaryData>('/dashboard/summary');
 export const refreshDashboardData = () => apiPost<{ status: string; message: string }>('/dashboard/refresh');
+export const fetchMyeongiSupplierPriceMonitor = () =>
+  apiGet<SupplierPriceMonitorData>('/dashboard/supplier-price-monitor/myeongi');
+export const fetchKolrabiSupplierPriceMonitor = () =>
+  apiGet<SupplierPriceMonitorData>('/dashboard/supplier-price-monitor/kolrabi');
+export const fetchChamoeAltteulSupplierPriceMonitor = () =>
+  apiGet<SupplierPriceMonitorData>('/dashboard/supplier-price-monitor/chamoe-altteul');
+export const fetchSupplierPriceMonitor = (key: string) =>
+  apiGet<SupplierPriceMonitorData>(`/dashboard/supplier-price-monitor/${encodeURIComponent(key)}`);
+
+export const fetchSupplierPriceAlerts = () =>
+  apiGet<SupplierPriceAlertsResponse>('/dashboard/supplier-price-alerts');
+
+export const refreshAllSupplierPriceMonitors = () =>
+  apiPost<{ status: string; results: Record<string, string> }>('/dashboard/supplier-price-monitor/refresh-all');
+
+export async function downloadMyeongiSupplierPriceMonitorWorkbook(): Promise<ProcessResult> {
+  return downloadSupplierPriceMonitorWorkbook('myeongi');
+}
+
+export async function downloadKolrabiSupplierPriceMonitorWorkbook(): Promise<ProcessResult> {
+  return downloadSupplierPriceMonitorWorkbook('kolrabi');
+}
+
+export async function downloadChamoeAltteulSupplierPriceMonitorWorkbook(): Promise<ProcessResult> {
+  return downloadSupplierPriceMonitorWorkbook('chamoe-altteul');
+}
+
+export async function downloadSupplierPriceMonitorWorkbook(key: string): Promise<ProcessResult> {
+  const res = await fetch(`${BASE_URL}/dashboard/supplier-price-monitor/${encodeURIComponent(key)}/download`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('인증이 만료되었습니다.');
+    }
+    const data = await res.json().catch(() => ({ detail: '공급가 비교 엑셀을 생성하지 못했습니다.' }));
+    throw new Error(data.detail || '공급가 비교 엑셀을 생성하지 못했습니다.');
+  }
+
+  const blob = await res.blob();
+  if (blob.size === 0) {
+    throw new Error('생성된 엑셀 파일이 비어 있습니다. 공급가 비교 데이터를 다시 확인해 주세요.');
+  }
+
+  const contentDisposition = res.headers.get('Content-Disposition') || '';
+  let filename = 'supplier-price-monitor.xlsx';
+  const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
+  if (filenameMatch) {
+    filename = decodeURIComponent(filenameMatch[1]);
+  }
+
+  let stats: Record<string, unknown> | null = null;
+  const statsHeader = res.headers.get('X-Stats');
+  if (statsHeader) {
+    try {
+      stats = JSON.parse(statsHeader);
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  return { blob, filename, stats };
+}
 
 // Products
 export const fetchProducts = () => apiGet<{ products: ProductData[] }>('/products');
@@ -707,6 +921,60 @@ export interface DashboardSummaryData {
   total_revenue_today: number;
   total_products: number;
   critical_alerts: number;
+}
+
+export interface SupplierPriceMonitorRow {
+  option_name: string;
+  supplier_option_name?: string;
+  sheet_name?: string;
+  sheet_row: number;
+  cell: string;
+  spreadsheet_price: number;
+  workbook_price?: number;
+  comparison_basis?: 'previous_supplier_snapshot' | string;
+  has_previous_snapshot?: boolean;
+  supplier_price: number;
+  diff: number;
+  signal: 'blue' | 'red' | 'same';
+  signal_label: string;
+}
+
+export interface SupplierPriceMonitorData {
+  key: string;
+  title: string;
+  supplier_name: string;
+  product_name: string;
+  checked_at: string;
+  output_filename: string;
+  total_items: number;
+  changed_items: number;
+  blue_count: number;
+  red_count: number;
+  same_count: number;
+  rows: SupplierPriceMonitorRow[];
+}
+
+export interface SupplierPriceAlertRun {
+  id: number;
+  run_date: string;
+  monitor_key: string;
+  supplier_name: string;
+  product_name: string;
+  status: 'ok' | 'error' | string;
+  total_items: number;
+  changed_items: number;
+  blue_count: number;
+  red_count: number;
+  same_count: number;
+  output_filename: string;
+  error_message: string;
+  checked_at: string;
+}
+
+export interface SupplierPriceAlertsResponse {
+  alerts: SupplierPriceAlertRun[];
+  active_count: number;
+  checked_monitors: number;
 }
 
 export interface ProductData {
@@ -901,62 +1169,6 @@ export const resumeSubscription = () =>
   apiPost<{ status: string }>('/billing/resume');
 
 
-// --- Sales dashboard ---
-
-export interface SalesRow {
-  product_label?: string;
-  coupang_option_keyword?: string;
-  vendor_option_name?: string;
-  ymd?: string;
-  total_qty: number;
-}
-
-export interface SalesSummary {
-  from: string;
-  to: string;
-  group_by: 'option' | 'product' | 'day';
-  rows: SalesRow[];
-  plan_code: string;
-}
-
-export const getSalesSummary = (from: string, to: string, groupBy: 'option' | 'product' | 'day' = 'option') =>
-  apiGet<SalesSummary>(`/sales/summary?from=${from}&to=${to}&group_by=${groupBy}`);
-
-export const getOptionTrend = (optionKeyword: string, from: string, to: string) =>
-  apiGet<{ option_keyword: string; from: string; to: string; rows: { ymd: string; total_qty: number }[] }>(
-    `/sales/option-trend?option_keyword=${encodeURIComponent(optionKeyword)}&from=${from}&to=${to}`,
-  );
-
-export const getSalesPresets = () =>
-  apiGet<{ presets: { label: string; from: string; to: string }[] }>('/sales/presets');
-
-export interface SettlementOption {
-  coupang_option_keyword: string;
-  vendor_option_name: string;
-  quantity: number;
-  unit_price_krw: number;
-  settlement_krw: number;
-}
-
-export interface SettlementCard {
-  product_label: string;
-  total_qty: number;
-  total_settlement_krw: number;
-  options: SettlementOption[];
-}
-
-export interface SettlementCardsResponse {
-  date: string;
-  cards: SettlementCard[];
-  total_settlement_krw: number;
-  total_qty: number;
-}
-
-export const getSettlementCards = (date?: string) => {
-  const q = date ? `?date=${date}` : '';
-  return apiGet<SettlementCardsResponse>(`/sales/cards${q}`);
-};
-
 export interface OrderBatchSummary {
   id: number;
   batch_name: string;
@@ -1002,7 +1214,6 @@ export interface OAuthConfig {
 
 export const getOAuthConfig = () =>
   apiGet<OAuthConfig>('/auth/oauth-config');
-
 
 // --- Social OAuth ---
 

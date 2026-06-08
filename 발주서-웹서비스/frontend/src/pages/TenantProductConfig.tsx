@@ -220,7 +220,7 @@ function ProductForm({
         <p className="text-[10px] text-gray-400 mt-1.5">
           <strong>셀 비움</strong> = 행 추가 모드 (고객별 발주서)&nbsp;·&nbsp;
           <strong>셀 입력(예:N5)</strong> = 합산 모드 (수량만 기재)&nbsp;·&nbsp;
-          <span className="text-emerald-600">단가 입력 시 판매 대시보드 정산 자동화</span>
+          <span className="text-emerald-600">단가 입력 시 발주서 단가 관리에 활용</span>
         </p>
       </div>
 
@@ -312,7 +312,13 @@ function TenantProductConfig() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">상품 설정</h1>
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">Setup</p>
+        <h1 className="mt-2 text-2xl font-bold text-gray-900">상품/양식 설정</h1>
+        <p className="mt-2 text-sm leading-6 text-gray-500">
+          사용자별로 거래처 발주서 양식과 쿠팡 상품·옵션 매칭을 저장합니다. 이 설정이 그대로 내 발주 자동화에 적용됩니다.
+        </p>
+      </div>
 
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">{error}</div>

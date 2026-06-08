@@ -5,6 +5,15 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
+from app.processors.chamdureup_order import convert_option
+from app.processors.tracking_match import (
+    name_counts,
+    normalize_courier_name,
+    option_key_set,
+    options_match,
+    requires_option_guard,
+)
+
 
 KST = timezone(timedelta(hours=9))
 
@@ -36,6 +45,11 @@ def process(
         address = normalize(row[14].value) if len(row) > 14 else ""
         courier = normalize(row[16].value) if len(row) > 16 else ""
         tracking = normalize(row[17].value) if len(row) > 17 else ""
+        option_keys = option_key_set(
+            row[6].value if len(row) > 6 else "",
+            row[8].value if len(row) > 8 else "",
+            row[11].value if len(row) > 11 else "",
+        )
 
         if tracking:
             order_entries.append({
@@ -45,6 +59,7 @@ def process(
                 "address": address,
                 "courier": courier,
                 "tracking": tracking,
+                "option_keys": option_keys,
             })
 
     order_by_order_no = {}
@@ -66,6 +81,10 @@ def process(
     used_entries = set()
     filled = 0
     skipped = 0
+    delivery_name_counts = name_counts(
+        normalize(dl_ws.cell(row=row_idx, column=27).value)
+        for row_idx in range(2, dl_ws.max_row + 1)
+    )
 
     for row_idx in range(2, dl_ws.max_row + 1):
         e_cell = dl_ws.cell(row=row_idx, column=5)
@@ -77,6 +96,11 @@ def process(
         dl_name = normalize(dl_ws.cell(row=row_idx, column=27).value)
         dl_phone = normalize(dl_ws.cell(row=row_idx, column=28).value)
         dl_address = normalize(dl_ws.cell(row=row_idx, column=30).value)
+        dl_product = dl_ws.cell(row=row_idx, column=11).value
+        dl_option = dl_ws.cell(row=row_idx, column=12).value
+        dl_option_keys = option_key_set(dl_option, convert_option(str(dl_option or "")))
+        if not dl_option_keys:
+            dl_option_keys = option_key_set(dl_product)
 
         if not dl_name and not dl_order_no:
             continue
@@ -103,6 +127,15 @@ def process(
             available = [c for c in candidates if id(c) not in used_entries]
 
             if available:
+                if requires_option_guard(dl_name, delivery_name_counts, len(candidates)):
+                    available = [
+                        c for c in available
+                        if options_match(c.get("option_keys"), dl_option_keys)
+                    ]
+                    if not available:
+                        skipped += 1
+                        continue
+
                 for c in available:
                     if c["phone"] == dl_phone and c["address"] == dl_address:
                         matched = c
@@ -124,7 +157,7 @@ def process(
             e_cell.value = matched["tracking"]
             d_cell = dl_ws.cell(row=row_idx, column=4)
             if matched["courier"]:
-                d_cell.value = matched["courier"]
+                d_cell.value = normalize_courier_name(matched["courier"])
             used_entries.add(id(matched))
             filled += 1
         else:

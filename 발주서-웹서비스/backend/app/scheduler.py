@@ -132,27 +132,18 @@ async def refresh_orders():
     try:
         date_from = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
         date_to = datetime.utcnow().strftime("%Y-%m-%d")
-        result = await coupang_client.get_order_sheets(
-            created_at_from=date_from,
-            created_at_to=date_to,
-        )
-        if result and "data" in result:
-            orders = result["data"]
-            if isinstance(orders, list):
-                await db.cache_orders(orders)
-                logger.info(f"Orders refreshed: {len(orders)} items")
-
-                # Update daily sales aggregation
-                for order in orders:
-                    ordered_at = order.get("orderedAt", "")
-                    if ordered_at:
-                        date = ordered_at[:10]  # YYYY-MM-DD
-                        pid = order.get("sellerProductId", 0)
-                        pname = order.get("sellerProductName", "")
-                        qty = order.get("shippingCount", 1)
-                        revenue = order.get("orderPrice", 0)
-                        if pid:
-                            await db.upsert_daily_sales(pid, pname, date, qty, revenue)
+        orders: list[dict] = []
+        for order_status in ("ACCEPT", "INSTRUCT"):
+            result = await coupang_client.get_order_sheets(
+                created_at_from=date_from,
+                created_at_to=date_to,
+                order_status=order_status,
+            )
+            if result and isinstance(result.get("data"), list):
+                orders.extend(result["data"])
+        if orders:
+            await db.cache_orders(orders)
+            logger.info(f"Orders refreshed: {len(orders)} items")
     except Exception as e:
         logger.error(f"Failed to refresh orders: {e}")
 
@@ -228,6 +219,21 @@ async def backup_database():
         logger.error(f"Backup failed: {e}")
 
 
+async def refresh_supplier_price_monitors():
+    """Daily 10:00 KST supplier price check for margin defense."""
+    from app.supplier_price_monitor import refresh_supplier_price_snapshots
+
+    try:
+        results = await refresh_supplier_price_snapshots()
+        failed = {key: value for key, value in results.items() if value != "ok"}
+        if failed:
+            logger.warning("Supplier price monitor finished with errors: %s", failed)
+        else:
+            logger.info("Supplier price monitor refreshed: %s", results)
+    except Exception as e:
+        logger.error(f"Supplier price monitor refresh failed: {e}")
+
+
 def start_scheduler():
     """Start background scheduler with periodic jobs."""
     scheduler.add_job(
@@ -252,6 +258,12 @@ def start_scheduler():
         backup_database,
         trigger=CronTrigger(day_of_week="sun", hour=3, minute=0, timezone="Asia/Seoul"),
         id="backup_database",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        refresh_supplier_price_monitors,
+        trigger=CronTrigger(hour=10, minute=0, timezone="Asia/Seoul"),
+        id="refresh_supplier_price_monitors",
         replace_existing=True,
     )
     scheduler.start()

@@ -12,6 +12,7 @@ import {
   TossOrder, TossClaim,
 } from '../api';
 import FileUpload from '../components/FileUpload';
+import { getDefaultGogumaDateRange, getGogumaDateRangeForDays } from '../lib/gogumaDateRange';
 
 function formatDate(date: Date): string {
   const y = date.getFullYear();
@@ -49,6 +50,24 @@ function ErrorBanner({ message }: { message: string }) {
       </div>
     </div>
   );
+}
+
+function formatProcessStats(stats: Record<string, unknown>): string[] {
+  const labels: Record<string, string> = {
+    total: '수집된 주문',
+    coupang: '쿠팡',
+    toss: '토스',
+    period: '선택 기간',
+    product: '상품',
+  };
+
+  return Object.entries(stats).flatMap(([key, value]) => {
+    if (key === 'options' || value == null) return [];
+    if (Array.isArray(value) || typeof value === 'object') return [];
+    if (key === 'toss' && Number(value) === 0) return [];
+    const suffix = key === 'total' || key === 'coupang' || key === 'toss' ? '건' : '';
+    return [`${labels[key] || key}: ${String(value)}${suffix}`];
+  });
 }
 
 function PlatformBadge({ platform }: { platform: 'coupang' | 'toss' | 'alwayz' }) {
@@ -130,9 +149,10 @@ function TrackingResultView({ result, platform }: { result: TrackingApiResult; p
 // ══════════════════════════════════════════════════════════════════
 function OrderCollectionTab() {
   const today = new Date();
+  const [initialDateRange] = useState(() => getDefaultGogumaDateRange());
   // Shared date range
-  const [fromDate, setFromDate] = useState(formatDate(today));
-  const [toDate, setToDate] = useState(formatDate(today));
+  const [fromDate, setFromDate] = useState(initialDateRange.fromDate);
+  const [toDate, setToDate] = useState(initialDateRange.toDate);
 
   // Coupang state
   const [coupangLoading, setCoupangLoading] = useState(false);
@@ -149,11 +169,9 @@ function OrderCollectionTab() {
   const [tossTotal, setTossTotal] = useState(0);
 
   const setDateRange = useCallback((days: number) => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - (days - 1));
-    setFromDate(formatDate(start));
-    setToDate(formatDate(end));
+    const range = getGogumaDateRangeForDays(days);
+    setFromDate(range.fromDate);
+    setToDate(range.toDate);
     setCoupangResult(null);
     setCoupangError('');
     setTossResult(null);
@@ -294,6 +312,9 @@ function OrderCollectionTab() {
             <span className="font-semibold">수집 기간:</span> {fromDate} ~ {toDate}
             {fromDate === toDate && ' (당일)'}
           </p>
+          <p className="text-xs text-orange-500 mt-1">
+            쿠팡 Wing 상품준비중 전체에는 이미 발주했지만 송장 미입력인 과거 주문도 포함될 수 있습니다.
+          </p>
         </div>
 
         {/* Collect buttons */}
@@ -346,12 +367,8 @@ function OrderCollectionTab() {
               <h4 className="text-sm font-bold text-green-800 mb-1">수집 완료</h4>
               {coupangResult.stats && (
                 <div className="space-y-0.5 mb-3">
-                  {Object.entries(coupangResult.stats).map(([key, value]) => (
-                    <p key={key} className="text-sm text-green-700">
-                      {key === 'total' ? `수집된 주문: ${value}건` :
-                       key === 'period' ? `수집 기간: ${value}` :
-                       `${key}: ${value}`}
-                    </p>
+                  {formatProcessStats(coupangResult.stats).map((line) => (
+                    <p key={line} className="text-sm text-green-700">{line}</p>
                   ))}
                 </div>
               )}
@@ -380,8 +397,8 @@ function OrderCollectionTab() {
           {tossResult && (
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 animate-fade-in">
               <h4 className="text-sm font-bold text-green-800 mb-1">수집 완료</h4>
-              {tossResult.stats && Object.entries(tossResult.stats).map(([k, v]) => (
-                <p key={k} className="text-sm text-green-700">{k}: {String(v)}</p>
+              {tossResult.stats && formatProcessStats(tossResult.stats).map((line) => (
+                <p key={line} className="text-sm text-green-700">{line}</p>
               ))}
               <button onClick={() => downloadBlob(tossResult.blob, tossResult.filename)}
                 className="mt-3 inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-green-700 transition-all shadow-sm">

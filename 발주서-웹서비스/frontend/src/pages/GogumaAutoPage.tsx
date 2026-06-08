@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { processGogumaAuto, processGogumaTrackingApi, downloadBlob, ProcessResult, TrackingApiResult } from '../api';
 import FileUpload from '../components/FileUpload';
+import { getDefaultGogumaDateRange, getGogumaDateRangeForDays } from '../lib/gogumaDateRange';
 
 function formatDate(date: Date): string {
   const y = date.getFullYear();
@@ -13,19 +14,18 @@ function formatDate(date: Date): string {
 function GogumaAutoPage() {
   const navigate = useNavigate();
   const today = new Date();
+  const [initialDateRange] = useState(() => getDefaultGogumaDateRange());
 
-  const [fromDate, setFromDate] = useState(formatDate(today));
-  const [toDate, setToDate] = useState(formatDate(today));
+  const [fromDate, setFromDate] = useState(initialDateRange.fromDate);
+  const [toDate, setToDate] = useState(initialDateRange.toDate);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [error, setError] = useState('');
 
   const setDateRange = useCallback((days: number) => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - (days - 1));
-    setFromDate(formatDate(start));
-    setToDate(formatDate(end));
+    const range = getGogumaDateRangeForDays(days);
+    setFromDate(range.fromDate);
+    setToDate(range.toDate);
     setResult(null);
     setError('');
   }, []);
@@ -52,8 +52,9 @@ function GogumaAutoPage() {
   };
 
   const handleReset = () => {
-    setFromDate(formatDate(today));
-    setToDate(formatDate(today));
+    const range = getDefaultGogumaDateRange();
+    setFromDate(range.fromDate);
+    setToDate(range.toDate);
     setResult(null);
     setError('');
   };

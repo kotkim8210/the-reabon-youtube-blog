@@ -6,6 +6,14 @@ from collections import defaultdict
 from openpyxl import load_workbook
 
 from app.config import TEMPLATE_DIR
+from app.processors.goguma_order import transform_option
+from app.processors.haedal_tracking_parser import detect_haedal_columns, find_tracking_in_row
+from app.processors.tracking_match import (
+    name_counts,
+    option_key_set,
+    options_match,
+    requires_option_guard,
+)
 
 
 KST = timezone(timedelta(hours=9))
@@ -23,18 +31,6 @@ def phone_digits(value) -> str:
     if value is None:
         return ""
     return re.sub(r'\D', '', str(value))
-
-
-def find_tracking_in_row(ws, row_idx) -> str:
-    """P~V열 중 10~14자리 숫자인 운송장번호를 찾는다."""
-    for col in range(16, 23):  # P(16) ~ V(22)
-        val = ws.cell(row=row_idx, column=col).value
-        if val is not None:
-            s = str(val).strip()
-            if re.match(r'^\d{10,14}$', s):
-                return s
-    return ""
-
 
 def process(
     haedal_bytes: bytes,
@@ -54,23 +50,21 @@ def process(
     hd_wb = load_workbook(filename=BytesIO(haedal_bytes), data_only=True)
     hd_ws = hd_wb.active
 
-    # Header detection: if A1 contains '받' or '분', data starts from row 2
-    start_row = 1
-    a1_val = normalize(hd_ws.cell(row=1, column=1).value)
-    if "받" in a1_val or "분" in a1_val:
-        start_row = 2
+    # Header-based column detection supports both old and new 해달/한진 reply formats.
+    cols = detect_haedal_columns(hd_ws)
 
     # Extract entries from 해달
     haedal_entries = []
-    for row_idx in range(start_row, hd_ws.max_row + 1):
-        name = normalize(hd_ws.cell(row=row_idx, column=1).value)    # A
-        phone = phone_digits(hd_ws.cell(row=row_idx, column=2).value)   # B
-        address = normalize(hd_ws.cell(row=row_idx, column=6).value) # F
+    for row_idx in range(cols.start_row, hd_ws.max_row + 1):
+        name = normalize(hd_ws.cell(row=row_idx, column=cols.name).value)
+        phone = phone_digits(hd_ws.cell(row=row_idx, column=cols.phone).value)
+        address = normalize(hd_ws.cell(row=row_idx, column=cols.address).value)
+        product = hd_ws.cell(row=row_idx, column=cols.product).value
 
         if not name:
             continue
 
-        tracking = find_tracking_in_row(hd_ws, row_idx)
+        tracking = find_tracking_in_row(hd_ws, row_idx, cols.tracking)
 
         if tracking:
             haedal_entries.append({
@@ -78,6 +72,7 @@ def process(
                 "phone": phone,
                 "address": address,
                 "tracking": tracking,
+                "option_keys": option_key_set(product, transform_option(str(product or ""))),
             })
 
     # Load DeliveryList
@@ -103,6 +98,10 @@ def process(
     skipped = 0
     skipped_names: list[str] = []
     phone_fallback_notes: list[str] = []
+    delivery_name_counts = name_counts(
+        normalize(dl_ws.cell(row=row_idx, column=27).value)
+        for row_idx in range(2, dl_ws.max_row + 1)
+    )
 
     for row_idx in range(2, dl_ws.max_row + 1):
         # Column E = 5 (tracking number destination)
@@ -115,6 +114,13 @@ def process(
         dl_name = normalize(dl_ws.cell(row=row_idx, column=27).value)     # AA
         dl_phone = phone_digits(dl_ws.cell(row=row_idx, column=28).value)    # AB
         dl_address = normalize(dl_ws.cell(row=row_idx, column=30).value)  # AD
+        dl_option_raw = dl_ws.cell(row=row_idx, column=12).value          # L
+        dl_option_keys = option_key_set(
+            dl_option_raw,
+            transform_option(str(dl_option_raw or "")),
+        )
+        if not dl_option_keys:
+            dl_option_keys = option_key_set(dl_ws.cell(row=row_idx, column=11).value)
 
         if not dl_name:
             continue
@@ -126,6 +132,16 @@ def process(
         matched_via_phone_only = False
 
         if available:
+            if requires_option_guard(dl_name, delivery_name_counts, len(candidates)):
+                available = [
+                    c for c in available
+                    if options_match(c.get("option_keys"), dl_option_keys)
+                ]
+                if not available:
+                    skipped += 1
+                    skipped_names.append(dl_name)
+                    continue
+
             # Try phone + address match first
             for c in available:
                 if c["phone"] == dl_phone and c["address"] == dl_address:
@@ -157,6 +173,11 @@ def process(
                 c for c in entry_by_phone.get(dl_phone, [])
                 if id(c) not in used_entries
             ]
+            if requires_option_guard(dl_name, delivery_name_counts, len(phone_candidates)):
+                phone_candidates = [
+                    c for c in phone_candidates
+                    if options_match(c.get("option_keys"), dl_option_keys)
+                ]
             if len(phone_candidates) == 1:
                 matched = phone_candidates[0]
                 matched_via_phone_only = True

@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import FileUpload from '../components/FileUpload';
-import { processFile, downloadBlob, ProcessResult } from '../api';
+import { processFile, processTossWatermelonTracking, downloadBlob, ProcessResult } from '../api';
 
 interface FileConfig {
   key: string;
   label: string;
+  accept?: string;
+  acceptLabel?: string;
   optional?: boolean;
 }
 
@@ -19,6 +21,14 @@ interface ExtraCheckbox {
   label: string;
   description?: string;
   defaultValue: boolean;
+}
+
+interface TextAreaConfig {
+  key: string;
+  label: string;
+  placeholder: string;
+  helperText?: string;
+  required?: boolean;
 }
 
 interface ToolConfig {
@@ -40,13 +50,16 @@ interface ToolConfig {
   };
   extraCheckboxes?: ExtraCheckbox[];
   tossDateRange?: boolean; // 토스 API 날짜 범위 선택 UI 표시 여부
+  tossDateTitle?: string;
+  tossDateDescription?: string;
+  textArea?: TextAreaConfig;
 }
 
 const toolConfigs: Record<string, ToolConfig> = {
   'kolrabi-order': {
-    title: '콜라비 발주서 생성',
+    title: '콜라비+성주참외 알뜰과(제주다팜) 발주서 생성',
     description:
-      'DeliveryList에서 콜라비 주문을 추출하여 제주다팜 발주서를 생성합니다.',
+      'DeliveryList에서 콜라비와 성주참외 가정용 혼합과 주문을 추출하여 제주다팜 발주서를 함께 생성합니다.',
     icon: '🥬',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'green',
@@ -86,9 +99,9 @@ const toolConfigs: Record<string, ToolConfig> = {
     },
   },
   'myeongi-order': {
-    title: '명이나물 발주서 생성',
+    title: '명이나물+애플초당옥수수 발주서 생성',
     description:
-      'DeliveryList에서 명이나물 주문을 추출하여 pbfcompany 발주서를 생성합니다.',
+      'DeliveryList에서 쥬얼리프룻 발주 대상인 명이나물과 애플초당옥수수 주문을 추출하여 pbfcompany 발주서를 생성합니다. 수박 6/7/8kg은 제이비티 메뉴에서 출력합니다.',
     icon: '🌿',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'green',
@@ -99,16 +112,98 @@ const toolConfigs: Record<string, ToolConfig> = {
     },
   },
   'tomato-order': {
-    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅 발주서 생성',
+    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박 6/7/8kg 발주서 생성',
     description:
-      'DeliveryList에서 대저토마토·성주참외 중소/로얄·남해땅두릅 주문을 추출합니다. 성주참외 가정용 혼합과가 함께 있으면 제주다팜 알뜰참외 발주서를 별도 파일로 추가 출력합니다.',
-    icon: '🍅🍈🌿',
+      'DeliveryList에서 제이비티 발주 대상인 대저토마토·성주참외 중소/로얄·남해땅두릅·수박 6/7/8kg 주문을 추출하고, 토스 API 수박 주문도 함께 합칩니다.',
+    icon: '🍅🍈🌿🍉',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'red',
     colorClasses: {
       bg: 'bg-red-50',
       text: 'text-red-700',
       badge: 'bg-red-100 text-red-700',
+    },
+    tossDateRange: true,
+    tossDateTitle: '토스 수박 6/7/8kg 주문 수집',
+    tossDateDescription: '날짜가 있으면 토스 API 수박 6/7/8kg 주문만 제이비티 발주서에 합칩니다.',
+  },
+  'toss-watermelon-order': {
+    title: '토스 수박 6/7/8kg 발주서 생성',
+    description:
+      'DeliveryList 없이 토스 API에서 수박 6/7/8kg 주문만 수집하여 제이비티 발주서를 생성합니다.',
+    icon: '🍉',
+    files: [],
+    color: 'red',
+    colorClasses: {
+      bg: 'bg-red-50',
+      text: 'text-red-700',
+      badge: 'bg-red-100 text-red-700',
+    },
+    tossDateRange: true,
+    tossDateTitle: '토스 수박 6/7/8kg 주문 수집',
+    tossDateDescription: '선택한 기간의 토스 수박 6/7/8kg 주문만 제이비티 발주서로 출력합니다.',
+  },
+  'temu-order': {
+    title: '테무 수박 발주서 생성',
+    description:
+      '테무 order_export 엑셀/CSV를 업로드하면 수박 발주서를 만들고, 아래에서 테무 배송확인 송장입력 파일도 생성할 수 있습니다.',
+    icon: '🛒',
+    files: [
+      {
+        key: 'order_file',
+        label: '테무 주문 파일(order_export .xlsx/.csv)',
+        accept: '.xlsx,.xls,.csv',
+        acceptLabel: '.xlsx, .xls, .csv 파일',
+      },
+    ],
+    color: 'red',
+    colorClasses: {
+      bg: 'bg-red-50',
+      text: 'text-red-700',
+      badge: 'bg-red-100 text-red-700',
+    },
+    textArea: {
+      key: 'order_text',
+      label: '테무 주문상세 텍스트(엑셀 없을 때만)',
+      placeholder:
+        '테무 주문상세 페이지에서 Ctrl+A → Ctrl+C 후 여기에 붙여넣으세요.\n주문 ID, 수령인 이름, 전화번호, 배송 주소, 상품명, 수량이 포함되어야 합니다.',
+      helperText: '엑셀 파일 업로드가 우선 처리됩니다. 텍스트 방식은 긴급 예비용입니다.',
+      required: false,
+    },
+  },
+  'temu-tracking': {
+    title: '테무 송장 대량등록',
+    description:
+      '테무 주문목록(order_export)과 택배 송장파일을 주문번호·수령인 기준으로 매칭해 "배송 확인" 업로드 템플릿을 생성합니다. 배송사는 kg별 자동(2·3·5kg=롯데택배, 6·7·8kg=Hanjin), 배송 출발지=식품애착.',
+    icon: '🛒📦',
+    files: [
+      {
+        key: 'order_export',
+        label: '테무 주문목록 (order_export_*.xlsx/.csv)',
+        accept: '.xlsx,.xls,.csv',
+        acceptLabel: '.xlsx, .xls, .csv 파일',
+      },
+      { key: 'tracking', label: '택배 송장파일 (수령인·송장번호 포함)' },
+      { key: 'tracking2', label: '택배 송장파일 2 (선택)', optional: true },
+    ],
+    color: 'red',
+    colorClasses: {
+      bg: 'bg-red-50',
+      text: 'text-red-700',
+      badge: 'bg-red-100 text-red-700',
+    },
+  },
+  'chamoe-mixed-order': {
+    title: '성주참외 알뜰과(제주다팜) 발주서 생성',
+    description:
+      '쿠팡 가정용 혼합과 주문만 추출하여 제주다팜 성주참외 알뜰과 발주서를 생성합니다.',
+    icon: '🍈',
+    files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
+    color: 'green',
+    colorClasses: {
+      bg: 'bg-green-50',
+      text: 'text-green-700',
+      badge: 'bg-green-100 text-green-700',
     },
   },
   'goguma-order': {
@@ -128,11 +223,13 @@ const toolConfigs: Record<string, ToolConfig> = {
       badge: 'bg-orange-100 text-orange-700',
     },
     tossDateRange: true,
+    tossDateTitle: '토스 API 주문 수집',
+    tossDateDescription: '날짜가 있으면 토스 API 주문도 함께 발주서에 합칩니다.',
   },
   'myeongi-tracking': {
-    title: '명이나물 운송장번호 입력',
+    title: '명이나물+애플초당옥수수 운송장번호 입력',
     description:
-      '명이나물 orderlist의 운송장번호를 DeliveryList에 자동으로 매핑합니다.',
+      '명이나물 또는 애플초당옥수수 orderlist의 운송장번호를 DeliveryList에 자동으로 매핑합니다.',
     icon: '🌿📦',
     files: [
       { key: 'orderlist', label: 'Orderlist 파일' },
@@ -146,12 +243,12 @@ const toolConfigs: Record<string, ToolConfig> = {
     },
   },
   'tomato-tracking': {
-    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅 운송장번호 입력',
+    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박 6/7/8kg·초당옥수수 운송장번호 입력',
     description:
-      '회신 파일의 운송장번호와 택배사(K열)를 DeliveryList에 자동으로 매핑합니다. 성주참외 가정용 혼합과는 콜라비+성주참외 혼합(알뜰)과 메뉴를 사용하세요.',
+      '제이비티 회신 파일의 운송장번호와 택배사(K열)를 DeliveryList에 자동으로 매핑합니다. 제주다팜 성주참외 알뜰과는 콜라비+성주참외 알뜰과 메뉴를 사용하세요.',
     icon: '🍅🍈🌿📦',
     files: [
-      { key: 'tomato_reply', label: '대저토마토·성주참외(중소/로얄) 회신 파일' },
+      { key: 'tomato_reply', label: '제이비티 회신 파일' },
       { key: 'delivery', label: 'DeliveryList 파일' },
     ],
     color: 'red',
@@ -162,9 +259,9 @@ const toolConfigs: Record<string, ToolConfig> = {
     },
   },
   'tracking-input': {
-    title: '콜라비+성주참외 혼합(알뜰)과 운송장번호 입력',
+    title: '콜라비+성주참외 알뜰과 운송장번호 입력',
     description:
-      '콜라비와 성주참외 가정용 혼합과가 함께 들어 있는 Orderlist 파일의 운송장번호를 DeliveryList에 자동으로 매핑합니다.',
+      '콜라비와 제주다팜 성주참외 알뜰과가 함께 들어 있는 Orderlist 파일의 운송장번호를 DeliveryList에 자동으로 매핑합니다.',
     icon: '📦',
     files: [
       { key: 'orderlist', label: 'Orderlist 파일' },
@@ -196,9 +293,9 @@ const toolConfigs: Record<string, ToolConfig> = {
   'gaegeolmu-order': {
     title: '게걸무씨앗기름 발주서 생성',
     description:
-      'DeliveryList에서 게걸무씨앗기름 주문을 추출하여 발주서를 생성합니다.',
+      '쿠팡 DeliveryList 또는 지마켓 발송관리 파일에서 게걸무씨앗기름 주문을 추출하여 발주서를 생성합니다.',
     icon: '🌾',
-    files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
+    files: [{ key: 'delivery', label: 'DeliveryList 또는 지마켓 발송관리 파일' }],
     color: 'amber',
     colorClasses: {
       bg: 'bg-amber-50',
@@ -247,16 +344,35 @@ function ProcessPage() {
       init['toss_from_date'] = today;
       init['toss_to_date'] = today;
     }
+    if (config?.textArea) {
+      init[config.textArea.key] = '';
+    }
     return init;
   });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [error, setError] = useState('');
+  const [trackingFile, setTrackingFile] = useState<File | null>(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingResult, setTrackingResult] = useState<Record<string, unknown> | null>(null);
+  const [trackingError, setTrackingError] = useState('');
+  const [temuTrackingFiles, setTemuTrackingFiles] = useState<Record<string, File | null>>({});
+  const [temuTrackingLoading, setTemuTrackingLoading] = useState(false);
+  const [temuTrackingResult, setTemuTrackingResult] = useState<ProcessResult | null>(null);
+  const [temuTrackingError, setTemuTrackingError] = useState('');
 
   const allFilesUploaded = useMemo(() => {
     if (!config) return false;
-    return config.files.filter((f) => !f.optional).every((f) => files[f.key] != null);
-  }, [config, files]);
+    if (toolId === 'temu-order') {
+      return Boolean(files.order_file) || Boolean((extraValues.order_text || '').trim());
+    }
+    const requiredFilesUploaded = config.files
+      .filter((f) => !f.optional)
+      .every((f) => files[f.key] != null);
+    const requiredTextEntered =
+      !config.textArea?.required || Boolean((extraValues[config.textArea.key] || '').trim());
+    return requiredFilesUploaded && requiredTextEntered;
+  }, [config, files, extraValues]);
 
   if (!config || !toolId) {
     return (
@@ -297,6 +413,7 @@ function ProcessPage() {
 
       const res = await processFile(toolId, fileMap, extraValues);
       setResult(res);
+      downloadBlob(res.blob, res.filename);
     } catch (err) {
       setError(err instanceof Error ? err.message : '처리 중 오류가 발생했습니다.');
     } finally {
@@ -312,8 +429,63 @@ function ProcessPage() {
 
   const handleReset = () => {
     setFiles({});
+    if (config?.textArea) {
+      setExtraValues((prev) => ({ ...prev, [config.textArea!.key]: '' }));
+    }
     setResult(null);
     setError('');
+  };
+
+  const handleTossWatermelonTracking = async () => {
+    if (!trackingFile) return;
+    setTrackingLoading(true);
+    setTrackingError('');
+    setTrackingResult(null);
+    try {
+      const res = await processTossWatermelonTracking(trackingFile);
+      setTrackingResult(res);
+    } catch (err) {
+      setTrackingError(err instanceof Error ? err.message : '운송장 등록 중 오류가 발생했습니다.');
+    } finally {
+      setTrackingLoading(false);
+    }
+  };
+
+  const handleTemuTrackingFileSelect = (key: string) => (file: File | null) => {
+    setTemuTrackingFiles((prev) => ({ ...prev, [key]: file }));
+    setTemuTrackingResult(null);
+    setTemuTrackingError('');
+  };
+
+  const handleTemuTrackingProcess = async () => {
+    const orderExport = temuTrackingFiles.order_export;
+    const tracking = temuTrackingFiles.tracking;
+    if (!orderExport || !tracking) return;
+
+    setTemuTrackingLoading(true);
+    setTemuTrackingError('');
+    setTemuTrackingResult(null);
+    try {
+      const fileMap: Record<string, File> = {
+        order_export: orderExport,
+        tracking,
+      };
+      if (temuTrackingFiles.tracking2) {
+        fileMap.tracking2 = temuTrackingFiles.tracking2;
+      }
+      const res = await processFile('temu-tracking', fileMap);
+      setTemuTrackingResult(res);
+    } catch (err) {
+      setTemuTrackingError(err instanceof Error ? err.message : '테무 송장 파일 생성 중 오류가 발생했습니다.');
+    } finally {
+      setTemuTrackingLoading(false);
+    }
+  };
+
+  const handleTemuTrackingReset = () => {
+    setTemuTrackingFiles({});
+    setTemuTrackingResult(null);
+    setTemuTrackingError('');
   };
 
   const formatStats = (stats: Record<string, unknown>): string[] => {
@@ -395,28 +567,60 @@ function ProcessPage() {
           </div>
         )}
 
-        <div className="space-y-5">
-          {config.files.map((fileConfig) => (
-            <FileUpload
-              key={fileConfig.key}
-              label={fileConfig.label}
-              file={files[fileConfig.key] || null}
-              onFileSelect={handleFileSelect(fileConfig.key)}
+        {config.files.length > 0 ? (
+          <div className="space-y-5">
+            {config.files.map((fileConfig) => (
+              <FileUpload
+                key={fileConfig.key}
+                label={fileConfig.label}
+                accept={fileConfig.accept}
+                acceptLabel={fileConfig.acceptLabel}
+                file={files[fileConfig.key] || null}
+                onFileSelect={handleFileSelect(fileConfig.key)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-orange-200 bg-orange-50/50 px-4 py-3 text-sm text-orange-700">
+            {config.textArea
+              ? '파일 없이 주문상세 텍스트만 붙여넣으면 발주서를 생성합니다.'
+              : '파일 없이 날짜만 선택하면 토스 API에서 주문을 수집합니다.'}
+          </div>
+        )}
+
+        {config.textArea && (
+          <div className="mt-5">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              {config.textArea.label}
+            </label>
+            <textarea
+              value={extraValues[config.textArea.key] || ''}
+              onChange={(e) =>
+                setExtraValues((prev) => ({ ...prev, [config.textArea!.key]: e.target.value }))
+              }
+              placeholder={config.textArea.placeholder}
+              rows={12}
+              className="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm
+                         focus:ring-2 focus:ring-red-300 focus:border-red-400 outline-none
+                         transition-all whitespace-pre-wrap"
             />
-          ))}
-        </div>
+            {config.textArea.helperText && (
+              <p className="text-xs text-gray-500 mt-2">{config.textArea.helperText}</p>
+            )}
+          </div>
+        )}
 
         {/* Toss API Date Range Picker */}
         {config.tossDateRange && (
           <div className="mt-5 p-4 rounded-xl border border-orange-200 bg-orange-50/50">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-bold text-gray-800">🛒 토스 API 주문 수집</span>
+              <span className="text-sm font-bold text-gray-800">🛒 {config.tossDateTitle || '토스 API 주문 수집'}</span>
               <div className="flex gap-1.5">
                 {[
                   { label: '오늘', days: 0 },
                   { label: '2일', days: 1 },
                   { label: '3일', days: 2 },
-                  { label: '주말(금~일)', days: 3 },
+                  { label: '4일', days: 3 },
                   { label: '수집안함', days: -1 },
                 ].map((preset) => (
                   <button
@@ -477,6 +681,9 @@ function ProcessPage() {
             </div>
             {!extraValues['toss_from_date'] && (
               <p className="text-xs text-gray-400 mt-2">※ 날짜 미선택 시 토스 API 수집을 건너뜁니다.</p>
+            )}
+            {config.tossDateDescription && (
+              <p className="text-xs text-gray-500 mt-2">{config.tossDateDescription}</p>
             )}
           </div>
         )}
@@ -552,7 +759,10 @@ function ProcessPage() {
               </>
             )}
           </button>
-          {(Object.keys(files).length > 0 || result || error) && (
+          {(Object.values(files).some(Boolean) ||
+            Boolean(config.textArea && (extraValues[config.textArea.key] || '').trim()) ||
+            result ||
+            error) && (
             <button
               onClick={handleReset}
               disabled={loading}
@@ -566,6 +776,173 @@ function ProcessPage() {
           )}
         </div>
       </div>
+
+      {toolId === 'toss-watermelon-order' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6 animate-slide-up">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-xl">
+              📦
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">토스 수박 6/7/8kg 운송장 등록</h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                제이비티 회신 파일을 올리면 토스 수박 6/7/8kg 주문에 운송장번호를 자동 등록합니다.
+              </p>
+            </div>
+          </div>
+
+          <FileUpload
+            label="제이비티 회신 파일"
+            file={trackingFile}
+            onFileSelect={(file) => {
+              setTrackingFile(file || null);
+              setTrackingResult(null);
+              setTrackingError('');
+            }}
+          />
+
+          <div className="mt-6 flex items-center gap-3">
+            <button
+              onClick={handleTossWatermelonTracking}
+              disabled={!trackingFile || trackingLoading}
+              className="bg-red-600 text-white px-6 py-3 rounded-xl font-semibold text-sm
+                         hover:bg-red-700 active:bg-red-800
+                         disabled:opacity-50 disabled:cursor-not-allowed
+                         transition-all duration-200 flex items-center gap-2"
+            >
+              {trackingLoading ? '등록 중...' : '토스 운송장 등록'}
+            </button>
+            {(trackingFile || trackingResult || trackingError) && (
+              <button
+                onClick={() => {
+                  setTrackingFile(null);
+                  setTrackingResult(null);
+                  setTrackingError('');
+                }}
+                disabled={trackingLoading}
+                className="text-gray-500 hover:text-gray-700 px-4 py-3 rounded-xl
+                           font-medium text-sm hover:bg-gray-100 transition-all duration-200"
+              >
+                초기화
+              </button>
+            )}
+          </div>
+
+          {trackingError && (
+            <div className="mt-5 bg-red-50 border border-red-200 rounded-2xl p-5 animate-fade-in">
+              <h4 className="text-sm font-bold text-red-800 mb-0.5">오류 발생</h4>
+              <p className="text-sm text-red-600">{trackingError}</p>
+            </div>
+          )}
+
+          {trackingResult && (
+            <div className="mt-5 bg-green-50 border border-green-200 rounded-2xl p-5 animate-fade-in">
+              <h4 className="text-sm font-bold text-green-800 mb-1">운송장 등록 완료</h4>
+              <div className="space-y-0.5">
+                {formatStats(trackingResult)
+                  .filter((line) => !line.startsWith('status:'))
+                  .map((line, i) => (
+                    <p key={i} className="text-sm text-green-700">
+                      {line}
+                    </p>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {toolId === 'temu-order' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6 animate-slide-up">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-xl">
+              📦
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">테무 송장입력 파일 생성</h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                테무 주문엑셀과 거래처 회신/송장파일을 매칭해 테무 배송 확인 업로드 엑셀을 만듭니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            <FileUpload
+              label="테무 주문목록(order_export) 파일"
+              accept=".xlsx,.xls,.csv"
+              acceptLabel=".xlsx, .xls, .csv 파일"
+              file={temuTrackingFiles.order_export || null}
+              onFileSelect={handleTemuTrackingFileSelect('order_export')}
+            />
+            <FileUpload
+              label="택배 송장파일 1"
+              file={temuTrackingFiles.tracking || null}
+              onFileSelect={handleTemuTrackingFileSelect('tracking')}
+            />
+            <FileUpload
+              label="택배 송장파일 2 (선택)"
+              file={temuTrackingFiles.tracking2 || null}
+              onFileSelect={handleTemuTrackingFileSelect('tracking2')}
+            />
+          </div>
+
+          <p className="text-xs text-gray-500 mt-3">
+            출력 파일은 첨부한 테무 양식 그대로 주문 ID, 주문 상품 id, 수량, 배송 출발지, 배송사, 추적 번호를 채웁니다.
+          </p>
+
+          <div className="mt-6 flex items-center gap-3">
+            <button
+              onClick={handleTemuTrackingProcess}
+              disabled={!temuTrackingFiles.order_export || !temuTrackingFiles.tracking || temuTrackingLoading}
+              className="bg-red-600 text-white px-6 py-3 rounded-xl font-semibold text-sm
+                         hover:bg-red-700 active:bg-red-800
+                         disabled:opacity-50 disabled:cursor-not-allowed
+                         transition-all duration-200 flex items-center gap-2"
+            >
+              {temuTrackingLoading ? '생성 중...' : '테무 배송확인 엑셀 생성'}
+            </button>
+            {(Object.values(temuTrackingFiles).some(Boolean) || temuTrackingResult || temuTrackingError) && (
+              <button
+                onClick={handleTemuTrackingReset}
+                disabled={temuTrackingLoading}
+                className="text-gray-500 hover:text-gray-700 px-4 py-3 rounded-xl
+                           font-medium text-sm hover:bg-gray-100 transition-all duration-200"
+              >
+                초기화
+              </button>
+            )}
+          </div>
+
+          {temuTrackingError && (
+            <div className="mt-5 bg-red-50 border border-red-200 rounded-2xl p-5 animate-fade-in">
+              <h4 className="text-sm font-bold text-red-800 mb-0.5">오류 발생</h4>
+              <p className="text-sm text-red-600">{temuTrackingError}</p>
+            </div>
+          )}
+
+          {temuTrackingResult && (
+            <div className="mt-5 bg-green-50 border border-green-200 rounded-2xl p-5 animate-fade-in">
+              <h4 className="text-sm font-bold text-green-800 mb-1">테무 배송확인 파일 생성 완료</h4>
+              {temuTrackingResult.stats && (
+                <div className="space-y-0.5 mb-4">
+                  {formatStats(temuTrackingResult.stats).map((line, i) => (
+                    <p key={i} className="text-sm text-green-700">
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => downloadBlob(temuTrackingResult.blob, temuTrackingResult.filename)}
+                className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white
+                           px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+              >
+                ⬇ {temuTrackingResult.filename} 다운로드
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Error Message */}
       {error && (

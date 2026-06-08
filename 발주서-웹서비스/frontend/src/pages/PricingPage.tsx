@@ -97,7 +97,7 @@ export default function PricingPage() {
             <ul className="mt-6 space-y-2 text-sm text-slate-700">
               <li>✔ 제품 {freePlan?.max_products ?? 1}개 등록</li>
               <li>✔ 월 {freePlan?.max_monthly_orders ?? 50}건 처리</li>
-              <li>✔ 판매 대시보드 (최근 30일)</li>
+              <li>✔ 발주 자동화 대시보드</li>
               <li className="text-slate-400">✘ 운송장 자동 입력</li>
               <li className="text-slate-400">✘ 쿠팡 실시간 재고/가격</li>
             </ul>
@@ -118,7 +118,7 @@ export default function PricingPage() {
             <ul className="mt-6 space-y-2 text-sm text-slate-700">
               <li>✔ 제품 무제한 등록</li>
               <li>✔ 월 {proPlan?.max_monthly_orders?.toLocaleString() ?? '3,000'}건 처리</li>
-              <li>✔ 판매 대시보드 (전체 기간)</li>
+              <li>✔ 발주 자동화 대시보드</li>
               <li>✔ 운송장 자동 입력</li>
               <li>✔ 쿠팡 실시간 재고/가격</li>
               <li>✔ 자동 가격 조정</li>

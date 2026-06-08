@@ -13,6 +13,15 @@ from collections import defaultdict
 
 from openpyxl import load_workbook
 
+from app.processors.goguma_order import transform_alwayz_option, transform_option
+from app.processors.haedal_tracking_parser import detect_haedal_columns, find_tracking_in_row
+from app.processors.tracking_match import (
+    name_counts,
+    option_key_set,
+    options_match,
+    requires_option_guard,
+)
+
 
 KST = timezone(timedelta(hours=9))
 
@@ -21,16 +30,6 @@ def normalize(value) -> str:
     if value is None:
         return ""
     return re.sub(r'\s+', '', str(value).strip())
-
-
-def find_tracking_in_row(ws, row_idx) -> str:
-    for col in range(16, 23):  # P(16) ~ V(22)
-        val = ws.cell(row=row_idx, column=col).value
-        if val is not None:
-            s = str(val).strip()
-            if re.match(r'^\d{10,14}$', s):
-                return s
-    return ""
 
 
 def process(
@@ -49,28 +48,26 @@ def process(
     # 해달 발주서 파싱
     hd_wb = load_workbook(filename=BytesIO(haedal_bytes), data_only=True)
     hd_ws = hd_wb.active
-
-    start_row = 1
-    a1_val = normalize(hd_ws.cell(row=1, column=1).value)
-    if "받" in a1_val or "분" in a1_val or "수령" in a1_val:
-        start_row = 2
+    cols = detect_haedal_columns(hd_ws)
 
     haedal_entries = []
-    for row_idx in range(start_row, hd_ws.max_row + 1):
-        name = normalize(hd_ws.cell(row=row_idx, column=1).value)
-        phone = normalize(hd_ws.cell(row=row_idx, column=2).value)
-        address = normalize(hd_ws.cell(row=row_idx, column=6).value)
+    for row_idx in range(cols.start_row, hd_ws.max_row + 1):
+        name = normalize(hd_ws.cell(row=row_idx, column=cols.name).value)
+        phone = normalize(hd_ws.cell(row=row_idx, column=cols.phone).value)
+        address = normalize(hd_ws.cell(row=row_idx, column=cols.address).value)
+        product = hd_ws.cell(row=row_idx, column=cols.product).value
 
         if not name:
             continue
 
-        tracking = find_tracking_in_row(hd_ws, row_idx)
+        tracking = find_tracking_in_row(hd_ws, row_idx, cols.tracking)
         if tracking:
             haedal_entries.append({
                 "name": name,
                 "phone": phone,
                 "address": address,
                 "tracking": tracking,
+                "option_keys": option_key_set(product, transform_option(str(product or ""))),
             })
 
     # 올웨이즈 파일 로드
@@ -84,6 +81,10 @@ def process(
     used_entries = set()
     filled = 0
     skipped = 0
+    alwayz_name_counts = name_counts(
+        normalize(al_ws.cell(row=row_idx, column=19).value)
+        for row_idx in range(2, al_ws.max_row + 1)
+    )
 
     for row_idx in range(2, al_ws.max_row + 1):
         # W열(23) = 운송장번호 대상
@@ -95,6 +96,8 @@ def process(
         al_name = normalize(al_ws.cell(row=row_idx, column=19).value)     # S = 수령인
         al_phone = normalize(al_ws.cell(row=row_idx, column=20).value)    # T = 수령인 연락처
         al_address = normalize(al_ws.cell(row=row_idx, column=15).value)  # O = 주소
+        al_option_raw = al_ws.cell(row=row_idx, column=6).value           # F = 옵션
+        al_option_keys = option_key_set(al_option_raw, transform_alwayz_option(str(al_option_raw or "")))
 
         if not al_name:
             continue
@@ -111,6 +114,15 @@ def process(
         if not available:
             skipped += 1
             continue
+
+        if requires_option_guard(al_name, alwayz_name_counts, len(candidates)):
+            available = [
+                (i, c) for i, c in available
+                if options_match(c.get("option_keys"), al_option_keys)
+            ]
+            if not available:
+                skipped += 1
+                continue
 
         matched = None
 

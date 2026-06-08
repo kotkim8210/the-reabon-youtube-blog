@@ -16,7 +16,6 @@ import OrderTools from './pages/OrderTools';
 import PricingDashboard from './pages/PricingDashboard';
 import PricingPage from './pages/PricingPage';
 import ProcessPage from './pages/ProcessPage';
-import SalesDashboard from './pages/SalesDashboard';
 import SignupPage from './pages/SignupPage';
 import TenantOrderPage from './pages/TenantOrderPage';
 import TenantProductConfig from './pages/TenantProductConfig';
@@ -53,6 +52,26 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
   if (!token) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return <>{children}</>;
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const token = localStorage.getItem('token');
+  const location = useLocation();
+  const { user } = useUser();
+
+  if (authDisabled) {
+    return <>{children}</>;
+  }
+
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (user?.role !== 'admin') {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
@@ -120,12 +139,17 @@ export default function App() {
           <Route path="inventory" element={<PlaceholderTab />} />
           <Route path="cs" element={<PlaceholderTab />} />
           <Route path="ai-content" element={<PlaceholderTab />} />
-          <Route path="roas" element={<PlaceholderTab />} />
           <Route path="my/products" element={<TenantProductConfig />} />
           <Route path="my/process" element={<TenantOrderPage />} />
           <Route path="billing" element={<BillingDashboard />} />
-          <Route path="sales" element={<SalesDashboard />} />
-          <Route path="admin" element={<AdminPanel />} />
+          <Route
+            path="admin"
+            element={
+              <AdminRoute>
+                <AdminPanel />
+              </AdminRoute>
+            }
+          />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

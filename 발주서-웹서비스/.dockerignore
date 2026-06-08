@@ -6,3 +6,9 @@ __pycache__
 .env
 .git
 backend/static
+backend/uploads
+backend/*.sqlite
+backend/*.sqlite-*
+*.zip
+.claude
+tmp*

@@ -2,6 +2,7 @@
 
 import re
 import logging
+from hashlib import sha1
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 from collections import defaultdict
@@ -11,6 +12,14 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
+from app.processors.tracking_match import (
+    name_counts,
+    option_key_set,
+    options_match,
+    requires_option_guard,
+)
+from app.processors.goguma_order import transform_toss_option as normalize_goguma_toss_option
+from app.processors.haedal_tracking_parser import detect_haedal_columns, find_tracking_in_row
 from app.toss.client import toss_client
 
 logger = logging.getLogger(__name__)
@@ -29,6 +38,21 @@ def normalize(value) -> str:
     return s
 
 
+def stable_order_id(prefix: str, *values) -> str:
+    raw = "|".join(normalize(value) for value in values if normalize(value))
+    if not raw:
+        return ""
+    return f"{prefix}:{sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+
+
+def toss_order_id(item: dict) -> str:
+    for key in ("orderNo", "orderId", "orderNumber", "orderSheetId", "paymentKey"):
+        value = item.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
 def normalize_strip(value) -> str:
     """공백 완전 제거 (매칭용)."""
     if value is None:
@@ -37,9 +61,7 @@ def normalize_strip(value) -> str:
 
 
 def transform_toss_option(product_name: str, option_name: str) -> str:
-    text = normalize(option_name) if option_name else normalize(product_name)
-    text = re.sub(r"^1박스\s*황금\s*", "", text)
-    return text
+    return normalize_goguma_toss_option(product_name, option_name)
 
 
 def is_goguma_order(item: dict) -> bool:
@@ -97,6 +119,14 @@ async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, 
             "qty": str(item.get("quantity") or 1),
             "product": product,
             "memo": item.get("shippingNote") or "",
+            "order_id": toss_order_id(item) or stable_order_id(
+                "toss-api",
+                item.get("receiverName"),
+                item.get("receiverRealPhone") or item.get("receiverPhone"),
+                full_address,
+                product,
+                item.get("quantity") or 1,
+            ),
         })
 
     if not entries:
@@ -124,6 +154,8 @@ async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, 
             start_row = r
             break
 
+    option_totals: dict[str, dict] = {}
+
     for i, entry in enumerate(entries):
         row_idx = start_row + i
         mapping = {
@@ -143,6 +175,23 @@ async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, 
             cell = ws.cell(row=row_idx, column=col, value=value)
             cell.font = font11
 
+        try:
+            qty_int = int(float(entry["qty"])) if entry["qty"] not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+        bucket = option_totals.setdefault(
+            entry["product"] or "고구마",
+            {
+                "coupang_option_keyword": entry["product"] or "고구마",
+                "vendor_option_name": entry["product"] or "고구마",
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if entry.get("order_id"):
+            bucket["orders"].append({"order_id": entry["order_id"], "quantity": qty_int})
+
     output = BytesIO()
     tmpl_wb.save(output)
     output.seek(0)
@@ -152,6 +201,8 @@ async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, 
     stats = {
         "total": len(entries),
         "period": f"{from_date} ~ {to_date}",
+        "product": "고구마",
+        "options": list(option_totals.values()),
     }
 
     return output.read(), filename, stats
@@ -161,43 +212,31 @@ async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, 
 # 2) 토스 운송장 등록
 # ---------------------------------------------------------------------------
 
-def find_tracking_in_row(ws, row_idx) -> str:
-    """P~V열 중 10~14자리 숫자인 운송장번호를 찾는다."""
-    for col in range(16, 23):  # P(16) ~ V(22)
-        val = ws.cell(row=row_idx, column=col).value
-        if val is not None:
-            s = str(val).strip()
-            if re.match(r"^\d{10,14}$", s):
-                return s
-    return ""
-
-
 def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
     """Parse 해달 발주서 and extract entries with tracking numbers."""
     wb = load_workbook(filename=BytesIO(haedal_bytes), data_only=True)
     ws = wb.active
 
-    start_row = 1
-    a1_val = normalize_strip(ws.cell(row=1, column=1).value)
-    if "받" in a1_val or "분" in a1_val or "수령" in a1_val:
-        start_row = 2
+    cols = detect_haedal_columns(ws)
 
     entries = []
-    for row_idx in range(start_row, ws.max_row + 1):
-        name = normalize_strip(ws.cell(row=row_idx, column=1).value)
-        phone = normalize_strip(ws.cell(row=row_idx, column=2).value)
-        address = normalize_strip(ws.cell(row=row_idx, column=6).value)
+    for row_idx in range(cols.start_row, ws.max_row + 1):
+        name = normalize_strip(ws.cell(row=row_idx, column=cols.name).value)
+        phone = normalize_strip(ws.cell(row=row_idx, column=cols.phone).value)
+        address = normalize_strip(ws.cell(row=row_idx, column=cols.address).value)
+        product = ws.cell(row=row_idx, column=cols.product).value
 
         if not name:
             continue
 
-        tracking = find_tracking_in_row(ws, row_idx)
+        tracking = find_tracking_in_row(ws, row_idx, cols.tracking)
         if tracking:
             entries.append({
                 "name": name,
                 "phone": phone,
                 "address": address,
                 "tracking": tracking,
+                "option_keys": option_key_set(product, transform_toss_option("", str(product or ""))),
             })
 
     return entries
@@ -279,6 +318,11 @@ async def process_toss_tracking(haedal_bytes: bytes) -> dict:
             "address": normalize_strip(full_address),
             "name_display": receiver_name,
             "order_status": order_status,
+            "option_keys": option_key_set(
+                item.get("optionName"),
+                transform_toss_option(item.get("productName") or "", item.get("optionName") or ""),
+            )
+            or option_key_set(item.get("productName")),
         })
 
     if not toss_orders:
@@ -311,6 +355,7 @@ async def process_toss_tracking(haedal_bytes: bytes) -> dict:
     matched_pairs = []
     results = list(pre_skipped_results)
     skip_count = len(pre_skipped_results)
+    toss_name_counts = name_counts(order["name"] for order in toss_orders)
 
     for order in toss_orders:
         candidates = entry_by_name.get(order["name"], [])
@@ -328,6 +373,11 @@ async def process_toss_tracking(haedal_bytes: bytes) -> dict:
             (i, c) for i, c in enumerate(candidates)
             if id(c) not in used_entries
         ]
+        if requires_option_guard(order["name"], toss_name_counts, len(candidates)):
+            available = [
+                (i, c) for i, c in available
+                if options_match(c.get("option_keys"), order.get("option_keys"))
+            ]
         if not available:
             skip_count += 1
             results.append({

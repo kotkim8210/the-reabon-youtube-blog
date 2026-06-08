@@ -9,6 +9,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from app.processors.danharu_order import build_platform_label
+from app.processors.tracking_match import name_counts, options_match, requires_option_guard
 
 KST = timezone(timedelta(hours=9))
 
@@ -89,9 +90,24 @@ def _score_match(
     return score
 
 
-def process(reply_bytes: bytes, delivery_bytes: bytes) -> tuple[bytes, str, dict]:
-    """Write Danharu tracking numbers into DeliveryList column E only."""
-    reply_entries = _extract_reply_entries(reply_bytes)
+def process(
+    reply_bytes: bytes | list[bytes],
+    delivery_bytes: bytes,
+) -> tuple[bytes, str, dict]:
+    """Write Danharu tracking numbers into DeliveryList column E only.
+
+    `reply_bytes` 는 단일 파일(bytes) 또는 여러 파일(list[bytes])을 받는다.
+    여러 회신 파일에서 추출한 항목을 하나로 합쳐 DeliveryList에 적용한다.
+    """
+    if isinstance(reply_bytes, (bytes, bytearray)):
+        reply_files = [bytes(reply_bytes)]
+    else:
+        reply_files = [bytes(b) for b in reply_bytes]
+
+    reply_entries: list[dict] = []
+    for raw in reply_files:
+        reply_entries.extend(_extract_reply_entries(raw))
+
     if not reply_entries:
         raise ValueError("회신 파일에서 M열 송장번호가 입력된 주문을 찾지 못했습니다.")
 
@@ -108,6 +124,10 @@ def process(reply_bytes: bytes, delivery_bytes: bytes) -> tuple[bytes, str, dict
     used_entries: set[int] = set()
     filled = 0
     skipped = 0
+    delivery_name_counts = name_counts(
+        normalize_key(delivery_ws.cell(row=row_index, column=27).value)
+        for row_index in range(2, delivery_ws.max_row + 1)
+    )
 
     for row_index in range(2, delivery_ws.max_row + 1):
         tracking_cell = delivery_ws.cell(row=row_index, column=5)
@@ -133,6 +153,23 @@ def process(reply_bytes: bytes, delivery_bytes: bytes) -> tuple[bytes, str, dict
         if not candidates:
             skipped += 1
             continue
+
+        if requires_option_guard(
+            receiver_name_key,
+            delivery_name_counts,
+            len(entries_by_name.get(receiver_name_key, [])),
+        ):
+            target_option_keys = {key for key in (platform_label_key, option_key) if key}
+            candidates = [
+                entry for entry in candidates
+                if options_match(
+                    {entry.get("platform_label_key", ""), entry.get("supply_option_key", "")},
+                    target_option_keys,
+                )
+            ]
+            if not candidates:
+                skipped += 1
+                continue
 
         scored_candidates = [
             (
@@ -169,5 +206,6 @@ def process(reply_bytes: bytes, delivery_bytes: bytes) -> tuple[bytes, str, dict
         "filled": filled,
         "skipped": skipped,
         "reply_rows": len(reply_entries),
+        "reply_files": len(reply_files),
     }
     return output.read(), filename, stats

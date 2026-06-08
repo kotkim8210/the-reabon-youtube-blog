@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
+from app.processors import chamoe_mixed_order
 
 
 KST = timezone(timedelta(hours=9))
@@ -31,6 +32,44 @@ def convert_quantity(option_text: str) -> str | None:
         if weight in ("3", "5", "10"):
             return f"콜라비 정품 {weight}kg"
     return None
+
+
+def _combined_text(product_name: object, option_text: object) -> str:
+    return normalize(f"{product_name or ''} {option_text or ''}")
+
+
+def is_jejudafarm_corn_order(product_name: object, option_text: object) -> bool:
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    return (
+        "초당옥수수" in text
+        and "애플초당옥수수" not in text
+        and "중품" not in text
+        and "특품" not in text
+    )
+
+
+def convert_corn_option(product_name: object, option_text: object) -> str | None:
+    """Convert 초당옥수수 DeliveryList text to 제주다팜 발주 옵션."""
+    text = _combined_text(product_name, option_text)
+    if not is_jejudafarm_corn_order(product_name, option_text):
+        return None
+
+    count_match = re.search(r"(\d+)\s*(?:개|입)", text)
+    if not count_match:
+        return None
+    count = count_match.group(1)
+    if count not in ("5", "10", "15", "20"):
+        return None
+
+    grade = "중품" if "중품" in text else "특품"
+    return f"초당옥수수({grade}) {count}개"
+
+
+def clear_stray_header_numbers(ws) -> None:
+    for col in range(14, ws.max_column + 1):
+        cell = ws.cell(row=1, column=col)
+        if cell.value in (6, "6"):
+            cell.value = None
 
 
 def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
@@ -68,6 +107,7 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
     for name in tmpl_wb.sheetnames[1:]:
         del tmpl_wb[name]
     ws = tmpl_wb[first_sheet_name]
+    clear_stray_header_numbers(ws)
 
     font11 = Font(size=11)
 
@@ -77,6 +117,8 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
         if ws.cell(row=r, column=2).value is None:
             start_row = r
             break
+
+    option_totals: dict[str, dict] = {}
 
     for i, row in enumerate(filtered_rows):
         out_row = start_row + i
@@ -98,8 +140,13 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
         option = normalize(row[11].value) if len(row) > 11 else ""
         qty_val = row[22].value if len(row) > 22 else ""
         qty = normalize(qty_val)
+        order_no = normalize(row[2].value) if len(row) > 2 else ""
 
         product = convert_quantity(option)
+        try:
+            qty_int = int(float(qty_val)) if qty_val not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
 
         # Zipcode with zero-fill to 5 digits
         if zipcode:
@@ -124,6 +171,20 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
             cell = ws.cell(row=out_row, column=col, value=value)
             cell.font = font11
 
+        if product:
+            bucket = option_totals.setdefault(
+                option or product,
+                {
+                    "coupang_option_keyword": option or product,
+                    "vendor_option_name": product,
+                    "quantity": 0,
+                    "orders": [],
+                },
+            )
+            bucket["quantity"] += qty_int
+            if order_no:
+                bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
     # Save to bytes
     output = BytesIO()
     tmpl_wb.save(output)
@@ -131,6 +192,131 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
 
     now = datetime.now(KST)
     filename = f"제주다팜_아이티소프트_콜라비발주({now.strftime('%Y%m%d')}).xlsx"
-    stats = {"total": len(filtered_rows)}
+    stats = {
+        "total": len(filtered_rows),
+        "product": "콜라비",
+        "options": list(option_totals.values()),
+    }
 
     return output.read(), filename, stats
+
+
+def process_corn(delivery_file_bytes: bytes) -> tuple[bytes, str, dict] | None:
+    """Process DeliveryList rows for 제주다팜 초당옥수수 발주."""
+    dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes), data_only=True)
+    dl_ws = dl_wb.active
+
+    filtered_rows: list[tuple] = []
+    for row in dl_ws.iter_rows(min_row=2):
+        product_name = normalize(row[10].value) if len(row) > 10 else ""
+        option = normalize(row[11].value) if len(row) > 11 else ""
+        converted = convert_corn_option(product_name, option)
+        if converted:
+            filtered_rows.append((row, converted))
+
+    if not filtered_rows:
+        return None
+
+    template_path = TEMPLATE_DIR / "콜라비_제주다팜_원본.xlsx"
+    if not template_path.exists():
+        raise FileNotFoundError(
+            f"Template not found: {template_path}. "
+            f"Please place the template file in the templates directory."
+        )
+
+    tmpl_wb = load_workbook(filename=str(template_path))
+    first_sheet_name = tmpl_wb.sheetnames[0]
+    for name in tmpl_wb.sheetnames[1:]:
+        del tmpl_wb[name]
+    ws = tmpl_wb[first_sheet_name]
+    clear_stray_header_numbers(ws)
+
+    font11 = Font(size=11)
+    start_row = 2
+    for r in range(2, ws.max_row + 2):
+        if ws.cell(row=r, column=2).value is None:
+            start_row = r
+            break
+
+    option_totals: dict[str, dict] = {}
+    for i, (row, product) in enumerate(filtered_rows):
+        out_row = start_row + i
+
+        name = normalize(row[26].value) if len(row) > 26 else ""
+        phone = normalize(row[27].value) if len(row) > 27 else ""
+        zipcode = normalize(row[28].value) if len(row) > 28 else ""
+        address = normalize(row[29].value) if len(row) > 29 else ""
+        memo = normalize(row[30].value) if len(row) > 30 else ""
+        option = normalize(row[11].value) if len(row) > 11 else ""
+        qty_val = row[22].value if len(row) > 22 else ""
+        qty = normalize(qty_val)
+        order_no = normalize(row[2].value) if len(row) > 2 else ""
+
+        try:
+            qty_int = int(float(qty_val)) if qty_val not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+
+        if zipcode:
+            try:
+                zipcode = str(int(float(zipcode))).zfill(5)
+            except (ValueError, TypeError):
+                zipcode = zipcode.zfill(5)
+
+        mapping = {
+            2: name,
+            3: phone,
+            5: zipcode,
+            6: address,
+            8: product,
+            9: qty,
+            10: "식품애착",
+            11: "010-5700-7756",
+            13: memo,
+        }
+
+        for col, value in mapping.items():
+            cell = ws.cell(row=out_row, column=col, value=value)
+            cell.font = font11
+
+        bucket = option_totals.setdefault(
+            option or product,
+            {
+                "coupang_option_keyword": option or product,
+                "vendor_option_name": product,
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order_no:
+            bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
+    output = BytesIO()
+    tmpl_wb.save(output)
+    output.seek(0)
+
+    now = datetime.now(KST)
+    filename = f"제주다팜_아이티소프트_초당옥수수발주({now.strftime('%Y%m%d')}).xlsx"
+    stats = {
+        "total": len(filtered_rows),
+        "product": "초당옥수수(제주다팜)",
+        "options": list(option_totals.values()),
+    }
+    return output.read(), filename, stats
+
+
+def process_outputs(delivery_file_bytes: bytes) -> list[tuple[bytes, str, dict]]:
+    """Return 제주다팜 order files together: 콜라비 + 성주참외 알뜰과."""
+    results: list[tuple[bytes, str, dict]] = []
+
+    kolrabi_result = process(delivery_file_bytes)
+    kolrabi_stats = kolrabi_result[2] if len(kolrabi_result) > 2 else {}
+    if int((kolrabi_stats or {}).get("total") or 0) > 0:
+        results.append(kolrabi_result)
+
+    chamoe_result = chamoe_mixed_order.process(delivery_file_bytes)
+    if chamoe_result:
+        results.append(chamoe_result)
+
+    return results

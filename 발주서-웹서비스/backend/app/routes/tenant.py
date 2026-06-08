@@ -13,7 +13,6 @@ from app.auth import verify_token
 from app.db import (
     save_user_template, get_user_templates, get_user_template_data, delete_user_template,
     create_user_product, get_user_products, update_user_product, delete_user_product,
-    log_option_sales,
 )
 from app.quota import check_product_limit, check_order_quota, record_order_usage
 
@@ -171,7 +170,7 @@ async def process_delivery(
     total_orders = sum((stats or {}).get("total", 0) for _, _, stats in results)
     await check_order_quota(user["user_id"], total_orders)
 
-    # Record usage + per-option sales
+    # Record quota usage only. 판매추적 기능은 삭제되어 option_sales에 적재하지 않는다.
     for _, _, stats in results:
         if not stats:
             continue
@@ -179,9 +178,6 @@ async def process_delivery(
         order_count = stats.get("total", 0)
         if order_count > 0:
             await record_order_usage(user["user_id"], product_label, order_count)
-        opts = stats.get("options") or []
-        if opts:
-            await log_option_sales(user["user_id"], product_label, opts)
 
     if len(results) == 1:
         file_bytes, filename, stats = results[0]

@@ -88,6 +88,7 @@ async def _process_sum_mode(
     option_totals: dict[str, dict] = {}  # keyword → {vendor_option_name, quantity}
     for row in matched_rows:
         l_val = normalize(row[11].value) if len(row) > 11 else ""  # L column = option
+        order_no = normalize(row[2].value) if len(row) > 2 else ""  # C column = order number
         qty_raw = row[22].value if len(row) > 22 else 0  # W column = quantity
         try:
             qty = int(qty_raw) if qty_raw else 1
@@ -106,8 +107,11 @@ async def _process_sum_mode(
                     "coupang_option_keyword": opt_keyword,
                     "vendor_option_name": opt.get("vendor_option_name", ""),
                     "quantity": 0,
+                    "orders": [],
                 })
                 bucket["quantity"] += qty
+                if order_no:
+                    bucket["orders"].append({"order_id": order_no, "quantity": qty})
                 break
 
     if not cell_totals:
@@ -216,8 +220,11 @@ async def _process_row_mode(
                 "coupang_option_keyword": matched_kw,
                 "vendor_option_name": option_map[matched_kw],
                 "quantity": 0,
+                "orders": [],
             })
             bucket["quantity"] += row_qty
+            if order_no:
+                bucket["orders"].append({"order_id": order_no, "quantity": row_qty})
 
         out_row = start_row + row_count
         mapping = {

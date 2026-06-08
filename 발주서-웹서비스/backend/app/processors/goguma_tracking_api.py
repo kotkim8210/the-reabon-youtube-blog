@@ -12,6 +12,14 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from app.coupang.client import coupang_client
+from app.processors.goguma_order import transform_option
+from app.processors.haedal_tracking_parser import detect_haedal_columns, find_tracking_in_row
+from app.processors.tracking_match import (
+    name_counts,
+    option_key_set,
+    options_match,
+    requires_option_guard,
+)
 
 logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
@@ -34,37 +42,22 @@ def phone_digits(value: object) -> str:
     return re.sub(r"\D", "", str(value))
 
 
-def find_tracking_in_row(ws, row_idx: int) -> str:
-    """Find a 10-14 digit tracking number in columns P~V."""
-    for col in range(16, 23):  # P ~ V
-        val = ws.cell(row=row_idx, column=col).value
-        if val is None:
-            continue
-        s = str(val).strip()
-        if re.match(r"^\d{10,14}$", s):
-            return s
-    return ""
-
-
 def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
     """Parse shipping workbook and extract rows with tracking numbers."""
     wb = load_workbook(filename=BytesIO(haedal_bytes), data_only=True)
     ws = wb.active
-
-    start_row = 1
-    a1_val = normalize(ws.cell(row=1, column=1).value)
-    if "받" in a1_val or "수령" in a1_val:
-        start_row = 2
+    cols = detect_haedal_columns(ws)
 
     entries = []
-    for row_idx in range(start_row, ws.max_row + 1):
-        name = normalize(ws.cell(row=row_idx, column=1).value)     # A
-        phone = phone_digits(ws.cell(row=row_idx, column=2).value)    # B
-        address = normalize(ws.cell(row=row_idx, column=6).value)  # F
+    for row_idx in range(cols.start_row, ws.max_row + 1):
+        name = normalize(ws.cell(row=row_idx, column=cols.name).value)
+        phone = phone_digits(ws.cell(row=row_idx, column=cols.phone).value)
+        address = normalize(ws.cell(row=row_idx, column=cols.address).value)
+        product = ws.cell(row=row_idx, column=cols.product).value
         if not name:
             continue
 
-        tracking = find_tracking_in_row(ws, row_idx)
+        tracking = find_tracking_in_row(ws, row_idx, cols.tracking)
         if tracking:
             entries.append(
                 {
@@ -72,6 +65,7 @@ def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
                     "phone": phone,
                     "address": address,
                     "tracking": tracking,
+                    "option_keys": option_key_set(product, transform_option(str(product or ""))),
                 }
             )
 
@@ -130,6 +124,11 @@ async def _fetch_orders_by_status(order_status: str, from_date: str, to_date: st
                         "address": normalize(address_raw),
                         "name_display": receiver.get("name") or "",
                         "order_status": order_status,
+                        "option_keys": option_key_set(
+                            item.get("vendorItemName"),
+                            transform_option(item.get("vendorItemName") or ""),
+                        )
+                        or option_key_set(item.get("sellerProductName")),
                     }
                 )
 
@@ -214,10 +213,16 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
     matched_via_phone: dict[int, str] = {}  # id(order) -> 해달측 이름 (fallback 표시용)
     results = []
     skip_count = 0
+    coupang_name_counts = name_counts(order["name"] for order in coupang_orders)
 
     for order in coupang_orders:
         candidates = entry_by_name.get(order["name"], [])
         available = [c for c in candidates if id(c) not in used_entries]
+        if requires_option_guard(order["name"], coupang_name_counts, len(candidates)):
+            available = [
+                c for c in available
+                if options_match(c.get("option_keys"), order.get("option_keys"))
+            ]
 
         matched = None
         matched_via_phone_only = False
@@ -247,6 +252,11 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
                 c for c in entry_by_phone.get(order["phone"], [])
                 if id(c) not in used_entries
             ]
+            if requires_option_guard(order["name"], coupang_name_counts, len(phone_pool)):
+                phone_pool = [
+                    c for c in phone_pool
+                    if options_match(c.get("option_keys"), order.get("option_keys"))
+                ]
             if len(phone_pool) == 1:
                 matched = phone_pool[0]
                 matched_via_phone_only = True
@@ -301,6 +311,54 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
             or "accept" in lowered
         )
 
+    def _extract_response_list(api_result: dict) -> list[dict]:
+        """쿠팡 송장업로드 응답에서 결과 항목 리스트를 꺼낸다.
+
+        응답 구조가 버전/케이스별로 달라서 모두 대응:
+          - {"data": {"responseList": [...]}}
+          - {"data": [...]}                  (data 자체가 리스트)
+          - {"responseList": [...]}          (data 래핑 없음)
+        """
+        if not isinstance(api_result, dict):
+            return []
+        data = api_result.get("data")
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        if isinstance(data, dict):
+            rl = data.get("responseList")
+            if isinstance(rl, list):
+                return [x for x in rl if isinstance(x, dict)]
+        rl = api_result.get("responseList")
+        if isinstance(rl, list):
+            return [x for x in rl if isinstance(x, dict)]
+        return []
+
+    def _item_failed(item: dict) -> tuple[bool, str, object]:
+        """결과 항목이 '실패'인지 판정. (failed, message, result_code)
+
+        쿠팡은 성공 시 succeed=true 또는 resultCode가 SUCCESS류이거나
+        resultMessage가 비어있다. 명확한 실패 신호가 있을 때만 실패로 본다.
+        """
+        result_code = item.get("resultCode")
+        result_message = item.get("resultMessage") or ""
+        succeed = item.get("succeed")
+
+        # 명시적 성공 신호
+        if succeed is True:
+            return (False, "", result_code)
+        code_str = str(result_code or "").upper()
+        if code_str in ("SUCCESS", "200", "0", "OK"):
+            return (False, "", result_code)
+        # 명시적 실패 신호 (succeed가 False이거나 실패 메시지/코드가 있음)
+        if succeed is False:
+            return (True, result_message or code_str or "등록 실패", result_code)
+        if result_message and code_str not in ("", "SUCCESS", "200", "0", "OK"):
+            return (True, result_message, result_code)
+        if code_str and code_str not in ("SUCCESS", "200", "0", "OK"):
+            return (True, result_message or code_str, result_code)
+        # 신호 없음 → 배치 code가 200이면 성공으로 간주(상위에서 처리)
+        return (False, "", result_code)
+
     async def _upload_and_parse(pairs: list[tuple[dict, str]]):
         dtos = _build_dtos(pairs)
         try:
@@ -310,24 +368,59 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
             logger.error("쿠팡 송장업로드 API 오류: %s", exc)
             return [], [(order, tracking, str(exc), None) for order, tracking in pairs]
 
-        response_data = (api_result or {}).get("data", {})
-        response_list = response_data.get("responseList", [])
-        response_map = {item.get("shipmentBoxId"): item for item in response_list}
+        api_result = api_result or {}
+        top_code = api_result.get("code")
+        response_list = _extract_response_list(api_result)
 
-        if not response_list and api_result:
-            code = api_result.get("code") or response_data.get("responseCode")
-            if code in (200, 0, "200"):
+        # 배치 자체가 거부된 경우 (HTTP 200 envelope이지만 code가 에러)
+        batch_ok = str(top_code or "").upper() in ("200", "0", "OK", "SUCCESS") or top_code is None
+
+        # 결과 항목이 없으면: 배치 성공이면 전체 성공, 아니면 전체 실패
+        if not response_list:
+            if batch_ok:
                 return list(pairs), []
+            msg = api_result.get("message") or "쿠팡 응답에 결과 목록이 없습니다."
+            return [], [(order, tracking, str(msg), top_code) for order, tracking in pairs]
 
-        success_pairs = []
-        fail_pairs = []
-        for order, tracking in pairs:
-            resp_item = response_map.get(order["shipment_box_id"], {})
-            if resp_item.get("succeed"):
-                success_pairs.append((order, tracking))
+        success_pairs: list[tuple[dict, str]] = []
+        fail_pairs: list[tuple[dict, str, str, object]] = []
+
+        # shipmentBoxId 기준 매칭이 가능하면 우선 사용, 안 되면 순서(zip) 기반.
+        # 쿠팡은 요청 순서대로 결과를 돌려주므로 zip이 안전한 기본값.
+        def _norm_id(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        resp_by_box: dict[int, dict] = {}
+        for item in response_list:
+            bid = _norm_id(item.get("shipmentBoxId"))
+            if bid is not None and bid != 0:
+                resp_by_box.setdefault(bid, item)
+
+        use_box_match = len(resp_by_box) >= len(pairs) > 0
+
+        for idx, (order, tracking) in enumerate(pairs):
+            item = None
+            if use_box_match:
+                item = resp_by_box.get(_norm_id(order["shipment_box_id"]))
+            if item is None and idx < len(response_list):
+                item = response_list[idx]  # 순서 기반 fallback
+            if item is None:
+                # 결과 항목을 못 찾았지만 배치가 성공이면 성공으로 간주
+                if batch_ok:
+                    success_pairs.append((order, tracking))
+                else:
+                    fail_pairs.append((order, tracking, "결과 항목 없음", top_code))
+                continue
+
+            failed, message, result_code = _item_failed(item)
+            if failed:
+                fail_pairs.append((order, tracking, str(message or "등록 실패"), result_code))
             else:
-                message = resp_item.get("resultMessage") or resp_item.get("resultCode", "알 수 없는 오류")
-                fail_pairs.append((order, tracking, str(message), resp_item.get("resultCode")))
+                success_pairs.append((order, tracking))
+
         return success_pairs, fail_pairs
 
     if matched_pairs:

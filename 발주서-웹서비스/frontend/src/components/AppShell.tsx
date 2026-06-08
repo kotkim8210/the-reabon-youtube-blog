@@ -1,7 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3,
   Bell,
   CreditCard,
   LayoutDashboard,
@@ -14,12 +13,11 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   Sparkles,
-  TrendingUp,
   User,
   X,
 } from 'lucide-react';
 
-import { refreshDashboardData } from '../api';
+import { fetchSupplierPriceAlerts, refreshDashboardData, type SupplierPriceAlertRun } from '../api';
 import { isAuthDisabled, useUser } from '../App';
 import AdminModal from './AdminModal';
 import SidebarItem from './mvp/SidebarItem';
@@ -27,22 +25,19 @@ import SidebarItem from './mvp/SidebarItem';
 const adminNavItems = [
   { icon: LayoutDashboard, label: '자동화 대시보드', path: '/' },
   { icon: ShoppingCart, label: '발주 도구', path: '/orders' },
-  { icon: TrendingUp, label: '판매 추적', path: '/sales' },
   { icon: CreditCard, label: '구독 & 사용량', path: '/billing' },
 ];
 
 const tenantNavItems = [
   { icon: LayoutDashboard, label: '자동화 대시보드', path: '/' },
-  { icon: ShoppingCart, label: '기존 발주 처리', path: '/my/process' },
-  { icon: Settings, label: '상품 설정', path: '/my/products' },
-  { icon: TrendingUp, label: '판매 대시보드', path: '/sales' },
+  { icon: ShoppingCart, label: '내 발주 자동화', path: '/my/process' },
+  { icon: Settings, label: '상품/양식 설정', path: '/my/products' },
   { icon: CreditCard, label: '구독 & 사용량', path: '/billing' },
 ];
 
 const aiItems = [
-  { icon: Shield, label: '마진 방어', path: '/pricing' },
+  { icon: Shield, label: '마진 방어', path: '/#margin-defense' },
   { icon: Sparkles, label: 'AI 상세페이지', path: '/ai-content' },
-  { icon: BarChart3, label: 'ROAS 분석', path: '/roas' },
 ];
 
 export default function AppShell() {
@@ -54,11 +49,27 @@ export default function AppShell() {
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [supplierAlerts, setSupplierAlerts] = useState<SupplierPriceAlertRun[]>([]);
+  const [supplierAlertCount, setSupplierAlertCount] = useState(0);
+
+  const loadSupplierAlerts = async () => {
+    if (!isAdmin) return;
+    try {
+      const data = await fetchSupplierPriceAlerts();
+      setSupplierAlerts(data.alerts);
+      setSupplierAlertCount(data.active_count);
+    } catch {
+      setSupplierAlerts([]);
+      setSupplierAlertCount(0);
+    }
+  };
 
   const handleRefresh = async () => {
     setLoading(true);
     try {
       await refreshDashboardData();
+      await loadSupplierAlerts();
     } catch {
       // noop
     } finally {
@@ -81,7 +92,32 @@ export default function AppShell() {
   const handleNav = (path: string) => {
     navigate(path);
     setSidebarOpen(false);
+
+    if (path === '/#margin-defense') {
+      window.setTimeout(() => {
+        document.getElementById('margin-defense')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      }, 120);
+    }
   };
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadSupplierAlerts();
+    const interval = window.setInterval(loadSupplierAlerts, 5 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [isAdmin]);
+
+  const activeSupplierAlerts = supplierAlerts
+    .filter((alert) => alert.status !== 'ok' || Number(alert.changed_items || 0) > 0)
+    .sort((left, right) => {
+      const leftCritical = left.status !== 'ok' ? 1 : 0;
+      const rightCritical = right.status !== 'ok' ? 1 : 0;
+      if (leftCritical !== rightCritical) return rightCritical - leftCritical;
+      return Number(right.changed_items || 0) - Number(left.changed_items || 0);
+    });
 
   return (
     <div className="flex min-h-screen overflow-hidden bg-[#f7f4ee] text-slate-900">
@@ -208,10 +244,70 @@ export default function AppShell() {
               <RefreshCw size={20} />
             </button>
             <div className="relative">
-              <button className="p-2 text-slate-400 transition-all hover:text-amber-600">
+              <button
+                onClick={() => setAlertsOpen((current) => !current)}
+                className="p-2 text-slate-400 transition-all hover:text-amber-600"
+                title="마진방어 알림"
+              >
                 <Bell size={20} />
               </button>
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
+              {supplierAlertCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-black text-white ring-2 ring-white">
+                  {supplierAlertCount > 9 ? '9+' : supplierAlertCount}
+                </span>
+              )}
+              {alertsOpen && (
+                <div className="absolute right-0 top-11 z-50 w-[340px] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15">
+                  <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">Margin Defense</p>
+                    <h3 className="mt-1 text-base font-black text-slate-900">마진방어 공급가 알림</h3>
+                    <p className="mt-1 text-xs text-slate-500">매일 오전 10시 자동으로 어드민/스프레드시트 단가를 확인합니다.</p>
+                  </div>
+                  <div className="max-h-96 overflow-y-auto p-3">
+                    {activeSupplierAlerts.length ? (
+                      activeSupplierAlerts.slice(0, 8).map((alert) => (
+                        <button
+                          key={`${alert.monitor_key}-${alert.id}`}
+                          onClick={() => {
+                            setAlertsOpen(false);
+                            handleNav('/#margin-defense');
+                          }}
+                          className="mb-2 w-full rounded-2xl border border-slate-100 bg-white p-3 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-black text-slate-900">
+                                {alert.product_name || alert.monitor_key}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {alert.supplier_name || '거래처'} · {new Date(alert.checked_at).toLocaleString('ko-KR')}
+                              </p>
+                            </div>
+                            <span className={`rounded-full px-2 py-1 text-[11px] font-black ${
+                              alert.status !== 'ok'
+                                ? 'bg-rose-100 text-rose-700'
+                                : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {alert.status !== 'ok' ? '오류' : `${alert.changed_items}건 변동`}
+                            </span>
+                          </div>
+                          {alert.status !== 'ok' ? (
+                            <p className="mt-2 line-clamp-2 text-xs text-rose-600">{alert.error_message}</p>
+                          ) : (
+                            <p className="mt-2 text-xs text-slate-600">
+                              상승 {alert.blue_count}건 · 하락 {alert.red_count}건 · 동일 {alert.same_count}건
+                            </p>
+                          )}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                        아직 확인할 공급가 변동 알림이 없습니다.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <button onClick={() => setAdminOpen(true)} className="p-2 text-slate-400 transition-all hover:text-amber-600">
               <Settings size={20} />

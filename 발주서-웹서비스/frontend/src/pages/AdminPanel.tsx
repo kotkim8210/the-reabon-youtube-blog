@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react';
-import { useUser } from '../App';
+import { isAuthDisabled, useUser } from '../App';
 import {
   fetchUsers, createUser, toggleUserActive,
   fetchBlockedIPs, blockIP, unblockIP,
@@ -8,6 +8,7 @@ import {
 
 function AdminPanel() {
   const { user } = useUser();
+  const canAccess = isAuthDisabled() || user?.role === 'admin';
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
   const [newUsername, setNewUsername] = useState('');
@@ -19,8 +20,10 @@ function AdminPanel() {
   const [tab, setTab] = useState<'users' | 'ips'>('users');
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (canAccess) {
+      loadData();
+    }
+  }, [canAccess]);
 
   const loadData = async () => {
     try {
@@ -32,7 +35,7 @@ function AdminPanel() {
     }
   };
 
-  if (user?.role !== 'admin') {
+  if (!canAccess) {
     return (
       <div className="p-8 text-center text-gray-500">
         관리자만 접근할 수 있습니다.

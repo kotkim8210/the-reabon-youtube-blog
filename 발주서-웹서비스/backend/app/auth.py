@@ -262,6 +262,15 @@ class GoogleTokenRequest(BaseModel):
     credential: str  # Google ID Token
 
 
+def _is_unverified_google_email(info: dict) -> bool:
+    verified = info.get("email_verified")
+    if verified is None:
+        return False
+    if isinstance(verified, bool):
+        return not verified
+    return str(verified).lower() not in {"true", "1", "yes"}
+
+
 @router.post("/kakao/token", response_model=TokenResponse)
 async def kakao_login(req: KakaoTokenRequest):
     """Exchange a Kakao access_token (from JS SDK) for an app JWT."""
@@ -301,6 +310,9 @@ async def google_login(req: GoogleTokenRequest):
     - An ID Token (credential from One Tap) → calls tokeninfo
     We detect by attempting userinfo first.
     """
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="구글 로그인이 아직 설정되지 않았습니다.")
+
     async with httpx.AsyncClient(timeout=5.0) as client:
         # Try as access_token (useGoogleLogin flow)
         resp = await client.get(
@@ -308,6 +320,16 @@ async def google_login(req: GoogleTokenRequest):
             headers={"Authorization": f"Bearer {req.credential}"},
         )
         if resp.status_code == 200:
+            if GOOGLE_CLIENT_ID:
+                token_info_resp = await client.get(
+                    "https://oauth2.googleapis.com/tokeninfo",
+                    params={"access_token": req.credential},
+                )
+                if token_info_resp.status_code != 200:
+                    raise HTTPException(status_code=401, detail="구글 토큰 검증 실패")
+                token_info = token_info_resp.json()
+                if token_info.get("aud") != GOOGLE_CLIENT_ID:
+                    raise HTTPException(status_code=401, detail="구글 클라이언트 ID 불일치")
             info = resp.json()
             google_id = info.get("sub")
         else:
@@ -325,6 +347,8 @@ async def google_login(req: GoogleTokenRequest):
 
     if not google_id:
         raise HTTPException(status_code=401, detail="구글 사용자 정보 없음")
+    if _is_unverified_google_email(info):
+        raise HTTPException(status_code=401, detail="인증되지 않은 구글 이메일입니다.")
 
     email = info.get("email")
     name = info.get("name") or info.get("given_name")

@@ -17,7 +17,7 @@ from app.order_automation_store import (
     list_order_batches,
     update_batch_sync_status,
 )
-from app.processors import danharu_order, danharu_tracking
+from app.processors import danharu_order, danharu_tracking, unified_tracking
 from app.quota import check_order_quota, record_order_usage
 from app.supabase_sync import supabase_enabled, sync_batch_to_supabase
 
@@ -150,24 +150,68 @@ async def process_danharu(
 
 @router.post("/tracking/danharu")
 async def process_danharu_tracking(
-    reply_file: UploadFile = File(...),
+    reply_files: list[UploadFile] | None = File(default=None),
+    reply_file: UploadFile | None = File(default=None),
     delivery_file: UploadFile = File(...),
     user: dict = Depends(verify_token),
 ):
     del user
 
-    if not reply_file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="단하루 회신 파일은 엑셀만 업로드할 수 있습니다.")
-    if not delivery_file.filename.endswith((".xlsx", ".xls")):
+    all_reply_files = list(reply_files or [])
+    if reply_file is not None:
+        all_reply_files.append(reply_file)
+
+    if not all_reply_files:
+        raise HTTPException(status_code=400, detail="단하루 회신 파일을 1개 이상 업로드해 주세요.")
+    for f in all_reply_files:
+        if not (f.filename or "").endswith((".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail=f"단하루 회신 파일은 엑셀만 업로드할 수 있습니다: {f.filename}")
+    if not (delivery_file.filename or "").endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="DeliveryList는 엑셀 파일만 업로드할 수 있습니다.")
 
-    reply_bytes = await reply_file.read()
+    reply_bytes_list = [await f.read() for f in all_reply_files]
     delivery_bytes = await delivery_file.read()
 
     try:
-        output_bytes, filename, stats = danharu_tracking.process(reply_bytes, delivery_bytes)
+        output_bytes, filename, stats = danharu_tracking.process(reply_bytes_list, delivery_bytes)
         return _download_response(output_bytes, filename, stats)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive API guard
         raise HTTPException(status_code=500, detail=f"운송장 입력 중 오류가 발생했습니다: {exc}") from exc
+
+
+@router.post("/tracking/unified")
+async def process_unified_tracking(
+    reply_files: list[UploadFile] | None = File(default=None),
+    reply_file: UploadFile | None = File(default=None),
+    delivery_file: UploadFile = File(...),
+    user: dict = Depends(verify_token),
+):
+    del user
+
+    all_reply_files = list(reply_files or [])
+    if reply_file is not None:
+        all_reply_files.append(reply_file)
+
+    if not all_reply_files:
+        raise HTTPException(status_code=400, detail="회신/송장 파일을 1개 이상 업로드해 주세요.")
+    for f in all_reply_files:
+        if not (f.filename or "").endswith((".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail=f"회신/송장 파일은 엑셀만 업로드할 수 있습니다: {f.filename}")
+    if not (delivery_file.filename or "").endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="DeliveryList는 엑셀 파일만 업로드할 수 있습니다.")
+
+    reply_bytes_list = [
+        (f.filename or f"reply_{index + 1}.xlsx", await f.read())
+        for index, f in enumerate(all_reply_files)
+    ]
+    delivery_bytes = await delivery_file.read()
+
+    try:
+        output_bytes, filename, stats = unified_tracking.process(reply_bytes_list, delivery_bytes)
+        return _download_response(output_bytes, filename, stats)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive API guard
+        raise HTTPException(status_code=500, detail=f"통합 운송장 입력 중 오류가 발생했습니다: {exc}") from exc

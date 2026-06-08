@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 interface FileUploadProps {
   label: string;
   accept?: string;
+  acceptLabel?: string;
   onFileSelect: (file: File) => void;
   file: File | null;
 }
@@ -10,6 +11,7 @@ interface FileUploadProps {
 function FileUpload({
   label,
   accept = '.xlsx,.xls',
+  acceptLabel = '.xlsx, .xls 파일',
   onFileSelect,
   file,
 }: FileUploadProps) {
@@ -151,7 +153,7 @@ function FileUpload({
               <span className="text-indigo-600 font-semibold">드래그</span>
               하세요
             </p>
-            <p className="text-xs text-gray-400 mt-1">.xlsx, .xls 파일</p>
+            <p className="text-xs text-gray-400 mt-1">{acceptLabel}</p>
           </div>
         )}
       </div>

@@ -35,6 +35,13 @@ def convert_quantity(option_text: str) -> str | None:
     return mapping.get(weight)
 
 
+def clear_stray_header_numbers(ws) -> None:
+    for col in range(14, ws.max_column + 1):
+        cell = ws.cell(row=1, column=col)
+        if cell.value in (6, "6"):
+            cell.value = None
+
+
 def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict] | None:
     dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes), data_only=True)
     dl_ws = dl_wb.active
@@ -62,6 +69,7 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict] | None:
     for name in tmpl_wb.sheetnames[1:]:
         del tmpl_wb[name]
     ws = tmpl_wb[first_sheet_name]
+    clear_stray_header_numbers(ws)
 
     font11 = Font(size=11)
 
@@ -104,11 +112,37 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict] | None:
             cell = ws.cell(row=out_row, column=col, value=value)
             cell.font = font11
 
+    option_totals: dict[str, dict] = {}
+    for row, product_name in filtered_rows:
+        option = normalize(row[11].value) if len(row) > 11 else product_name
+        qty_value = row[22].value if len(row) > 22 else 1
+        order_no = normalize(row[2].value) if len(row) > 2 else ""
+        try:
+            qty_int = int(qty_value) if qty_value else 1
+        except (TypeError, ValueError):
+            qty_int = 1
+        bucket = option_totals.setdefault(
+            option,
+            {
+                "coupang_option_keyword": option,
+                "vendor_option_name": product_name,
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order_no:
+            bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
     output = BytesIO()
     tmpl_wb.save(output)
     output.seek(0)
 
     now = datetime.now(KST)
     filename = f"제주다팜 성주 알뜰참외 발주_아이티소프트_({now.strftime('%Y%m%d')}).xlsx"
-    stats = {"total": len(filtered_rows), "product": "성주참외 혼합(알뜰)과"}
+    stats = {
+        "total": len(filtered_rows),
+        "product": "성주참외 알뜰과(제주다팜)",
+        "options": list(option_totals.values()),
+    }
     return output.read(), filename, stats

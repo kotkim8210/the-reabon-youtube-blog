@@ -71,7 +71,7 @@ const VENDORS: VendorConfig[] = [
     id: 'kolrabi',
     toolId: 'tracking-input',
     preferenceIds: ['kolrabi-unified'],
-    label: '콜라비+성주참외 혼합(알뜰)과',
+    label: '콜라비+성주참외 알뜰과',
     icon: '🥬',
     color: {
       border: 'border-blue-200',
@@ -87,7 +87,7 @@ const VENDORS: VendorConfig[] = [
     id: 'tomato',
     toolId: 'tomato-tracking',
     preferenceIds: ['tomato-unified'],
-    label: '대저토마토·성주참외(중소/로얄)·남해땅두릅',
+    label: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박',
     icon: '🍅🥒🌿',
     color: {
       border: 'border-red-200',
@@ -95,7 +95,7 @@ const VENDORS: VendorConfig[] = [
       badge: 'bg-red-100 text-red-700',
     },
     files: [
-      { key: 'tomato_reply', label: '대저토마토·성주참외(중소/로얄) 회신 파일' },
+      { key: 'tomato_reply', label: '제이비티 회신 파일' },
       { key: 'delivery', label: 'DeliveryList 파일' },
     ],
   },
