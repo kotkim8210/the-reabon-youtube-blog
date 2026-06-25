@@ -317,7 +317,7 @@ def _parse_temu_order_sheet(ws, source_label: str) -> list[dict]:
         recipient = _row_text(ws, row_idx, columns, "수령인 이름")
         phone = _normalize_phone(_row_text(ws, row_idx, columns, "수령인 전화번호"))
         zipcode, address = _temu_excel_address(ws, row_idx, columns)
-        order_product_id = _row_text(ws, row_idx, columns, "주문 상품 ID")
+        order_product_id = _row_text(ws, row_idx, columns, "주문 상품 ID", "상품 주문 ID")
 
         missing = []
         if not recipient:

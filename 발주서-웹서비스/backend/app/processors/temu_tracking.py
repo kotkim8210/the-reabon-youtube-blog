@@ -34,6 +34,7 @@ SHIP_FROM = "식품애착"           # 배송 출발지(테무 배송설정 등�
 CARRIER_SMALL = "롯데택배"       # 2/3/5kg (쥬얼리프룻)
 CARRIER_LARGE = "롯데택배"       # 6/7/8kg — 2026-06부터 제이비티→쥬얼리프룻 발주 전환, 기본 롯데
                                   # (실제 송장파일에 택배사가 있으면 그 값이 우선 적용됨)
+CARRIER_HANJIN = "한진택배"      # 송장파일에 '한진'이 명시된 건(예: 고구마 해달 발주)은 그대로 한진으로 등록
 SMALL_KGS = {2, 3, 5}
 LARGE_KGS = {6, 7, 8}
 
@@ -81,7 +82,7 @@ def _temu_carrier_name(value) -> str:
     if not compact:
         return ""
     if "한진" in compact or "hanjin" in compact:
-        return CARRIER_LARGE
+        return CARRIER_HANJIN
     if "롯데" in compact or "lotte" in compact:
         return CARRIER_SMALL
     if "cj" in compact or "대한통운" in compact:
@@ -131,11 +132,13 @@ def _read_temu_export_rows(order_bytes: bytes, filename: str = "") -> list[tuple
 def _parse_temu_export(order_bytes: bytes, filename: str = "") -> list[dict]:
     rows = _read_temu_export_rows(order_bytes, filename)
 
-    # 헤더 행 탐색 ('주문 ID' + '주문 상품 ID' 동시 포함)
+    # 헤더 행 탐색 ('주문 ID' + 항목ID '주문 상품 ID' 동시 포함)
+    # ※ 항목ID 헤더는 파일형식마다 단어순서가 다름: xlsx='주문 상품 ID', csv 내보내기='상품 주문 ID'.
+    #   둘 다 수용해야 CSV order_export 가 거부되지 않는다.
     header_idx = None
     for i, row in enumerate(rows[:20]):
         labels = {_norm(c) for c in row if c is not None}
-        if "주문ID" in labels and "주문상품ID" in labels:
+        if "주문ID" in labels and ("주문상품ID" in labels or "상품주문ID" in labels):
             header_idx = i
             break
     if header_idx is None:
@@ -163,7 +166,7 @@ def _parse_temu_export(order_bytes: bytes, filename: str = "") -> list[dict]:
     orders: list[dict] = []
     for row in rows[header_idx + 1:]:
         order_id = _norm(g(row, "주문 ID"))
-        item_id = _norm(g(row, "주문 상품 ID"))
+        item_id = _norm(g(row, "주문 상품 ID", "상품 주문 ID"))
         if not order_id and not item_id:
             continue
 
