@@ -19,7 +19,11 @@ from app.processors.tracking_match import (
     requires_option_guard,
 )
 from app.processors.goguma_order import transform_toss_option as normalize_goguma_toss_option
-from app.processors.haedal_tracking_parser import detect_haedal_columns, find_tracking_in_row
+from app.processors.haedal_tracking_parser import (
+    detect_haedal_columns,
+    find_courier_in_row,
+    find_tracking_in_row,
+)
 from app.toss.client import toss_client
 
 logger = logging.getLogger(__name__)
@@ -28,6 +32,27 @@ KST = timezone(timedelta(hours=9))
 GOGUMA_KEYWORDS = ["고구마", "꿀고구마"]
 TOSS_DELIVERY_COMPANY = "한진택배"
 TRACKABLE_TOSS_STATUSES = {"PAID", "PREPARING_PRODUCT", "DELIVERING"}
+
+
+def normalize_toss_courier(name: object) -> str:
+    """택배사명을 토스가 인식하는 정식명으로 정규화. (해달 파일이 '한진'처럼 약식으로 적어도)
+
+    토스 deliveryCompany는 정식 택배사명을 요구한다. '한진' → '한진택배' 처럼 맞춰야 등록된다.
+    """
+    compact = re.sub(r"\s+", "", str(name or "")).lower()
+    if not compact:
+        return TOSS_DELIVERY_COMPANY
+    if "대한통운" in compact or compact.startswith("cj"):
+        return "CJ대한통운"
+    if "한진" in compact:
+        return "한진택배"
+    if "롯데" in compact or "현대" in compact:
+        return "롯데택배"
+    if "우체국" in compact or "epost" in compact:
+        return "우체국택배"
+    if "로젠" in compact or "logen" in compact:
+        return "로젠택배"
+    return str(name).strip() or TOSS_DELIVERY_COMPANY
 
 
 def normalize(value) -> str:
@@ -231,15 +256,36 @@ def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
 
         tracking = find_tracking_in_row(ws, row_idx, cols.tracking)
         if tracking:
+            skip_cols = tuple(
+                c for c in (cols.name, cols.phone, cols.address, cols.product, cols.tracking) if c
+            )
+            courier = find_courier_in_row(ws, row_idx, cols.courier, skip_cols)
             entries.append({
                 "name": name,
                 "phone": phone,
                 "address": address,
                 "tracking": tracking,
+                "courier": courier,
                 "option_keys": option_key_set(product, transform_toss_option("", str(product or ""))),
             })
 
     return entries
+
+
+def _masked_name_match(masked: str, full_names) -> list[str]:
+    """토스가 가린 수취인명('정*순')을 해달 풀네임('정정순')과 매칭.
+
+    같은 글자수이고 '*' 위치를 뺀 나머지 글자가 모두 일치하면 같은 사람으로 본다.
+    토스 Shopping API는 일부 주문의 receiverName을 별표로 가려서 내려준다.
+    """
+    if "*" not in masked:
+        return []
+    return [
+        name
+        for name in full_names
+        if len(name) == len(masked)
+        and all(m == "*" or m == c for m, c in zip(masked, name))
+    ]
 
 
 async def process_toss_tracking(haedal_bytes: bytes) -> dict:
@@ -359,6 +405,10 @@ async def process_toss_tracking(haedal_bytes: bytes) -> dict:
 
     for order in toss_orders:
         candidates = entry_by_name.get(order["name"], [])
+        # 토스가 수취인명을 가린 경우('정*순')에도 풀네임 해달 항목과 와일드카드 매칭
+        if not candidates and "*" in order["name"]:
+            for masked_name in _masked_name_match(order["name"], entry_by_name.keys()):
+                candidates = candidates + entry_by_name[masked_name]
         if not candidates:
             skip_count += 1
             results.append({
@@ -411,13 +461,13 @@ async def process_toss_tracking(haedal_bytes: bytes) -> dict:
             matched = available[0][1]
 
         used_entries.add(id(matched))
-        matched_pairs.append((order, matched["tracking"]))
+        matched_pairs.append((order, matched["tracking"], matched.get("courier") or ""))
 
     # 4. Register tracking numbers via Toss API
     success_count = 0
     fail_count = 0
 
-    for order, tracking in matched_pairs:
+    for order, tracking, courier in matched_pairs:
         order_product_id = order.get("order_product_id")
         if not order_product_id:
             fail_count += 1
@@ -430,10 +480,12 @@ async def process_toss_tracking(haedal_bytes: bytes) -> dict:
             })
             continue
 
+        # 해달 파일에 적힌 실제 택배사명 그대로 등록(CJ대한통운/한진택배 등). 없으면 기본값.
+        delivery_company = normalize_toss_courier(courier)
         try:
             resp = await toss_client.register_tracking(
                 order_product_id=order_product_id,
-                delivery_company=TOSS_DELIVERY_COMPANY,
+                delivery_company=delivery_company,
                 tracking_number=tracking,
             )
             success_count += 1

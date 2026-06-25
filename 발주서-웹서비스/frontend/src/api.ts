@@ -48,7 +48,10 @@ async function apiGet<T>(path: string): Promise<T> {
     window.location.href = '/login';
     throw new Error('인증 만료');
   }
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: `API error: ${res.status}` }));
+    throw new Error(apiErrorMessage(data.detail, `API error: ${res.status}`));
+  }
   return res.json();
 }
 
@@ -63,7 +66,10 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
     window.location.href = '/login';
     throw new Error('인증 만료');
   }
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: `API error: ${res.status}` }));
+    throw new Error(apiErrorMessage(data.detail, `API error: ${res.status}`));
+  }
   return res.json();
 }
 
@@ -166,6 +172,43 @@ export const blockIP = (ip_address: string, user_id?: number, reason?: string) =
   apiPost<{ status: string; id: number }>('/admin/blocked-ips', { ip_address, user_id, reason });
 export const unblockIP = (blockId: number) =>
   apiDelete<{ status: string }>(`/admin/blocked-ips/${blockId}`);
+
+export async function downloadTemuKolrabiGoodsWorkbook(): Promise<ProcessResult> {
+  const res = await fetch(`${BASE_URL}/admin/temu/kolrabi-goods/download`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+    throw new Error('인증이 만료되었습니다.');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: '테무 콜라비 대량등록 엑셀 생성에 실패했습니다.' }));
+    throw new Error(apiErrorMessage(data.detail, '테무 콜라비 대량등록 엑셀 생성에 실패했습니다.'));
+  }
+
+  const blob = await res.blob();
+  const contentDisposition = res.headers.get('Content-Disposition') || '';
+  let filename = 'TEMU_콜라비_대량상품등록_작성본.xlsx';
+  const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
+  if (filenameMatch) {
+    filename = decodeURIComponent(filenameMatch[1]);
+  }
+
+  let stats: Record<string, unknown> | null = null;
+  const statsHeader = res.headers.get('X-Stats');
+  if (statsHeader) {
+    try {
+      stats = JSON.parse(statsHeader);
+    } catch {
+      stats = null;
+    }
+  }
+
+  return { blob, filename, stats };
+}
 
 // --- Tenant API ---
 
@@ -274,7 +317,7 @@ export async function processTenantOrder(deliveryFile: File): Promise<ProcessRes
       throw new Error('인증이 만료되었습니다.');
     }
     const data = await res.json().catch(() => ({ detail: '처리 중 오류가 발생했습니다.' }));
-    throw new Error(data.detail || '처리 중 오류가 발생했습니다.');
+    throw new Error(apiErrorMessage(data.detail, '처리 중 오류가 발생했습니다.'));
   }
 
   const blob = await res.blob();
@@ -299,7 +342,7 @@ export async function processTenantTracking(replyFiles: File[], deliveryFile: Fi
   });
   formData.append('delivery_file', deliveryFile);
 
-  const res = await fetch(`${BASE_URL}/automation/tracking/unified`, {
+  const res = await fetch(`${BASE_URL}/tenant/tracking`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,
@@ -355,6 +398,8 @@ export async function processFile(
     template: 'template_file',
     alwayz: 'alwayz_file',
     toss: 'toss_file',
+    toss_export: 'toss_export_file',
+    winners: 'winners_file',
     tracking: 'tracking_file',
     tracking2: 'tracking_file2',
     order_export: 'order_export_file',
@@ -385,7 +430,7 @@ export async function processFile(
       throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
     }
     const data = await res.json().catch(() => ({ detail: '처리 중 오류가 발생했습니다.' }));
-    throw new Error(data.detail || '처리 중 오류가 발생했습니다.');
+    throw new Error(apiErrorMessage(data.detail, '처리 중 오류가 발생했습니다.'));
   }
 
   const blob = await res.blob();
@@ -485,12 +530,13 @@ export async function mergeBatchTrackingResults(
 
 export async function processGogumaAuto(
   fromDate: string,
-  toDate: string
+  toDate: string,
+  includeToss = false
 ): Promise<ProcessResult> {
   const res = await fetch(`${BASE_URL}/process/goguma-auto`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from_date: fromDate, to_date: toDate }),
+    body: JSON.stringify({ from_date: fromDate, to_date: toDate, include_toss: includeToss }),
   });
 
   if (!res.ok) {
@@ -500,7 +546,7 @@ export async function processGogumaAuto(
       throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
     }
     const data = await res.json().catch(() => ({ detail: '처리 중 오류가 발생했습니다.' }));
-    throw new Error(data.detail || '처리 중 오류가 발생했습니다.');
+    throw new Error(apiErrorMessage(data.detail, '처리 중 오류가 발생했습니다.'));
   }
 
   const blob = await res.blob();
@@ -664,7 +710,7 @@ export async function processGogumaTrackingApi(
       throw new Error('인증이 만료되었습니다.');
     }
     const data = await res.json().catch(() => ({ detail: '처리 중 오류가 발생했습니다.' }));
-    throw new Error(data.detail || '처리 중 오류가 발생했습니다.');
+    throw new Error(apiErrorMessage(data.detail, '처리 중 오류가 발생했습니다.'));
   }
 
   return res.json();
@@ -689,7 +735,7 @@ export async function processTossOrder(
       throw new Error('인증이 만료되었습니다.');
     }
     const data = await res.json().catch(() => ({ detail: '처리 중 오류가 발생했습니다.' }));
-    throw new Error(data.detail || '처리 중 오류가 발생했습니다.');
+    throw new Error(apiErrorMessage(data.detail, '처리 중 오류가 발생했습니다.'));
   }
 
   const blob = await res.blob();
@@ -726,7 +772,7 @@ export async function processTossTrackingApi(
       throw new Error('인증이 만료되었습니다.');
     }
     const data = await res.json().catch(() => ({ detail: '처리 중 오류가 발생했습니다.' }));
-    throw new Error(data.detail || '처리 중 오류가 발생했습니다.');
+    throw new Error(apiErrorMessage(data.detail, '처리 중 오류가 발생했습니다.'));
   }
 
   return res.json();

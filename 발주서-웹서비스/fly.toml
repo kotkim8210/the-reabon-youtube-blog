@@ -6,9 +6,12 @@ primary_region = "nrt"
 [http_service]
   internal_port = 8000
   force_https = true
+  # 머신이 자동 정지되면 다음 요청 때 콜드스타트(~7초)가 발생하는데,
+  # 그 사이 운송장 등록 같은 긴 POST를 누르면 요청이 머신에 닿지 못해
+  # 프론트에 "Failed to fetch"로 보인다. 1대는 항상 켜둬서 콜드스타트를 없앤다.
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [env]
   DATABASE_PATH = "/data/suyikolla.db"

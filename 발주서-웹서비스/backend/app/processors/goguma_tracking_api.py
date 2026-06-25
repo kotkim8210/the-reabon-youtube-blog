@@ -11,9 +11,13 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from app.coupang.client import coupang_client
+from app.coupang.client import coupang_goguma_client
 from app.processors.goguma_order import transform_option
-from app.processors.haedal_tracking_parser import detect_haedal_columns, find_tracking_in_row
+from app.processors.haedal_tracking_parser import (
+    detect_haedal_columns,
+    find_courier_in_row,
+    find_tracking_in_row,
+)
 from app.processors.tracking_match import (
     name_counts,
     option_key_set,
@@ -25,7 +29,27 @@ logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 
 GOGUMA_KEYWORDS = ["고구마", "꿀고구마"]
-DELIVERY_COMPANY_CODE = "HANJIN"
+DELIVERY_COMPANY_CODE = "HANJIN"  # 기본(해달은 보통 한진). 파일에 택배사가 명시되면 그걸 우선.
+
+# 택배사명 → 쿠팡 deliveryCompanyCode. 미인식 시 기본(한진).
+_COURIER_NAME_TO_CODE: list[tuple[tuple[str, ...], str]] = [
+    (("대한통운", "cj"), "CJGLS"),
+    (("한진",), "HANJIN"),
+    (("롯데", "현대"), "HYUNDAI"),   # 롯데택배 = 쿠팡 코드 HYUNDAI(구 현대택배)
+    (("우체국", "epost"), "EPOST"),
+    (("로젠", "logen"), "KGB"),
+]
+
+
+def courier_code(name: object, default: str = DELIVERY_COMPANY_CODE) -> str:
+    """택배사명 문자열 → 쿠팡 deliveryCompanyCode. 못 알아보면 기본값."""
+    compact = re.sub(r"\s+", "", str(name or "")).lower()
+    if not compact:
+        return default
+    for keys, code in _COURIER_NAME_TO_CODE:
+        if any(k in compact for k in keys):
+            return code
+    return default
 
 
 def normalize(value: object) -> str:
@@ -59,12 +83,17 @@ def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
 
         tracking = find_tracking_in_row(ws, row_idx, cols.tracking)
         if tracking:
+            skip_cols = tuple(
+                c for c in (cols.name, cols.phone, cols.address, cols.product, cols.tracking) if c
+            )
+            courier_name = find_courier_in_row(ws, row_idx, cols.courier, skip_cols)
             entries.append(
                 {
                     "name": name,
                     "phone": phone,
                     "address": address,
                     "tracking": tracking,
+                    "delivery_company_code": courier_code(courier_name),
                     "option_keys": option_key_set(product, transform_option(str(product or ""))),
                 }
             )
@@ -84,7 +113,7 @@ async def _fetch_orders_by_status(order_status: str, from_date: str, to_date: st
     next_token = None
 
     while True:
-        result = await coupang_client.get_order_sheets(
+        result = await coupang_goguma_client.get_order_sheets(
             created_at_from=from_date,
             created_at_to=to_date,
             order_status=order_status,
@@ -156,7 +185,7 @@ async def fetch_pending_orders() -> list[dict]:
     if accept_shipment_box_ids:
         logger.info("결제완료 주문 %s건 자동 확인 처리 시작", len(accept_shipment_box_ids))
         try:
-            confirm_result = await coupang_client.confirm_orders(accept_shipment_box_ids)
+            confirm_result = await coupang_goguma_client.confirm_orders(accept_shipment_box_ids)
             code = (confirm_result or {}).get("code")
             if code in (200, "200", 0):
                 logger.info("쿠팡 주문 확인 성공: %s건", len(accept_shipment_box_ids))
@@ -280,6 +309,7 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
             continue
 
         used_entries.add(id(matched))
+        order["delivery_code"] = matched.get("delivery_company_code") or DELIVERY_COMPANY_CODE
         matched_pairs.append((order, matched["tracking"]))
         if matched_via_phone_only:
             matched_via_phone[id(order)] = matched["name"]
@@ -293,7 +323,7 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
                 "shipmentBoxId": order["shipment_box_id"],
                 "orderId": order["order_id"],
                 "vendorItemId": order["vendor_item_id"],
-                "deliveryCompanyCode": DELIVERY_COMPANY_CODE,
+                "deliveryCompanyCode": order.get("delivery_code") or DELIVERY_COMPANY_CODE,
                 "invoiceNumber": tracking,
             }
             for order, tracking in pairs
@@ -362,7 +392,7 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
     async def _upload_and_parse(pairs: list[tuple[dict, str]]):
         dtos = _build_dtos(pairs)
         try:
-            api_result = await coupang_client.upload_invoices(dtos)
+            api_result = await coupang_goguma_client.upload_invoices(dtos)
             logger.info("쿠팡 송장업로드 API 응답: %s", api_result)
         except Exception as exc:
             logger.error("쿠팡 송장업로드 API 오류: %s", exc)
@@ -431,7 +461,7 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
         if retry_pairs:
             logger.info("상태 전이 의심 %s건 재시도 시작", len(retry_pairs))
             try:
-                confirm_result = await coupang_client.confirm_orders(retry_boxes)
+                confirm_result = await coupang_goguma_client.confirm_orders(retry_boxes)
                 logger.info("재시도용 주문 확인 응답: %s", confirm_result)
             except Exception as exc:
                 logger.error("재시도용 주문 확인 실패: %s", exc)

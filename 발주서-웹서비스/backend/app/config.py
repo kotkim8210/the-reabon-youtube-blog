@@ -10,13 +10,29 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24 * 7  # 7 days
 
 # Coupang Open API
+# 기본 COUPANG_* 값은 기존/공용 계정 호환용으로 유지한다.
 COUPANG_VENDOR_ID = os.getenv("COUPANG_VENDOR_ID", "")
 COUPANG_ACCESS_KEY = os.getenv("COUPANG_ACCESS_KEY", "")
 COUPANG_SECRET_KEY = os.getenv("COUPANG_SECRET_KEY", "")
 
+# 고구마는 별도 쿠팡 계정으로 운영한다. 없으면 기존 COUPANG_*으로 fallback.
+COUPANG_GOGUMA_VENDOR_ID = os.getenv("COUPANG_GOGUMA_VENDOR_ID") or COUPANG_VENDOR_ID
+COUPANG_GOGUMA_ACCESS_KEY = os.getenv("COUPANG_GOGUMA_ACCESS_KEY") or COUPANG_ACCESS_KEY
+COUPANG_GOGUMA_SECRET_KEY = os.getenv("COUPANG_GOGUMA_SECRET_KEY") or COUPANG_SECRET_KEY
+
+# 과일/농수산물 공용 쿠팡 계정. 없으면 기존 COUPANG_*으로 fallback.
+COUPANG_PRODUCE_VENDOR_ID = os.getenv("COUPANG_PRODUCE_VENDOR_ID") or COUPANG_VENDOR_ID
+COUPANG_PRODUCE_ACCESS_KEY = os.getenv("COUPANG_PRODUCE_ACCESS_KEY") or COUPANG_ACCESS_KEY
+COUPANG_PRODUCE_SECRET_KEY = os.getenv("COUPANG_PRODUCE_SECRET_KEY") or COUPANG_SECRET_KEY
+
 # Toss Shopping API
-TOSS_ACCESS_KEY = os.getenv("TOSS_ACCESS_KEY", "")
-TOSS_SECRET_KEY = os.getenv("TOSS_SECRET_KEY", "")
+# 새 로컬 자동화는 TOSS_CLIENT_ID/SECRET을 쓰고, 기존 웹서비스는 TOSS_ACCESS/SECRET을 썼다.
+# 둘 다 지원해서 배포 시크릿 이름 차이로 주문 조회가 깨지지 않게 한다.
+TOSS_ACCESS_KEY = os.getenv("TOSS_ACCESS_KEY") or os.getenv("TOSS_CLIENT_ID", "")
+TOSS_SECRET_KEY = os.getenv("TOSS_SECRET_KEY") or os.getenv("TOSS_CLIENT_SECRET", "")
+TOSS_API_BASE_URL = os.getenv("TOSS_API_BASE_URL", "https://shopping-fep.toss.im").rstrip("/")
+TOSS_OAUTH_TOKEN_URL = os.getenv("TOSS_OAUTH_TOKEN_URL", "https://oauth2.cert.toss.im/token")
+TOSS_OAUTH_SCOPE = os.getenv("TOSS_OAUTH_SCOPE", "toss-shopping-fep:read toss-shopping-fep:write")
 
 # Database
 DATABASE_PATH = os.getenv("DATABASE_PATH", "/data/suyikolla.db")

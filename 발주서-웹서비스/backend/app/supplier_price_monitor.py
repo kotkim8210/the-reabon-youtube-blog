@@ -36,6 +36,10 @@ GOOGLE_SHEET_JEWELRYFRUIT_KG_CSV = (
     "https://docs.google.com/spreadsheets/d/1Gb8feRt2FCCG0fpmhPKXcW1l061OefDD5UIejOhjcxY/gviz/tq"
     "?tqx=out:csv&gid=1831570299"
 )
+GOOGLE_SHEET_JEWELRYFRUIT_PEACH_CSV = (
+    "https://docs.google.com/spreadsheets/d/1Gb8feRt2FCCG0fpmhPKXcW1l061OefDD5UIejOhjcxY/gviz/tq"
+    "?tqx=out:csv&gid=1567728493"
+)
 
 PRICE_SIGNAL_STYLE = {
     "blue": {
@@ -73,11 +77,12 @@ class SupplierMonitorConfig:
     template_path: Path
     output_prefix: str
     options: tuple[SupplierOptionConfig, ...]
-    source_type: Literal["adminplus", "google_sheet"] = "adminplus"
+    source_type: Literal["adminplus", "google_sheet", "manual"] = "adminplus"
     output_suffix: str = ""
     output_name_pattern: str | None = None
     base_url: str | None = None
     search_value: str | None = None
+    product_code: str | None = None  # 설정 시 이름검색 대신 이 상품코드를 직접 사용(동명이상품 오매칭 방지)
     sheet_csv_url: str | None = None
     sheet_product_name: str | None = None
     sheet_product_column: str = "D"
@@ -87,6 +92,7 @@ class SupplierMonitorConfig:
     sheet_price_fallback_column: str | None = None
     sheet_previous_column: str | None = None
     skip_missing_options: bool = False
+    active_until: str | None = None  # 'YYYY-MM-DD' 이후 자동 만료(한시 모니터)
 
     @property
     def login_url(self) -> str:
@@ -150,6 +156,31 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("애플초당옥수수 특품 10개", "애플초당옥수수(특품) 10개", 17, sheet_name="쥬얼리프룻"),
             SupplierOptionConfig("애플초당옥수수 특품 15개", "애플초당옥수수(특품) 15개", 18, sheet_name="쥬얼리프룻"),
             SupplierOptionConfig("애플초당옥수수 특품 20개", "애플초당옥수수(특품) 20개", 19, sheet_name="쥬얼리프룻"),
+        ),
+    ),
+    "potato-jewelry": SupplierMonitorConfig(
+        key="potato-jewelry",
+        source_type="google_sheet",
+        supplier_name="쥬얼리프룻",
+        product_name="햇 홍감자",
+        sheet_csv_url=GOOGLE_SHEET_JEWELRYFRUIT_KG_CSV,
+        sheet_product_name="햇 홍감자",
+        sheet_product_column="E",
+        sheet_option_column="F",
+        sheet_vip_column="I",
+        sheet_price_fallback_column="G",
+        sheet_previous_column="G",
+        template_path=TEMPLATE_DIR / "홍감자_쥬얼리프룻_소싱현황_원본.xlsx",
+        output_prefix="홍감자_쥬얼리프룻_V1",
+        output_name_pattern="홍감자 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
+        skip_missing_options=True,
+        options=(
+            # 현재 쿠팡 판매 5종(1kg중·3kg중·3kg대·5kg중·5kg대) = 쥬얼리 시트 등급+kg. 공급가는 시트 가격(G/I).
+            SupplierOptionConfig("홍감자 1kg 중", "중 1kg", 8, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("홍감자 3kg 중", "중 3kg", 9, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("홍감자 3kg 대", "대 3kg", 10, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("홍감자 5kg 중", "중 5kg", 11, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("홍감자 5kg 대", "대 5kg", 12, sheet_name="쥬얼리프룻"),
         ),
     ),
     "kolrabi": SupplierMonitorConfig(
@@ -258,6 +289,66 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("하우스수박 상품 8kg 이상", "하우스수박(상품)8kg이상", 12),
         ),
     ),
+    "watermelon-jewelry": SupplierMonitorConfig(
+        key="watermelon-jewelry",
+        source_type="manual",
+        supplier_name="쥬얼리프룻",
+        product_name="망고수박",
+        template_path=TEMPLATE_DIR / "망고수박_쥬얼리프룻_소싱현황_원본.xlsx",
+        output_prefix="망고수박_쥬얼리프룻_V3",
+        output_name_pattern="망고수박 소싱현황관리(쥬얼리)_V3_{date}.xlsx",
+        skip_missing_options=True,
+        options=(
+            SupplierOptionConfig("망고수박 가정용 2kg", "수박 가정용 2~3kg 내외 (2kg)", 8, sheet_name="제이비티"),
+            SupplierOptionConfig("망고수박 가정용 3kg", "수박 가정용 3~4kg 내외 (3kg)", 9, sheet_name="제이비티"),
+            SupplierOptionConfig("망고수박 가정용 5kg", "수박 가정용 4~5kg내외(5kg)", 10, sheet_name="제이비티"),
+            SupplierOptionConfig("망고수박 가정용 6kg", "수박 가정용 5~6kg내외(6kg)", 11, sheet_name="제이비티"),
+        ),
+    ),
+    # ── 신비복숭아 한시 모니터 (2026-06-15 ~ 2026-06-29, 2주) ──
+    "peach-jewelry": SupplierMonitorConfig(
+        key="peach-jewelry",
+        source_type="google_sheet",
+        supplier_name="쥬얼리프룻",
+        product_name="신비복숭아",
+        sheet_csv_url=GOOGLE_SHEET_JEWELRYFRUIT_PEACH_CSV,
+        sheet_product_name="신비 복숭아",
+        sheet_product_column="E",
+        sheet_option_column="F",
+        sheet_vip_column="I",            # 변경단가(VIP) 우선
+        sheet_price_fallback_column="G",  # 비어있으면 일반공급가
+        sheet_previous_column="G",
+        template_path=TEMPLATE_DIR / "신비복숭아_쥬얼리프룻_소싱현황_원본.xlsx",
+        output_prefix="신비복숭아_쥬얼리프룻_V1",
+        output_name_pattern="신비복숭아 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
+        active_until="2026-06-29",
+        skip_missing_options=True,
+        options=(
+            # 쥬얼리 구글시트(gid=1567728493) 신비 복숭아 옵션(F열)의 변경단가(I열). 쿠팡 판매 4종, 소싱현황 행순서.
+            SupplierOptionConfig("신비복숭아 1kg 중소과", "1kg (15과 내외)", 8),
+            SupplierOptionConfig("신비복숭아 2kg 중소과", "2kg (30과 내외)", 9),
+            SupplierOptionConfig("신비복숭아 1kg 대과", "1kg (11과 내외)", 10),
+            SupplierOptionConfig("신비복숭아 2kg 대과", "2kg (22과 내외)", 11),
+        ),
+    ),
+    "peach-jbt": SupplierMonitorConfig(
+        key="peach-jbt",
+        source_type="google_sheet",
+        supplier_name="제이비티",
+        product_name="신비복숭아",
+        sheet_csv_url=GOOGLE_SHEET_JBT_FRUIT_CSV,
+        sheet_product_name="복숭아",
+        template_path=TEMPLATE_DIR / "신비복숭아_제이비티_소싱현황_원본.xlsx",
+        output_prefix="신비복숭아_제이비티_V1",
+        output_name_pattern="신비복숭아 소싱현황관리(제이비티)_V1_{date}.xlsx",
+        active_until="2026-06-29",
+        skip_missing_options=True,
+        options=(
+            # 제이비티 발주 신비복숭아 3·4kg은 중소과. 시트에 등급별로 있어 '중소과'로 특정해야 매칭됨.
+            SupplierOptionConfig("신비복숭아 3kg 중소과", "신비복숭아 3kg 중소과", 8, sheet_name="제이비티"),
+            SupplierOptionConfig("신비복숭아 4kg 중소과", "신비복숭아 4kg 중소과", 9, sheet_name="제이비티"),
+        ),
+    ),
     "dureup-jbt": SupplierMonitorConfig(
         key="dureup-jbt",
         source_type="google_sheet",
@@ -276,7 +367,8 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
     ),
 }
 
-PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt"}
+# watermelon-jbt(수박)·chamoe-jbt(성주참외)는 발주처가 제이비티→쥬얼리로 이전돼 무용 → 일시중지(숨김)
+PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt"}
 
 MONITOR_CONFIGS["dureup-jbt"] = replace(
     MONITOR_CONFIGS["dureup-jbt"],
@@ -719,12 +811,14 @@ def _patch_workbook_values(config: SupplierMonitorConfig, updates: list[tuple[st
 
 
 async def _collect_supplier_prices(config: SupplierMonitorConfig) -> tuple[dict[str, int], dict[str, int]]:
+    if config.source_type == "manual":
+        return {}, {}
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         if config.source_type == "google_sheet":
             return await _fetch_google_sheet_prices(client, config)
 
         await _login(client, config)
-        product_code = await _find_product_code(client, config)
+        product_code = config.product_code or await _find_product_code(client, config)
         return await _fetch_adminplus_prices(client, config, product_code), {}
 
 
@@ -736,20 +830,39 @@ def _find_monitor_config(key: str) -> SupplierMonitorConfig | None:
     return None
 
 
+def is_supplier_monitor_expired(config: SupplierMonitorConfig | None, *, today: str | None = None) -> bool:
+    """한시 모니터(active_until)가 만료됐는지. (오늘 > active_until)"""
+    if not config or not config.active_until:
+        return False
+    current = today or datetime.now(KST).date().isoformat()
+    return current > config.active_until
+
+
 def is_supplier_monitor_paused(key: str) -> bool:
     config = _find_monitor_config(key)
     monitor_key = config.key if config else key.replace("_", "-")
-    return monitor_key in PAUSED_SUPPLIER_MONITOR_KEYS
+    if monitor_key in PAUSED_SUPPLIER_MONITOR_KEYS:
+        return True
+    # 한시 모니터 만료 시 일시중지와 동일 취급
+    return is_supplier_monitor_expired(config)
 
 
 def active_supplier_monitor_keys() -> tuple[str, ...]:
-    return tuple(key for key in MONITOR_CONFIGS if key not in PAUSED_SUPPLIER_MONITOR_KEYS)
+    return tuple(
+        key
+        for key, config in MONITOR_CONFIGS.items()
+        if key not in PAUSED_SUPPLIER_MONITOR_KEYS and not is_supplier_monitor_expired(config)
+    )
 
 
 async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
     config = _find_monitor_config(key)
     if not config:
         raise SupplierMonitorError(f"지원하지 않는 공급가 모니터입니다: {key}")
+    if is_supplier_monitor_expired(config):
+        raise SupplierMonitorError(
+            f"{config.product_name} 공급가 모니터링은 한시 운영 기간(~{config.active_until})이 만료되었습니다."
+        )
     if is_supplier_monitor_paused(config.key):
         raise SupplierMonitorError(f"{config.product_name} 공급가 모니터링은 품절로 일시중지 중입니다.")
 
@@ -780,8 +893,21 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
         editable_ws = _select_sheet(editable_wb, option.sheet_name)
         data_ws = _select_sheet(data_wb, option.sheet_name)
         cell_ref = f"{option.cell}{option.row}"
-        workbook_price = _parse_price(data_ws[cell_ref].value)
+        try:
+            workbook_price = _parse_price(data_ws[cell_ref].value)
+        except SupplierMonitorError:
+            # 공급가가 '예정' 등 비숫자면 skip 허용 모니터는 조용히 건너뜀 (불필요한 오류 방지)
+            if config.skip_missing_options:
+                logger.info(
+                    "Skip non-numeric workbook price for %s: %s (%r)",
+                    config.key, option.supplier_option_name, data_ws[cell_ref].value,
+                )
+                continue
+            raise
         supplier_price = _supplier_price_lookup(supplier_prices, option.supplier_option_name)
+        # manual 모니터: 외부 수집값이 없으므로 템플릿에 적힌 공급가를 그대로 사용
+        if supplier_price is None and config.source_type == "manual":
+            supplier_price = workbook_price
         if supplier_price is None:
             if config.skip_missing_options:
                 logger.info(

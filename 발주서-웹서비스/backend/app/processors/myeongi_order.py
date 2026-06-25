@@ -28,6 +28,255 @@ def is_apple_corn_order(product_name: object, option_text: object) -> bool:
     return "애플초당옥수수" in text or ("애플" in text and "초당옥수수" in text)
 
 
+# 망고수박 = 블랙망고수박(동일 상품). 일반수박(tomato_order)과는 반드시 구분.
+# 발주 품목명은 '블랙망고수박 {kg}kg'로 통일(_blackmango_label) — 아래 테이블은 더 이상
+# 출력에 쓰지 않으며, supplier_price_monitor.py(제이비티 망고수박 마진방어)의 소싱현황
+# 옵션명과 병렬 참조용으로만 남겨둔다.
+MANGO_WATERMELON_VENDOR_OPTIONS = {
+    "2": "수박 가정용 2~3kg 내외 (2kg)",
+    "3": "수박 가정용 3~4kg 내외 (3kg)",
+    "5": "수박 가정용 4~5kg내외(5kg)",
+    "6": "수박 가정용 5~6kg내외(6kg)",
+}
+
+
+def is_mango_watermelon_order(product_name: object, option_text: object) -> bool:
+    # 일반 망고수박 = 블랙망고수박 (동일 상품). '망고 수박'처럼 띄어써도 잡도록 공백 무시.
+    text = _combined_text(product_name, option_text).replace(" ", "")
+    return "망고수박" in text
+
+
+def _extract_kg(field: object) -> str:
+    """한 필드(상품명 또는 옵션명)에서 'Nkg'/'N.Nkg' 무게를 추출. 없으면 ''."""
+    m = re.search(r"(\d+(?:\.\d+)?)\s*kg", str(field or ""), re.IGNORECASE)
+    return _fmt_kg(m.group(1)) if m else ""
+
+
+def _blackmango_label(product_name: object, option_text: object) -> str:
+    """블랙망고수박 → '블랙망고수박 {kg}kg'.
+
+    블랙망고수박은 일반 망고수박('수박 가정용 N~Nkg') · 일반 수박과 반드시 구분한다.
+    무게는 **상품명(K)에서 우선** 추출한다 — 옵션(L)에 '수박 가정용 3~4kg 내외 (3kg)'
+    같은 엉뚱한 일반수박 SKU가 적혀 들어오는 경우가 있어 옵션의 kg은 신뢰하지 않는다.
+    상품명에 무게가 없으면 옵션의 소수(2.5kg 등) 무게를, 그것도 없으면 블랙망고수박
+    단일 규격인 2.5kg를 기본값으로 사용한다.
+    """
+    kg = _extract_kg(product_name)
+    if not kg:
+        # 상품명에 없을 때만 옵션을 본다. 단, '수박 가정용 N~Nkg'식 정수 표기는 무시하고
+        # 명시적 소수 무게(2.5kg 등)만 인정.
+        m = re.search(r"(\d+\.\d+)\s*kg", str(option_text or ""), re.IGNORECASE)
+        kg = _fmt_kg(m.group(1)) if m else "2.5"
+    return f"블랙망고수박 {kg}kg"
+
+
+# 햇 홍감자(카스테라 감자) — 2026 여름 쥬얼리프룻 발주.
+# 등급은 옵션 괄호 안 표기(소/중/대/특/특대/왕특). 쿠팡 표기 '특대'는 쥬얼리 시트 '특'에 매핑.
+# 긴 등급(왕특/특대)을 먼저 검사해야 '특대'가 '대'로 오인되지 않는다.
+_POTATO_GRADES = ("왕특", "특대", "특", "대", "중", "소")
+_POTATO_GRADE_MAP = {"특대": "특"}  # 쿠팡 고객표기 → 쥬얼리 소싱시트 등급
+
+
+def is_jewelry_potato_order(product_name: object, option_text: object) -> bool:
+    text = _combined_text(product_name, option_text).replace(" ", "")
+    return "홍감자" in text
+
+
+def _jewelry_potato_option(product_name: object, option_text: object) -> str | None:
+    """햇 홍감자 → '햇 홍감자 {등급} {kg}kg' (쥬얼리프룻 발주명).
+
+    등급은 옵션(L) 괄호 표기에서 우선 추출, kg는 상품명(K)+옵션 종합으로 추출.
+    """
+    if not is_jewelry_potato_order(product_name, option_text):
+        return None
+    # 등급: 옵션을 우선으로(괄호 안 '(대)', '(특대: ...)'), 없으면 상품명까지 본다.
+    grade = ""
+    for source in (normalize(option_text), _combined_text(product_name, option_text)):
+        for g in _POTATO_GRADES:
+            if g in source:
+                grade = _POTATO_GRADE_MAP.get(g, g)
+                break
+        if grade:
+            break
+    kg = _extract_kg(option_text) or _extract_kg(product_name)
+    parts = ["햇 홍감자"]
+    if grade:
+        parts.append(grade)
+    if kg:
+        parts.append(f"{kg}kg")
+    return " ".join(parts)
+
+
+# 일반 수박 6/7/8kg — 2026-06부터 제이비티가 아닌 쥬얼리팜(쥬얼리프룻) 발주.
+def is_house_watermelon_order(product_name: object, option_text: object) -> bool:
+    from app.processors.tomato_order import delivery_watermelon_kg, JBT_WATERMELON_KGS
+    return delivery_watermelon_kg(str(product_name or ""), str(option_text or "")) in JBT_WATERMELON_KGS
+
+
+# 성주참외 전체(로얄/중소/알뜰과) — 2026-06부터 쥬얼리팜 발주.
+# 로얄과/중소과 → '로얄과 Nkg'/'중소과 Nkg', 알뜰과(가정용 혼합과) → '가성비 혼합과 Nkg'.
+# ※ 알뜰과도 콜라비 메뉴가 아닌 명이나물(쥬얼리프룻) 메뉴에서 함께 출력한다.
+def is_jewelry_chamoe_order(product_name: object, option_text: object) -> bool:
+    return "성주참외" in str(product_name or "")
+
+
+def _jewelry_chamoe_option(product_name: object, option_text: object) -> str | None:
+    if not is_jewelry_chamoe_order(product_name, option_text):
+        return None
+    text = _combined_text(product_name, option_text)
+    kg_match = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
+    kg = kg_match.group(1) if kg_match else ""
+    if "로얄" in text:
+        grade = "로얄과"
+    elif "중소" in text:
+        grade = "중소과"
+    elif "혼합" in text or "알뜰" in text or "랜덤" in text:
+        grade = "가성비 혼합과"
+    else:
+        grade = "성주참외"
+    return f"{grade} {kg}kg".strip() if kg else grade
+
+
+def _house_watermelon_option(product_name: object, option_text: object) -> str | None:
+    from app.processors.tomato_order import delivery_watermelon_kg, JBT_WATERMELON_KGS
+    kg = delivery_watermelon_kg(str(product_name or ""), str(option_text or ""))
+    if kg not in JBT_WATERMELON_KGS:
+        return None
+    # 테무 쥬얼리 발주와 동일한 품목명으로 통일
+    return f"가정용 수박 {kg}kg 내외"
+
+
+# 신비복숭아 1·2kg → 쥬얼리프룻 발주 (3·4kg은 제이비티, 800g은 제외)
+def is_jewelry_peach_order(product_name: object, option_text: object) -> bool:
+    from app.processors.tomato_order import peach_kg, JEWELRY_PEACH_KGS
+    return peach_kg(str(product_name or ""), str(option_text or "")) in JEWELRY_PEACH_KGS
+
+
+def _jewelry_peach_option(product_name: object, option_text: object) -> str | None:
+    from app.processors.tomato_order import peach_kg, JEWELRY_PEACH_KGS
+    kg = peach_kg(str(product_name or ""), str(option_text or ""))
+    if kg not in JEWELRY_PEACH_KGS:
+        return None
+    # 쿠팡 신비복숭아: (kg, 등급) → 공급사 SKU명 (예: '1kg (중소과)' → '신비 복숭아 1kg (15과 내외)')
+    text = _combined_text(product_name, option_text)
+    grade = "중소과" if "중소과" in text else ("대과" if "대과" in text else "")
+    mapped = _PEACH_COUPANG_SKU.get((int(kg), grade))
+    if mapped:
+        return mapped
+    return _peach_label(product_name, option_text)
+
+
+def _fmt_kg(value: str) -> str:
+    """'3.0' → '3', '2.5' → '2.5' (불필요한 소수점 제거)."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(int(f)) if f.is_integer() else str(f)
+
+
+# 신비복숭아 등급 (긴 것 먼저 — '중소과'가 '소과'보다 먼저 매칭돼야 함)
+_PEACH_GRADES = ("중소과", "중대과", "로얄과", "혼합과", "랜덤과", "대과", "소과")
+
+# 쿠팡 신비복숭아 (kg, 등급) → 쥬얼리프룻 공급사 SKU명 (과수 내외)
+_PEACH_COUPANG_SKU = {
+    (1, "중소과"): "신비 복숭아 1kg (15과 내외)",
+    (2, "중소과"): "신비 복숭아 2kg (30과 내외)",
+    (1, "대과"): "신비 복숭아 1kg (11과 내외)",
+    (2, "대과"): "신비 복숭아 2kg (22과 내외)",
+}
+
+
+def _peach_label(product_name: object, option_text: object) -> str:
+    """신비복숭아 품목명 → '신비복숭아 {kg}kg {등급}'. (등급 없으면 생략)"""
+    text = _combined_text(product_name, option_text)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
+    kg = _fmt_kg(m.group(1)) if m else ""
+    grade = next((g for g in _PEACH_GRADES if g in text), "")
+    parts = ["신비복숭아"]
+    if kg:
+        parts.append(f"{kg}kg")
+    if grade:
+        parts.append(grade)
+    return " ".join(parts)
+
+
+def _external_chamoe_product(product_name: object, option_text: object) -> str | None:
+    """토스/테무 등 외부 채널의 성주참외 → 쥬얼리팜 발주 품목명.
+
+    쿠팡(_jewelry_chamoe_option)과 달리 알뜰과(혼합과)도 한 발주서에 포함한다
+    (외부 채널은 알뜰과 전용 버튼이 없으므로 전부 쥬얼리팜으로 출력).
+    """
+    text = _combined_text(product_name, option_text)
+    if "참외" not in text:
+        return None
+    kg_match = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
+    kg = _fmt_kg(kg_match.group(1)) if kg_match else ""
+    if "로얄" in text:
+        grade = "로얄과"
+    elif "중소" in text:
+        grade = "중소과"
+    else:
+        grade = "가성비 혼합과"   # 혼합/알뜰/랜덤/등급미표기 기본값
+    return f"{grade} {kg}kg".strip() if kg else grade
+
+
+def jewelry_external_product(
+    product_name: object,
+    option_text: object,
+    watermelon_kgs: set,
+) -> str | None:
+    """외부 채널(토스/테무)의 수박·성주참외 주문 → 쥬얼리팜 발주 품목명 (없으면 None).
+
+    - 수박: watermelon_kgs 범위(토스 6/7/8, 테무 2/3/5/6/7/8)일 때만 '가정용 수박 Nkg 내외'
+    - 성주참외: 로얄과/중소과/가성비 혼합과 Nkg
+    - 망고수박은 제외(별도 발주)
+    """
+    from app.processors.tomato_order import delivery_watermelon_kg
+    kg = delivery_watermelon_kg(str(product_name or ""), str(option_text or ""))
+    if kg in watermelon_kgs:
+        return f"가정용 수박 {kg}kg 내외"
+    peach = _jewelry_peach_option(product_name, option_text)
+    if peach:
+        return peach
+    return _external_chamoe_product(product_name, option_text)
+
+
+def jewelry_passthrough_product(
+    product_name: object,
+    option_text: object,
+    watermelon_kgs: set,
+) -> str | None:
+    """토스/올웨이즈 → 쥬얼리팜 발주 품목명.
+
+    신비복숭아는 옵션 보존(소과/대과 등), 망고수박(=블랙망고수박)은 상품명(K) 기준
+    '블랙망고수박 {kg}kg', 수박·성주참외는 정규화(jewelry_external_product).
+    """
+    text = _combined_text(product_name, option_text)
+
+    if "복숭아" in text:
+        # 신비복숭아: '신비복숭아 {kg}kg {등급(소과/중소과/대과...)}'
+        return _peach_label(product_name, option_text)
+
+    if "망고수박" in text.replace(" ", ""):
+        # 일반 망고수박 = 블랙망고수박 (동일 상품) → 모두 블랙망고수박으로 출력.
+        # 옵션(L)이 '수박 가정용 N~Nkg'로 잘못 적혀도 일반수박으로 둔갑하지 않는다.
+        return _blackmango_label(product_name, option_text)
+
+    if "홍감자" in text.replace(" ", ""):
+        # 햇 홍감자 → '햇 홍감자 {등급} {kg}kg'
+        return _jewelry_potato_option(product_name, option_text)
+
+    return jewelry_external_product(product_name, option_text, watermelon_kgs)
+
+
+def _mango_watermelon_option(product_name: object, option_text: object) -> str | None:
+    if not is_mango_watermelon_order(product_name, option_text):
+        return None
+    # 일반 망고수박 = 블랙망고수박 (동일 상품) → 모두 블랙망고수박으로 출력.
+    return _blackmango_label(product_name, option_text)
+
+
 def _apple_corn_option(product_name: object, option_text: object) -> str | None:
     text = _combined_text(product_name, option_text)
     if not is_apple_corn_order(product_name, option_text):
@@ -48,9 +297,34 @@ def convert_option(option_text: str, product_name: str = "") -> str | None:
     if apple_corn:
         return apple_corn
 
+    mango = _mango_watermelon_option(product_name, option_text)
+    if mango:
+        return mango
+
+    house = _house_watermelon_option(product_name, option_text)
+    if house:
+        return house
+
+    chamoe = _jewelry_chamoe_option(product_name, option_text)
+    if chamoe:
+        return chamoe
+
+    peach = _jewelry_peach_option(product_name, option_text)
+    if peach:
+        return peach
+
+    potato = _jewelry_potato_option(product_name, option_text)
+    if potato:
+        return potato
+
     text = str(option_text).strip()
     if not text:
-        return None
+        # 옵션(L)이 비면 상품명(K)으로 폴백 — 품목명 공란 방지(명이나물 행 전용 분기).
+        pn = str(product_name or "").strip()
+        if not pn:
+            return None
+        wmatch = re.search(r"(\d+(?:\.\d+)?)\s*(kg|g)", pn, re.IGNORECASE)
+        return f"명이나물 {wmatch.group(1)}{wmatch.group(2).lower()}" if wmatch else pn
     match = re.match(r"(\d+(?:kg|g))\s+1박스", text, re.IGNORECASE)
     if match:
         weight = match.group(1)
@@ -58,11 +332,17 @@ def convert_option(option_text: str, product_name: str = "") -> str | None:
     return text
 
 
-def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
-    """Process delivery list for 쥬얼리프룻 명이나물 orders.
+def process(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict]:
+    """쿠팡 DeliveryList + 토스 주문을 쥬얼리프룻 발주서로 출력.
 
     Args:
-        delivery_file_bytes: Raw bytes of the DeliveryList Excel file.
+        delivery_file_bytes: 쿠팡 DeliveryList 엑셀.
+        toss_entries: 토스 API에서 수집한 쥬얼리 entry 목록(선택). 각 entry는
+            품목명(product)이 이미 확정돼 있어 그대로 기록된다
+            (수박·성주참외·신비복숭아 등급·블랙망고수박 포함).
 
     Returns:
         Tuple of (output_bytes, filename, stats_dict).
@@ -73,6 +353,11 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
     filtered_rows = []
     has_myeongi = False
     has_apple_corn = False
+    has_mango = False
+    has_watermelon = False
+    has_chamoe = False
+    has_peach = False
+    has_potato = False
     for row in dl_ws.iter_rows(min_row=2):
         k_val = normalize(row[10].value) if len(row) > 10 else ""
         option = normalize(row[11].value) if len(row) > 11 else ""
@@ -82,6 +367,26 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
         elif is_apple_corn_order(k_val, option):
             filtered_rows.append(row)
             has_apple_corn = True
+        elif is_mango_watermelon_order(k_val, option):
+            # 망고수박 = 쥬얼리프룻 발주.
+            filtered_rows.append(row)
+            has_mango = True
+        elif is_house_watermelon_order(k_val, option):
+            # 일반 수박 6/7/8kg도 쥬얼리팜(쥬얼리프룻) 발주로 전환 (2026-06~)
+            filtered_rows.append(row)
+            has_watermelon = True
+        elif is_jewelry_chamoe_order(k_val, option):
+            # 성주참외(로얄/중소)도 쥬얼리팜 발주 (알뜰과는 별도 버튼)
+            filtered_rows.append(row)
+            has_chamoe = True
+        elif is_jewelry_peach_order(k_val, option):
+            # 신비복숭아 1·2kg → 쥬얼리프룻 (3·4kg은 제이비티)
+            filtered_rows.append(row)
+            has_peach = True
+        elif is_jewelry_potato_order(k_val, option):
+            # 햇 홍감자 → 쥬얼리프룻 발주
+            filtered_rows.append(row)
+            has_potato = True
 
     template_path = TEMPLATE_DIR / "명이나물_pbfcompany_원본.xlsx"
     if not template_path.exists():
@@ -160,6 +465,55 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
         if order_no:
             bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
 
+    # 토스 entry는 품목명(product)이 확정돼 있어 그대로 기록 (등급/블랙망고수박/전 kg 보존)
+    base_row = start_row + len(filtered_rows)
+    for j, entry in enumerate(toss_entries or []):
+        out_row = base_row + j
+        product = entry.get("product") or ""
+        try:
+            qty_int = int(float(entry.get("qty"))) if entry.get("qty") not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+        order_no = entry.get("order_id") or ""
+        mapping = {
+            1: today_str,
+            2: "아이티소프트",
+            3: entry.get("name", ""),
+            4: entry.get("phone", ""),
+            6: entry.get("address", ""),
+            7: product,
+            8: str(qty_int),
+            9: "식품애착",
+            10: "010-5700-7756",
+            12: entry.get("memo", ""),
+            13: order_no,
+        }
+        for col, value in mapping.items():
+            cell = ws.cell(row=out_row, column=col, value=value)
+            cell.font = font11
+
+        if "복숭아" in product:
+            has_peach = True
+        elif "망고수박" in product:
+            has_mango = True
+        elif "수박" in product:
+            has_watermelon = True
+        elif "과" in product:
+            has_chamoe = True
+
+        bucket = option_totals.setdefault(
+            product or "쥬얼리프룻",
+            {
+                "coupang_option_keyword": product or "쥬얼리프룻",
+                "vendor_option_name": product or "쥬얼리프룻",
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order_no:
+            bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
     output = BytesIO()
     tmpl_wb.save(output)
     output.seek(0)
@@ -169,6 +523,16 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
         product_parts.append("명이나물")
     if has_apple_corn:
         product_parts.append("애플초당옥수수")
+    if has_mango:
+        product_parts.append("망고수박")
+    if has_watermelon:
+        product_parts.append("수박")
+    if has_chamoe:
+        product_parts.append("성주참외")
+    if has_peach:
+        product_parts.append("신비복숭아")
+    if has_potato:
+        product_parts.append("홍감자")
     product_label = "_".join(product_parts)
     product_name = "+".join(product_parts) if product_parts else "쥬얼리프룻"
     if product_label:
@@ -176,9 +540,195 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
     else:
         filename = f"쥬얼리프룻_발주({now.strftime('%Y%m%d')}).xlsx"
     stats = {
-        "total": len(filtered_rows),
+        "total": len(filtered_rows) + len(toss_entries or []),
+        "coupang": len(filtered_rows),
+        "toss": len(toss_entries or []),
         "product": product_name,
         "options": list(option_totals.values()),
     }
 
     return output.read(), filename, stats
+
+
+# ── 토스 + 올웨이즈 수박 → 쥬얼리팜(쥬얼리프룻) 발주서 ──────────────
+# (기존 제이비티 발주에서 2026-06 발주처 전환)
+
+def parse_alwayz_jewelry_entries(alwayz_bytes: bytes) -> list[dict]:
+    """올웨이즈 주문내역에서 쥬얼리팜 발주 대상(수박 6/7/8kg + 성주참외) 주문을 추출.
+
+    올웨이즈 컬럼: A=주문아이디, E=상품명, F=옵션, G=수량,
+                  O=주소, P=우편번호, S=수령인, T=연락처
+    """
+    from app.processors.tomato_order import JBT_WATERMELON_KGS
+
+    wb = load_workbook(filename=BytesIO(alwayz_bytes), data_only=True)
+    ws = wb.active
+
+    entries: list[dict] = []
+    for row in ws.iter_rows(min_row=2):
+        product_name = normalize(row[4].value) if len(row) > 4 else ""
+        option = normalize(row[5].value) if len(row) > 5 else ""
+        name = normalize(row[18].value) if len(row) > 18 else ""
+        if not name or not product_name:
+            continue
+        product = jewelry_passthrough_product(product_name, option, JBT_WATERMELON_KGS)
+        if not product:
+            continue
+        entries.append({
+            "order_id": normalize(row[0].value) if len(row) > 0 else "",
+            "product": product,
+            "qty": (normalize(row[6].value) if len(row) > 6 else "") or "1",
+            "name": name,
+            "phone": normalize(row[19].value) if len(row) > 19 else "",
+            "address": normalize(row[14].value) if len(row) > 14 else "",
+            "option": option or product,
+            "memo": "",
+        })
+    return entries
+
+
+# 하위호환 alias (기존 호출부 보호)
+parse_alwayz_watermelon_entries = parse_alwayz_jewelry_entries
+
+
+def _build_jewelry_order_workbook(entries: list[dict]) -> tuple[bytes, str, dict]:
+    """쥬얼리팜 발주 entries(각 entry에 'product' 품목명 포함) → pbfcompany 발주서."""
+    template_path = TEMPLATE_DIR / "명이나물_pbfcompany_원본.xlsx"
+    if not template_path.exists():
+        raise FileNotFoundError(f"Template not found: {template_path}")
+
+    tmpl_wb = load_workbook(filename=str(template_path))
+    first_sheet_name = tmpl_wb.sheetnames[0]
+    for name in tmpl_wb.sheetnames[1:]:
+        del tmpl_wb[name]
+    ws = tmpl_wb[first_sheet_name]
+
+    font11 = Font(size=11)
+    now = datetime.now(KST)
+    today_str = now.strftime("%Y-%m-%d")
+
+    start_row = 2
+    for r in range(2, ws.max_row + 2):
+        if ws.cell(row=r, column=3).value is None:
+            start_row = r
+            break
+
+    option_totals: dict[str, dict] = {}
+    for i, entry in enumerate(entries):
+        out_row = start_row + i
+        product = entry["product"]
+        try:
+            qty_int = int(float(entry["qty"]))
+        except (TypeError, ValueError):
+            qty_int = 1
+
+        mapping = {
+            1: today_str,
+            2: "아이티소프트",
+            3: entry["name"],
+            4: entry["phone"],
+            6: entry["address"],
+            7: product,
+            8: str(qty_int),
+            9: "식품애착",
+            10: "010-5700-7756",
+            12: entry.get("memo") or "",
+            13: entry.get("order_id") or "",
+        }
+        for col, value in mapping.items():
+            cell = ws.cell(row=out_row, column=col, value=value)
+            cell.font = font11
+
+        opt_key = entry.get("option") or product
+        bucket = option_totals.setdefault(opt_key, {
+            "coupang_option_keyword": opt_key,
+            "vendor_option_name": product,
+            "quantity": 0,
+            "orders": [],
+        })
+        bucket["quantity"] += qty_int
+        if entry.get("order_id"):
+            bucket["orders"].append({"order_id": entry["order_id"], "quantity": qty_int})
+
+    output = BytesIO()
+    tmpl_wb.save(output)
+    output.seek(0)
+
+    products = [e["product"] for e in entries]
+    has_watermelon = any("수박" in p for p in products)
+    has_peach = any("복숭아" in p for p in products)
+    has_chamoe = any("과" in p and "수박" not in p and "복숭아" not in p for p in products)
+    label_parts = []
+    if has_watermelon:
+        label_parts.append("수박")
+    if has_chamoe:
+        label_parts.append("성주참외")
+    if has_peach:
+        label_parts.append("신비복숭아")
+    label = "_".join(label_parts) if label_parts else "발주"
+
+    filename = f"쥬얼리프룻_{label}_발주({now.strftime('%Y%m%d')}).xlsx"
+    stats = {
+        "total": len(entries),
+        "supplier": "쥬얼리프룻",
+        "product": "·".join(label_parts) if label_parts else "쥬얼리팜",
+        "options": list(option_totals.values()),
+    }
+    return output.read(), filename, stats
+
+
+# 하위호환 alias
+_build_jewelry_watermelon_workbook = _build_jewelry_order_workbook
+
+
+async def process_jewelry_watermelon_order(
+    from_date: str,
+    to_date: str,
+    alwayz_bytes: bytes | None = None,
+    collect_toss: bool = True,
+) -> list[tuple[bytes, str, dict]]:
+    """토스 API + 올웨이즈 주문을 쥬얼리프룻 발주서로 출력.
+
+    대상: 수박 6/7/8kg · 성주참외 · 신비복숭아(소과/대과 등 옵션 그대로) · (블랙)망고수박.
+    반환: [(bytes, filename, stats)] (쥬얼리 발주서 1개).
+    """
+    from app.processors.tomato_order import collect_toss_jewelry_orders
+
+    toss_error = ""
+    toss_entries: list[dict] = []
+    if collect_toss:
+        try:
+            toss_entries = await collect_toss_jewelry_orders(from_date, to_date)
+        except Exception as exc:
+            if not alwayz_bytes:
+                raise
+            toss_error = str(exc)
+
+    entries: list[dict] = [{
+        "order_id": t.get("order_id", ""),
+        "product": t["product"],
+        "qty": t.get("qty", "1"),
+        "name": t.get("name", ""),
+        "phone": t.get("phone", ""),
+        "address": t.get("address", ""),
+        "option": t.get("option") or t["product"],
+        "memo": t.get("memo", ""),
+    } for t in toss_entries]
+    alwayz_entries = parse_alwayz_jewelry_entries(alwayz_bytes) if alwayz_bytes else []
+    jewelry_entries = entries + alwayz_entries
+
+    if not jewelry_entries:
+        raise ValueError(
+            f"토스/올웨이즈에서 쥬얼리프룻 발주 대상(수박·성주참외·신비복숭아·망고수박) 주문을 찾지 못했습니다. 기간: {from_date} ~ {to_date}"
+        )
+
+    output_bytes, filename, stats = _build_jewelry_order_workbook(jewelry_entries)
+    stats = {
+        **stats,
+        "toss_orders": len(entries),
+        "alwayz_orders": len(alwayz_entries),
+        "period": f"{from_date} ~ {to_date}" if collect_toss else "올웨이즈 파일",
+    }
+    if toss_error:
+        stats["toss_error"] = toss_error
+    return [(output_bytes, filename, stats)]

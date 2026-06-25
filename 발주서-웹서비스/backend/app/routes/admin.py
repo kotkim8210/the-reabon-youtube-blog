@@ -1,6 +1,11 @@
-"""Admin routes: user management and IP blocking."""
+"""Admin routes: user management, IP blocking, and admin-only utilities."""
+
+import json
+from io import BytesIO
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from passlib.hash import bcrypt
 from pydantic import BaseModel
 from typing import Optional
@@ -10,6 +15,7 @@ from app.db import (
     get_all_users, create_user, update_user_active,
     get_blocked_ips, add_blocked_ip, remove_blocked_ip,
 )
+from app.processors import temu_kolrabi_goods
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -25,6 +31,20 @@ class BlockIPRequest(BaseModel):
     ip_address: str
     user_id: Optional[int] = None
     reason: str = ""
+
+
+def _make_excel_response(output_bytes: bytes, filename: str, stats: dict | None = None) -> StreamingResponse:
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Stats",
+    }
+    if stats:
+        headers["X-Stats"] = json.dumps(stats, ensure_ascii=True)
+    return StreamingResponse(
+        BytesIO(output_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 
 @router.get("/users")
@@ -77,3 +97,9 @@ async def block_ip(req: BlockIPRequest, admin: dict = Depends(require_admin)):
 async def unblock_ip(block_id: int, admin: dict = Depends(require_admin)):
     await remove_blocked_ip(block_id)
     return {"status": "ok"}
+
+
+@router.post("/temu/kolrabi-goods/download")
+async def download_temu_kolrabi_goods(admin: dict = Depends(require_admin)):
+    output_bytes, filename, stats = temu_kolrabi_goods.generate_workbook()
+    return _make_excel_response(output_bytes, filename, stats)

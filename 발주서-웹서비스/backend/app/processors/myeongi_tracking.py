@@ -5,7 +5,15 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from app.processors.myeongi_order import convert_option, is_apple_corn_order
+from app.processors.myeongi_order import (
+    convert_option,
+    is_apple_corn_order,
+    is_house_watermelon_order,
+    is_jewelry_chamoe_order,
+    is_jewelry_peach_order,
+    is_jewelry_potato_order,
+    is_mango_watermelon_order,
+)
 from app.processors.tracking_match import (
     name_counts,
     normalize_courier_name,
@@ -27,7 +35,15 @@ def normalize(value) -> str:
 
 def is_jewelryfruit_tracking_target(product_name: str, option_text: str) -> bool:
     product = str(product_name or "")
-    return "명이나물" in product or is_apple_corn_order(product_name, option_text)
+    return (
+        "명이나물" in product
+        or is_apple_corn_order(product_name, option_text)
+        or is_mango_watermelon_order(product_name, option_text)
+        or is_house_watermelon_order(product_name, option_text)  # 일반 수박 6/7/8kg (2026-06 쥬얼리 전환)
+        or is_jewelry_chamoe_order(product_name, option_text)    # 성주참외 로얄/중소 (2026-06 쥬얼리 전환)
+        or is_jewelry_peach_order(product_name, option_text)     # 신비복숭아 1·2kg (3·4kg은 제이비티)
+        or is_jewelry_potato_order(product_name, option_text)    # 햇 홍감자 (2026 여름 쥬얼리 발주)
+    )
 
 
 def process(
@@ -96,6 +112,10 @@ def process(
     skipped = 0
     has_myeongi = False
     has_apple_corn = False
+    has_mango = False
+    has_watermelon = False
+    has_chamoe = False
+    has_peach = False
     delivery_name_counts = name_counts(
         normalize(dl_ws.cell(row=row_idx, column=27).value)
         for row_idx in range(2, dl_ws.max_row + 1)
@@ -182,6 +202,14 @@ def process(
                 has_myeongi = True
             if is_apple_corn_order(dl_product, dl_option):
                 has_apple_corn = True
+            if is_mango_watermelon_order(dl_product, dl_option):
+                has_mango = True
+            if is_house_watermelon_order(dl_product, dl_option):
+                has_watermelon = True
+            if is_jewelry_chamoe_order(dl_product, dl_option):
+                has_chamoe = True
+            if is_jewelry_peach_order(dl_product, dl_option):
+                has_peach = True
         else:
             skipped += 1
 
@@ -195,6 +223,14 @@ def process(
         product_parts.append("명이나물")
     if has_apple_corn:
         product_parts.append("애플초당옥수수")
+    if has_mango:
+        product_parts.append("망고수박")
+    if has_watermelon:
+        product_parts.append("수박")
+    if has_chamoe:
+        product_parts.append("성주참외")
+    if has_peach:
+        product_parts.append("신비복숭아")
     product_label = "_".join(product_parts) if product_parts else "쥬얼리프룻"
     filename = f"DeliveryList_{product_label}_운송장입력완료_{now.strftime('%Y%m%d')}.xlsx"
     stats = {"filled": filled, "skipped": skipped}

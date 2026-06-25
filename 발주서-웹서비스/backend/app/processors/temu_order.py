@@ -92,7 +92,9 @@ def _value_after_label(lines: list[str], labels: tuple[str, ...]) -> str:
 def _normalize_phone(value: str) -> str:
     digits = re.sub(r"\D", "", value or "")
     if digits.startswith("82"):
-        digits = "0" + digits[2:]
+        rest = digits[2:]
+        # 테무는 '+82 010 8215 2937'처럼 82 뒤에 0이 이미 있는 경우가 있어 중복 0을 막는다.
+        digits = rest if rest.startswith("0") else "0" + rest
     if len(digits) == 11:
         return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
     return _normalize(value)
@@ -306,12 +308,10 @@ def _parse_temu_order_sheet(ws, source_label: str) -> list[dict]:
             continue
 
         product_text = f"{product_name} {option}"
-        if "수박" not in product_text:
-            continue
-
-        kg = _kg_from_text(product_text)
-        if kg not in SUPPORTED_WATERMELON_KGS:
-            unsupported_watermelon_rows.append(f"{row_idx}행 {option or product_name}")
+        is_watermelon = "수박" in product_text
+        is_chamoe = "참외" in product_text
+        is_goguma = "고구마" in product_text
+        if not (is_watermelon or is_chamoe or is_goguma):
             continue
 
         recipient = _row_text(ws, row_idx, columns, "수령인 이름")
@@ -329,11 +329,46 @@ def _parse_temu_order_sheet(ws, source_label: str) -> list[dict]:
         if missing:
             raise ValueError(f"테무 주문 {source_label} {row_idx}행에서 {', '.join(missing)} 정보를 찾지 못했습니다.")
 
+        if is_goguma:
+            # 고구마 → 해달 발주서(한진양식). 품목명 '꿀고구마 {kg}Kg ({등급})'로 정규화.
+            from app.processors.goguma_order import canonical_goguma_option
+
+            goguma_product = canonical_goguma_option(option or product_name, product_name)
+            entries.append(
+                {
+                    "kind": "goguma",
+                    "order_id": order_id
+                    or order_product_id
+                    or tomato_order.stable_order_id("temu-goguma", recipient, phone, address, product_name, option, qty),
+                    "order_product_id": order_product_id,
+                    "name": recipient,
+                    "phone": phone,
+                    "zipcode": zipcode,
+                    "address": address,
+                    "qty": qty,
+                    "product_name": product_name,
+                    "product": goguma_product,
+                    "memo": "테무 주문",
+                }
+            )
+            continue
+
+        from app.processors.myeongi_order import jewelry_external_product
+
+        jewelry_product = jewelry_external_product(product_name, option, SUPPORTED_WATERMELON_KGS)
+        if not jewelry_product:
+            # 수박인데 지원 kg(2/3/5/6/7/8)이 아닌 경우만 오류로 수집
+            if is_watermelon:
+                unsupported_watermelon_rows.append(f"{row_idx}행 {option or product_name}")
+            continue
+        kg = _kg_from_text(product_text) or 0
+
         entries.append(
             {
+                "kind": "jewelry",
                 "order_id": order_id
                 or order_product_id
-                or tomato_order.stable_order_id("temu-watermelon", recipient, phone, address, product_name, option, qty),
+                or tomato_order.stable_order_id("temu-jewelry", recipient, phone, address, product_name, option, qty),
                 "order_product_id": order_product_id,
                 "name": recipient,
                 "phone": phone,
@@ -341,9 +376,10 @@ def _parse_temu_order_sheet(ws, source_label: str) -> list[dict]:
                 "address": address,
                 "qty": qty,
                 "product_name": product_name,
-                "option": f"{kg}kg",
+                "option": jewelry_product,
                 "memo": "테무 주문",
                 "kg": kg,
+                "product": jewelry_product,
             }
         )
 
@@ -353,7 +389,7 @@ def _parse_temu_order_sheet(ws, source_label: str) -> list[dict]:
             + ", ".join(unsupported_watermelon_rows[:5])
         )
     if not entries:
-        raise ValueError("테무 주문 엑셀에서 발송할 수량이 있는 미발송 수박 주문을 찾지 못했습니다.")
+        raise ValueError("테무 주문 파일에서 발송할 수량이 있는 미발송 수박·성주참외·고구마 주문을 찾지 못했습니다.")
 
     return entries
 
@@ -386,11 +422,20 @@ def _parse_temu_order_text(order_text: str) -> dict:
     product_name = _extract_product(lines)
     qty = _extract_quantity(lines)
 
-    if not product_name or "수박" not in product_name:
-        raise ValueError("현재 테무 발주 자동화는 수박 주문부터 지원합니다. 주문상세 텍스트에 수박 상품명이 있는지 확인해주세요.")
+    from app.processors.myeongi_order import jewelry_external_product
 
-    kg = _extract_watermelon_kg(lines, product_name)
-    if kg not in SUPPORTED_WATERMELON_KGS:
+    is_watermelon = bool(product_name) and "수박" in product_name
+    is_chamoe = bool(product_name) and "참외" in product_name
+    if not (is_watermelon or is_chamoe):
+        raise ValueError("현재 테무 발주 자동화는 수박·성주참외 주문을 지원합니다. 주문상세 텍스트에 상품명이 있는지 확인해주세요.")
+
+    if is_watermelon:
+        kg = _extract_watermelon_kg(lines, product_name)
+    else:
+        kg = 0
+    option_text = " ".join(lines)
+    jewelry_product = jewelry_external_product(product_name, option_text, SUPPORTED_WATERMELON_KGS)
+    if not jewelry_product:
         raise ValueError("테무 수박 주문에서 2kg/3kg/5kg/6kg/7kg/8kg 옵션을 찾지 못했습니다. 상품명에 kg가 보이도록 주문상세 전체를 복사해주세요.")
 
     missing = []
@@ -405,16 +450,17 @@ def _parse_temu_order_text(order_text: str) -> dict:
 
     return {
         "order_id": order_id
-        or tomato_order.stable_order_id("temu-watermelon", recipient, phone, address, product_name, f"{kg}kg", qty),
+        or tomato_order.stable_order_id("temu-jewelry", recipient, phone, address, product_name, jewelry_product, qty),
         "name": recipient,
         "phone": phone,
         "zipcode": zipcode,
         "address": address,
         "qty": qty,
         "product_name": product_name,
-        "option": f"{kg}kg",
+        "option": jewelry_product,
         "memo": "테무 주문",
         "kg": kg,
+        "product": jewelry_product,
     }
 
 
@@ -455,8 +501,7 @@ def _build_jewelryfruit_workbook(entries: list[dict]) -> tuple[bytes, str, dict]
 
     option_buckets: dict[str, dict] = {}
     for index, entry in enumerate(entries, start=2):
-        kg = int(entry["kg"])
-        product = _jewelryfruit_product_name(kg)
+        product = entry.get("product") or _jewelryfruit_product_name(int(entry.get("kg") or 0))
         qty = int(entry["qty"])
 
         mapping = {
@@ -494,14 +539,24 @@ def _build_jewelryfruit_workbook(entries: list[dict]) -> tuple[bytes, str, dict]
     wb.save(output)
     output.seek(0)
 
+    products = [e.get("product") or "" for e in entries]
+    has_watermelon = any("수박" in p for p in products)
+    has_chamoe = any("과" in p and "수박" not in p for p in products)
+    label_parts = []
+    if has_watermelon:
+        label_parts.append("수박")
+    if has_chamoe:
+        label_parts.append("성주참외")
+    label = "_".join(label_parts) if label_parts else "발주"
+
     today = now.strftime("%Y%m%d")
-    filename = f"쥬얼리프룻_수박_발주({today}).xlsx"
+    filename = f"쥬얼리프룻_{label}_발주({today}).xlsx"
     stats = {
         "total": len(entries),
         "platform": "테무",
         "supplier": "쥬얼리프룻",
         "quantity": sum(int(entry["qty"]) for entry in entries),
-        "product": "수박",
+        "product": "·".join(label_parts) if label_parts else "쥬얼리팜",
         "options": list(option_buckets.values()),
     }
     return output.read(), filename, stats
@@ -529,27 +584,100 @@ def _build_jbt_workbook(entries: list[dict]) -> tuple[bytes, str, dict]:
     return output_bytes, filename, stats
 
 
-def _build_outputs(entries: list[dict]) -> list[tuple[bytes, str, dict]]:
-    jewelryfruit_entries = [entry for entry in entries if int(entry["kg"]) in JEWELRYFRUIT_WATERMELON_KGS]
-    jbt_entries = [entry for entry in entries if int(entry["kg"]) in tomato_order.JBT_WATERMELON_KGS]
+def _build_haedal_goguma_workbook(entries: list[dict]) -> tuple[bytes, str, dict]:
+    """테무 고구마 주문 → 해달 발주서(한진양식). 고구마 page의 해달 양식과 동일."""
+    if not entries:
+        raise ValueError("해달 발주로 출력할 테무 고구마 주문이 없습니다.")
 
+    template_path = TEMPLATE_DIR / "해달_발주서_한진양식.xlsx"
+    if not template_path.exists():
+        raise FileNotFoundError(f"Template not found: {template_path}")
+
+    wb = load_workbook(filename=str(template_path))
+    first_sheet_name = wb.sheetnames[0]
+    for name in wb.sheetnames[1:]:
+        del wb[name]
+    ws = wb[first_sheet_name]
+
+    font11 = Font(size=11)
+    start_row = 2
+    for r in range(2, ws.max_row + 2):
+        if ws.cell(row=r, column=1).value is None:
+            start_row = r
+            break
+
+    option_buckets: dict[str, dict] = {}
+    for i, entry in enumerate(entries):
+        row_idx = start_row + i
+        qty = int(entry["qty"])
+        product = entry["product"]
+        mapping = {
+            1: entry["name"],        # A 받으시는 분
+            2: entry["phone"],       # B 받으시는 분 전화
+            5: entry["zipcode"],     # E 받는분우편번호
+            6: entry["address"],     # F 받는분총주소
+            7: "식품애착",            # G 보내시는 분
+            8: "010-5700-7756",      # H 보내시는 분 전화
+            12: "전라남도 해남군 산이면 새상골길 ",  # L 보내는분총주소
+            13: str(qty),            # M 수량
+            14: product,             # N 품목명
+            16: "선불",              # P 지불조건
+            19: entry.get("memo", ""),  # S 메모1
+        }
+        for col, value in mapping.items():
+            cell = ws.cell(row=row_idx, column=col, value=value)
+            cell.font = font11
+
+        bucket = option_buckets.setdefault(
+            product,
+            {"coupang_option_keyword": product, "vendor_option_name": product, "quantity": 0, "orders": []},
+        )
+        bucket["quantity"] += qty
+        bucket["orders"].append({"order_id": entry["order_id"], "quantity": qty})
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    today = datetime.now(tomato_order.KST).strftime("%y%m%d")
+    filename = f"해달 발주서 한진양식_테무_알제이시스템즈({today}).xlsx"
+    stats = {
+        "total": len(entries),
+        "platform": "테무",
+        "supplier": "해달",
+        "product": "고구마",
+        "quantity": sum(int(e["qty"]) for e in entries),
+        "options": list(option_buckets.values()),
+    }
+    return output.read(), filename, stats
+
+
+def _build_outputs(entries: list[dict]) -> list[tuple[bytes, str, dict]]:
+    # 테무 수박·성주참외 → 쥬얼리프룻 발주서, 고구마 → 해달 발주서(한진양식).
+    # 파싱 단계에서 kind('jewelry'/'goguma')와 발주 품목명을 확정해 둠.
+    if not entries:
+        raise ValueError("테무 발주로 출력할 수박·성주참외·고구마 주문을 찾지 못했습니다.")
+    jewelry = [e for e in entries if e.get("kind") != "goguma"]
+    goguma = [e for e in entries if e.get("kind") == "goguma"]
     outputs: list[tuple[bytes, str, dict]] = []
-    if jewelryfruit_entries:
-        outputs.append(_build_jewelryfruit_workbook(jewelryfruit_entries))
-    if jbt_entries:
-        outputs.append(_build_jbt_workbook(jbt_entries))
+    if jewelry:
+        outputs.append(_build_jewelryfruit_workbook(jewelry))
+    if goguma:
+        outputs.append(_build_haedal_goguma_workbook(goguma))
     if not outputs:
-        raise ValueError("테무 수박 발주로 출력할 주문을 찾지 못했습니다.")
+        raise ValueError("테무 발주로 출력할 주문을 찾지 못했습니다.")
     return outputs
 
 
 def combine_output_stats(outputs: list[tuple[bytes, str, dict]]) -> dict:
+    products = [str((stats or {}).get("product", "")) for _, _, stats in outputs]
+    product_label = "·".join(p for p in products if p) or "수박·성주참외·고구마"
     return {
         "files": len(outputs),
         "total": sum(int((stats or {}).get("total", 0)) for _, _, stats in outputs),
         "quantity": sum(int((stats or {}).get("quantity", 0)) for _, _, stats in outputs),
         "platform": "테무",
-        "product": "수박",
+        "product": product_label,
         "filenames": [filename for _, filename, _ in outputs],
     }
 

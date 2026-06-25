@@ -18,6 +18,7 @@ class HaedalColumns:
     address: int = 6
     product: int = 14
     tracking: int | None = None
+    courier: int | None = None
 
 
 def _key(value: object) -> str:
@@ -47,11 +48,12 @@ def _tracking_number_candidate(value: object) -> str:
     """Return a likely tracking number from a cell value.
 
     해달/한진 회신 파일은 송장 헤더가 없거나 엉뚱한 헤더 아래에 12자리
-    송장번호가 들어오는 경우가 있다. 전화번호와 우편번호 오탐을 줄이기 위해
-    행 전체 fallback에서는 12자리 숫자만 후보로 본다.
+    송장번호가 들어오는 경우가 있다. 전화번호/안심번호/우편번호 오탐을 줄이기 위해
+    행 전체 fallback에서는 12자리 숫자 중 '0'으로 시작하지 않는 값만 후보로 본다.
+    (안심번호 0502/0503/0504-XXXX-XXXX = 12자리라 운송장으로 오인되던 버그 차단)
     """
     tracking = _valid_tracking(value)
-    if re.fullmatch(r"\d{12}", tracking):
+    if re.fullmatch(r"\d{12}", tracking) and not tracking.startswith("0"):
         return tracking
     return ""
 
@@ -89,6 +91,8 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
                 found["address"] = col_idx
             if not found.get("product") and _contains_any(header, ("상품명", "품명", "제품명", "상품")):
                 found["product"] = col_idx
+            if not found.get("courier") and _contains_any(header, ("택배사", "택배회사", "배송사", "택배사명")):
+                found["courier"] = col_idx
 
         score = len(found) + (2 if "tracking" in found else 0)
         if score > best_score:
@@ -105,6 +109,7 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
             address=best.get("address", 6),
             product=best.get("product", 14),
             tracking=best.get("tracking"),
+            courier=best.get("courier"),
         )
 
     a1 = _key(ws.cell(row=1, column=1).value)
@@ -112,22 +117,60 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
     return HaedalColumns(start_row=start_row)
 
 
-def find_tracking_in_row(ws, row_idx: int, tracking_col: int | None = None) -> str:
-    """Return tracking number from detected header, legacy range, or row scan.
+# 택배사명 식별용 키워드 (택배사 셀은 짧으므로 길이 제한과 함께 쓴다 → 주소/이름 오탐 방지)
+_COURIER_HINTS = ("택배", "대한통운", "우체국", "로젠", "한진", "롯데", "현대", "cj", "logen", "epost")
 
-    Priority:
-    1. Detected tracking header column
-    2. Legacy P(16) ~ V(22) scan
-    3. Any 12-digit number in the row, preferring values that start with 4
+
+def find_courier_in_row(
+    ws,
+    row_idx: int,
+    courier_col: int | None = None,
+    skip_cols: tuple[int, ...] = (),
+) -> str:
+    """행에서 택배사명을 찾는다.
+
+    택배사 열(헤더 감지)이 있으면 그 값을 쓴다. 없으면(거래처가 엉뚱한 열-예: '지불조건'-에
+    택배사를 적은 경우) 짧은 셀 값들 중 택배 키워드가 든 것을 찾는다. 이름/전화/주소/상품/송장
+    열은 제외하고, 길이 ≤ 12 인 셀만 봐서 '한진아파트' 같은 주소 오탐을 막는다.
+    """
+    if courier_col:
+        value = ws.cell(row=row_idx, column=courier_col).value
+        return str(value).strip() if value is not None else ""
+
+    skip = set(skip_cols)
+    for col_idx in range(1, getattr(ws, "max_column", 1) + 1):
+        if col_idx in skip:
+            continue
+        value = ws.cell(row=row_idx, column=col_idx).value
+        if value is None:
+            continue
+        text = str(value).strip()
+        compact = re.sub(r"\s+", "", text).lower()
+        if not compact or len(compact) > 12:
+            continue
+        if any(hint in compact for hint in _COURIER_HINTS):
+            return text
+    return ""
+
+
+def find_tracking_in_row(ws, row_idx: int, tracking_col: int | None = None) -> str:
+    """Return tracking number for a row.
+
+    송장 열(출고번호/송장번호 등)이 감지되면 **그 열만 신뢰**한다.
+    비어 있으면 빈값을 반환해 그 행은 건너뛴다 — 절대 행 스캔으로 추측하지 않는다.
+    (예전엔 빈 행에서 안심번호(0504-XXXX-XXXX, 12자리)를 운송장으로 오인해
+     쿠팡에 잘못 등록 → 출고지연이 발생했음.)
+
+    송장 열을 헤더에서 못 찾은 경우(tracking_col is None)에만 fallback:
+      1. 옛 해달 양식 P(16)~V(22) 숫자 스캔
+      2. 행 전체에서 12자리 숫자(0으로 시작=전화/안심번호 제외) 중 '4' 우선
     """
     if tracking_col:
-        tracking = _valid_tracking(ws.cell(row=row_idx, column=tracking_col).value)
-        if tracking:
-            return tracking
+        return _valid_tracking(ws.cell(row=row_idx, column=tracking_col).value)
 
     for col_idx in range(16, 23):  # P(16) ~ V(22), old 해달 reply fallback
         tracking = _valid_tracking(ws.cell(row=row_idx, column=col_idx).value)
-        if tracking:
+        if tracking and not tracking.startswith("0"):
             return tracking
 
     candidates = []
@@ -138,6 +181,4 @@ def find_tracking_in_row(ws, row_idx: int, tracking_col: int | None = None) -> s
     for tracking in candidates:
         if tracking.startswith("4"):
             return tracking
-    if candidates:
-        return candidates[0]
-    return ""
+    return candidates[0] if candidates else ""

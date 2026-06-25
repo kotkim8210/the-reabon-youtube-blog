@@ -53,8 +53,9 @@ def _processor_candidates(file_name: str, file_bytes: bytes) -> list[tuple[str, 
     if "게걸무" in text:
         return [("게걸무씨앗기름", gaegeolmu_tracking.process)]
 
-    if any(token in text for token in ("대저토마토", "성주참외", "남해땅두릅", "수박", "옥수수", "아이티소프트")) and "회신" in text:
-        return [("대저토마토/성주참외/남해땅두릅/수박/초당옥수수", tomato_tracking.process)]
+    # ※ 수박·성주참외 회신은 2026-06부터 쥬얼리(orderlist) 양식 → fallback 체인에서 myeongi_tracking이 처리
+    if any(token in text for token in ("대저토마토", "남해땅두릅", "옥수수", "아이티소프트")) and "회신" in text:
+        return [("대저토마토/남해땅두릅/초당옥수수", tomato_tracking.process)]
 
     if "애플초당옥수수" in text or ("애플" in text and "초당옥수수" in text):
         return [("애플초당옥수수", myeongi_tracking.process)]

@@ -7,23 +7,40 @@ import time
 
 import httpx
 
-from app.config import TOSS_ACCESS_KEY, TOSS_SECRET_KEY
+from app import config
 
 logger = logging.getLogger(__name__)
 
-OAUTH_URL = "https://oauth2.cert.toss.im/token"
-BASE_URL = "https://shopping-fep.toss.im"
+OAUTH_URL = config.TOSS_OAUTH_TOKEN_URL
+BASE_URL = config.TOSS_API_BASE_URL
 MAX_RETRIES = 3
 RATE_LIMIT = asyncio.Semaphore(10)
 PARTNER_NAME = "알제이시스템즈"
+INVALID_IP_RE = re.compile(r"INVALID_IP|허가되지 않은 IP", re.IGNORECASE)
+
+
+class TossApiError(RuntimeError):
+    """Toss Shopping API error that should be shown clearly to the operator."""
+
+    def __init__(self, message: str, *, error_code: str = "", reason: str = "", raw: object | None = None):
+        super().__init__(message)
+        self.message = message
+        self.error_code = error_code
+        self.reason = reason
+        self.raw = raw
+
+    @property
+    def is_invalid_ip(self) -> bool:
+        haystack = f"{self.error_code} {self.reason} {self.message}"
+        return bool(INVALID_IP_RE.search(haystack))
 
 
 class TossClient:
     """Async client for Toss Shopping OpenAPI with OAuth2 auth."""
 
     def __init__(self):
-        self.access_key = TOSS_ACCESS_KEY
-        self.secret_key = TOSS_SECRET_KEY
+        self.access_key = config.TOSS_ACCESS_KEY
+        self.secret_key = config.TOSS_SECRET_KEY
         self._client: httpx.AsyncClient | None = None
         self._token: str | None = None
         self._token_expires_at: float = 0
@@ -55,7 +72,7 @@ class TossClient:
                 "grant_type": "client_credentials",
                 "client_id": self.access_key,
                 "client_secret": self.secret_key,
-                "scope": "toss-shopping-fep:read toss-shopping-fep:write",
+                "scope": config.TOSS_OAUTH_SCOPE,
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
@@ -138,9 +155,14 @@ class TossClient:
         if not result or result.get("resultType") != "FAIL":
             return
         error_info = result.get("error") or {}
-        error_code = error_info.get("errorCode") or "INVALID_REQUEST"
-        reason = error_info.get("reason") or fallback_message
-        raise RuntimeError(f"{error_code}: {reason}")
+        error_code = str(error_info.get("errorCode") or "INVALID_REQUEST")
+        reason = str(error_info.get("reason") or fallback_message)
+        raise TossApiError(
+            f"{error_code}: {reason}",
+            error_code=error_code,
+            reason=reason,
+            raw=error_info,
+        )
 
     async def get_orders(
         self,
@@ -183,11 +205,18 @@ class TossClient:
             if not result:
                 break
 
-            # Toss API wraps data in success.results
+            # Toss API wraps data in success.results and may return HTTP 200 with resultType=FAIL.
             if result.get("resultType") == "FAIL":
-                error_info = result.get("error", {})
-                logger.error(f"토스 주문 API 실패: {error_info}")
-                raise RuntimeError(f"토스 주문 조회 API 실패: {error_info}")
+                error_info = result.get("error", {}) or {}
+                error_code = str(error_info.get("errorCode") or "TOSS_API_FAIL")
+                reason = str(error_info.get("reason") or error_info or "토스 주문 조회 실패")
+                logger.error("토스 주문 API 실패: %s", error_info)
+                raise TossApiError(
+                    f"토스 주문 조회 API 실패: {error_code} - {reason}",
+                    error_code=error_code,
+                    reason=reason,
+                    raw=error_info,
+                )
 
             data = result.get("success") or result
             items = data.get("results", [])
@@ -232,6 +261,20 @@ class TossClient:
             "partnerName": PARTNER_NAME,
         }
 
+        def _needs_confirm(exc: Exception) -> bool:
+            """결제완료(PAID) 상태라 운송장 등록이 거부된 경우인지 판별.
+
+            - 실제 HTTP 400
+            - HTTP 200 envelope FAIL → TossApiError (예: "주문상품의 상태가
+              '상품준비중' 혹은 '배송중'이 아닙니다") ← 이 케이스가 실제로 발생함
+            """
+            if isinstance(exc, httpx.HTTPStatusError):
+                return exc.response.status_code == 400
+            if isinstance(exc, TossApiError):
+                text = f"{getattr(exc, 'reason', '') or ''} {exc}"
+                return ("상품준비중" in text) or ("배송중" in text) or ("상태" in text)
+            return False
+
         try:
             result = await self._request(
                 "PUT",
@@ -240,11 +283,11 @@ class TossClient:
             )
             self._raise_if_failed(result, "토스 운송장 등록 실패")
             return result
-        except (httpx.HTTPStatusError, RuntimeError) as e:
-            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code != 400:
+        except (httpx.HTTPStatusError, TossApiError) as e:
+            if not _needs_confirm(e):
                 raise
             logger.info(
-                f"운송장 등록 실패 → 주문 확인 후 재시도 "
+                f"운송장 등록 실패(상품준비중 아님) → 주문 확인(PREPARING_PRODUCT) 후 재시도 "
                 f"(orderProductId={order_product_id}) | 원본 에러: {e}"
             )
             try:
@@ -255,7 +298,7 @@ class TossClient:
                     f"주문 확인 실패 (무시하고 재시도): {confirm_err}"
                 )
             # 확인 처리 후 API 반영 대기
-            await asyncio.sleep(1)
+            await asyncio.sleep(1.5)
             result = await self._request(
                 "PUT",
                 "/api/v3/shopping-fep/orders/products/delivery",

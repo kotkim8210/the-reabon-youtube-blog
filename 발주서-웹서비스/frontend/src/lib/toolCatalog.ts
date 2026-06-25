@@ -28,40 +28,40 @@ export const TOOL_CATALOG: ToolConfig[] = [
   },
   {
     id: 'myeongi-unified',
-    title: '명이나물+애플초당옥수수',
-    description: '쥬얼리프룻 발주서 생성 + 운송장번호 입력',
+    title: '명이나물+애플초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자',
+    description: '쥬얼리프룻 발주서 생성(쿠팡+토스 통합) + 운송장번호 입력',
     icon: '🌿',
     color: 'green',
     kind: 'unified',
   },
   {
     id: 'kolrabi-unified',
-    title: '콜라비+성주참외 알뜰과',
-    description: '제주다팜 발주서 생성 + 운송장번호 입력',
+    title: '콜라비·초당옥수수(제주다팜)',
+    description: '콜라비·초당옥수수 제주다팜 발주서 생성 + 운송장번호 입력 (애플초당옥수수·성주참외 알뜰과는 명이나물 메뉴)',
     icon: '🥬',
     color: 'green',
     kind: 'unified',
   },
   {
     id: 'tomato-unified',
-    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박 6/7/8kg',
-    description: '발주서 생성 + 운송장번호 입력',
-    icon: '🍅🍈🌿🍉',
+    title: '대저토마토·남해땅두릅·신비복숭아',
+    description: '제이비티엠 발주서 생성 + 운송장번호 입력 (초당옥수수는 콜라비(제주다팜) 메뉴로 이동)',
+    icon: '🍅🍈🌿🍑',
     color: 'red',
     kind: 'unified',
   },
   {
     id: 'toss-watermelon-order',
-    title: '토스 수박 6/7/8kg 발주서 생성',
-    description: 'DeliveryList 없이 토스 API 수박 6/7/8kg 주문만 제이비티 발주서로 출력합니다.',
+    title: '올웨이즈 쥬얼리 발주 + 토스 운송장 등록',
+    description: '올웨이즈 주문 → 쥬얼리프룻 발주서 + 토스 운송장 자동등록. (토스 주문 수집은 명이나물 메뉴로 일원화)',
     icon: '🍉',
     color: 'red',
     kind: 'order',
   },
   {
     id: 'temu-order',
-    title: '테무 수박 발주서 생성',
-    description: '테무 order_export 엑셀/CSV로 발주서를 만들고, 거래처 송장파일을 테무 배송확인 양식으로 변환합니다.',
+    title: '테무 수박·성주참외·고구마 발주서 생성',
+    description: '테무 order_export 엑셀/CSV로 수박·성주참외는 쥬얼리프룻 발주서, 고구마는 해달 발주서(한진양식)로 만들고, 거래처 송장파일을 테무 배송확인 양식으로 변환합니다.',
     icon: '🛒',
     color: 'red',
     kind: 'order',
@@ -103,12 +103,20 @@ export const TOOL_CATALOG: ToolConfig[] = [
 
 // --- Per-user preferences (localStorage) ---
 
+interface ToolOverride {
+  title?: string;
+  description?: string;
+}
+
 interface ToolPrefs {
   hidden: string[];   // 숨김 처리된 tool id
   deleted: string[];  // 삭제 처리된 tool id (휴지통)
+  renamed: Record<string, ToolOverride>;  // 사용자 지정 이름/설명 override
+  sectionTitles: Record<string, string>;  // 통합 페이지 섹션 제목 override (key별 커스텀 텍스트)
+  order: string[];    // 사용자 지정 카드 표시 순서 (tool id 순서; 미포함 id는 카탈로그 순서로 뒤에)
 }
 
-const EMPTY_PREFS: ToolPrefs = { hidden: [], deleted: [] };
+const EMPTY_PREFS: ToolPrefs = { hidden: [], deleted: [], renamed: {}, sectionTitles: {}, order: [] };
 
 function prefsKey(userId: number | string | null | undefined): string {
   return `tool-prefs:${userId ?? 'anon'}`;
@@ -122,6 +130,9 @@ export function loadToolPrefs(userId: number | string | null | undefined): ToolP
     return {
       hidden: Array.isArray(parsed.hidden) ? parsed.hidden : [],
       deleted: Array.isArray(parsed.deleted) ? parsed.deleted : [],
+      renamed: (parsed.renamed && typeof parsed.renamed === 'object') ? parsed.renamed : {},
+      sectionTitles: (parsed.sectionTitles && typeof parsed.sectionTitles === 'object') ? parsed.sectionTitles : {},
+      order: Array.isArray(parsed.order) ? parsed.order : [],
     };
   } catch {
     return { ...EMPTY_PREFS };
@@ -166,14 +177,89 @@ export function restoreTool(userId: number | string | null | undefined, toolId: 
   return prefs;
 }
 
+export function renameTool(
+  userId: number | string | null | undefined,
+  toolId: string,
+  title: string | undefined,
+  description: string | undefined,
+): ToolPrefs {
+  const prefs = loadToolPrefs(userId);
+  const entry: ToolOverride = { ...(prefs.renamed[toolId] || {}) };
+  if (title !== undefined) {
+    const t = title.trim();
+    if (t) entry.title = t;
+    else delete entry.title;
+  }
+  if (description !== undefined) {
+    const d = description.trim();
+    if (d) entry.description = d;
+    else delete entry.description;
+  }
+  if (Object.keys(entry).length > 0) prefs.renamed[toolId] = entry;
+  else delete prefs.renamed[toolId];
+  saveToolPrefs(userId, prefs);
+  return prefs;
+}
+
+/** 카탈로그 기본값에 사용자 override(이름/설명)를 적용한 ToolConfig를 반환 */
+export function applyToolOverride(tool: ToolConfig, prefs: ToolPrefs): ToolConfig {
+  const ov = prefs.renamed[tool.id];
+  if (!ov) return tool;
+  return {
+    ...tool,
+    title: ov.title ?? tool.title,
+    description: ov.description ?? tool.description,
+  };
+}
+
 export function resetToolPrefs(userId: number | string | null | undefined): ToolPrefs {
-  saveToolPrefs(userId, { ...EMPTY_PREFS });
-  return { ...EMPTY_PREFS };
+  const empty: ToolPrefs = { hidden: [], deleted: [], renamed: {}, sectionTitles: {}, order: [] };
+  saveToolPrefs(userId, empty);
+  return empty;
+}
+
+/** 카드 표시 순서 저장 (ids 순서대로; 미포함 id는 카탈로그 순서로 뒤에 붙음) */
+export function setToolOrder(
+  userId: number | string | null | undefined,
+  ids: string[],
+): ToolPrefs {
+  const prefs = loadToolPrefs(userId);
+  prefs.order = ids;
+  saveToolPrefs(userId, prefs);
+  return prefs;
+}
+
+/** ToolConfig 배열을 사용자 지정 순서(order)대로 정렬. order에 없는 항목은 기존 카탈로그 순서로 뒤에. */
+export function applyToolOrder(tools: ToolConfig[], order: string[]): ToolConfig[] {
+  if (!order || order.length === 0) return tools;
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const catalogIndex = (id: string) => TOOL_CATALOG.findIndex((t) => t.id === id);
+  return [...tools].sort((a, b) => {
+    const ra = rank.has(a.id) ? (rank.get(a.id) as number) : Number.MAX_SAFE_INTEGER;
+    const rb = rank.has(b.id) ? (rank.get(b.id) as number) : Number.MAX_SAFE_INTEGER;
+    if (ra !== rb) return ra - rb;
+    return catalogIndex(a.id) - catalogIndex(b.id);
+  });
+}
+
+/** 통합 페이지 섹션 제목 override 저장 (빈 값이면 기본값으로 복원) */
+export function setSectionTitle(
+  userId: number | string | null | undefined,
+  key: string,
+  title: string,
+): ToolPrefs {
+  const prefs = loadToolPrefs(userId);
+  const t = (title || '').trim();
+  if (t) prefs.sectionTitles[key] = t;
+  else delete prefs.sectionTitles[key];
+  saveToolPrefs(userId, prefs);
+  return prefs;
 }
 
 export function getVisibleTools(userId: number | string | null | undefined): ToolConfig[] {
   const prefs = loadToolPrefs(userId);
-  return TOOL_CATALOG.filter(
-    (t) => !prefs.deleted.includes(t.id) && !prefs.hidden.includes(t.id),
-  );
+  const visible = TOOL_CATALOG
+    .filter((t) => !prefs.deleted.includes(t.id) && !prefs.hidden.includes(t.id))
+    .map((t) => applyToolOverride(t, prefs));
+  return applyToolOrder(visible, prefs.order);
 }

@@ -158,6 +158,7 @@ function OrderCollectionTab() {
   const [coupangLoading, setCoupangLoading] = useState(false);
   const [coupangResult, setCoupangResult] = useState<ProcessResult | null>(null);
   const [coupangError, setCoupangError] = useState('');
+  const [mergedAll, setMergedAll] = useState(false);  // 전체 수집: 토스를 쿠팡 발주서에 통합
 
   // Toss state
   const [tossLoading, setTossLoading] = useState(false);
@@ -194,34 +195,31 @@ function OrderCollectionTab() {
     { days: 4, label: '4일', sub: '주말직후 월요일' },
   ];
 
-  // Collect from both platforms simultaneously
+  // 전체 수집: 쿠팡 + 토스 주문을 하나의 해달 발주서로 통합 출력
   const handleCollectAll = async () => {
     setCoupangLoading(true);
-    setTossLoading(true);
     setCoupangError('');
-    setTossError('');
     setCoupangResult(null);
+    setTossError('');
     setTossResult(null);
-
-    const coupangPromise = processGogumaAuto(fromDate, toDate)
-      .then((res) => setCoupangResult(res))
-      .catch((err) => setCoupangError(err instanceof Error ? err.message : '쿠팡 처리 중 오류'))
-      .finally(() => setCoupangLoading(false));
-
-    const tossPromise = processTossOrder(fromDate, toDate)
-      .then((res) => setTossResult(res))
-      .catch((err) => setTossError(err instanceof Error ? err.message : '토스 처리 중 오류'))
-      .finally(() => setTossLoading(false));
-
-    await Promise.allSettled([coupangPromise, tossPromise]);
+    setMergedAll(true);
+    try {
+      const res = await processGogumaAuto(fromDate, toDate, true);
+      setCoupangResult(res);
+    } catch (err) {
+      setCoupangError(err instanceof Error ? err.message : '전체 수집 중 오류');
+    } finally {
+      setCoupangLoading(false);
+    }
   };
 
   const handleCollectCoupang = async () => {
     setCoupangLoading(true);
     setCoupangError('');
     setCoupangResult(null);
+    setMergedAll(false);
     try {
-      const res = await processGogumaAuto(fromDate, toDate);
+      const res = await processGogumaAuto(fromDate, toDate, false);
       setCoupangResult(res);
     } catch (err) {
       setCoupangError(err instanceof Error ? err.message : '쿠팡 처리 중 오류');
@@ -234,6 +232,7 @@ function OrderCollectionTab() {
     setTossLoading(true);
     setTossError('');
     setTossResult(null);
+    setMergedAll(false);
     try {
       const res = await processTossOrder(fromDate, toDate);
       setTossResult(res);
@@ -358,9 +357,9 @@ function OrderCollectionTab() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
           <div className="flex items-center gap-2 mb-4">
             <PlatformBadge platform="coupang" />
-            <span className="text-sm font-bold text-gray-900">발주서</span>
+            <span className="text-sm font-bold text-gray-900">{mergedAll ? '통합 발주서 (쿠팡 + 토스)' : '발주서'}</span>
           </div>
-          {coupangLoading && <Spinner text="쿠팡 API에서 결제완료 주문을 수집 중..." color="orange" />}
+          {coupangLoading && <Spinner text={mergedAll ? '쿠팡 + 토스 주문을 수집해 통합 중...' : '쿠팡 API에서 결제완료 주문을 수집 중...'} color="orange" />}
           {coupangError && <ErrorBanner message={coupangError} />}
           {coupangResult && (
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 animate-fade-in">
@@ -409,7 +408,12 @@ function OrderCollectionTab() {
               </button>
             </div>
           )}
-          {!tossLoading && !tossResult && !tossError && (
+          {!tossLoading && !tossResult && !tossError && mergedAll && (
+            <p className="text-sm text-green-700 text-center py-8 bg-green-50 border border-green-200 rounded-xl">
+              토스 주문은 왼쪽 <b>통합 발주서(쿠팡+토스)</b>에 합쳐졌습니다. ✓
+            </p>
+          )}
+          {!tossLoading && !tossResult && !tossError && !mergedAll && (
             <p className="text-sm text-gray-400 text-center py-8">기간을 선택하고 수집 버튼을 클릭하세요</p>
           )}
         </div>

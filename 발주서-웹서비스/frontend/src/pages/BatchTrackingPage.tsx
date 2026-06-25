@@ -87,7 +87,7 @@ const VENDORS: VendorConfig[] = [
     id: 'tomato',
     toolId: 'tomato-tracking',
     preferenceIds: ['tomato-unified'],
-    label: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박',
+    label: '대저토마토·남해땅두릅·초당옥수수·신비복숭아',
     icon: '🍅🥒🌿',
     color: {
       border: 'border-red-200',

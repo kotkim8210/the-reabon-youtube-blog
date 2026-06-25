@@ -19,11 +19,13 @@ from pydantic import BaseModel
 
 from app import config
 from app.coupang.client import CoupangApiError
+from app.toss.client import TossApiError
 from app.processors import (
     batch_tracking_merge,
     chamoe_mixed_order,
     chamdureup_order,
     chamdureup_tracking,
+    event_order,
     gaegeolmu_order,
     gaegeolmu_tracking,
     goguma_auto,
@@ -241,6 +243,25 @@ def _raise_coupang_http_error(exc: CoupangApiError) -> None:
     )
 
 
+def _toss_api_error_detail(exc: TossApiError) -> str:
+    if exc.is_invalid_ip:
+        return (
+            "토스 API IP 허용 오류입니다. "
+            "토스가 현재 rj-balju 서버의 주문 조회 요청을 '허가되지 않은 IP'로 거부했습니다. "
+            "토스 쇼핑 파트너스 > 쇼핑 > 연동 관리 > 직접 연동/Open API 키의 IP 주소 목록에도 "
+            "이번 서버 출구 IP(화면에 표시된 79.127.159.103)를 추가한 뒤 다시 실행해주세요. "
+            f"원문: {exc.error_code or 'INVALID_IP'} - {exc.reason or exc.message}"
+        )
+    return f"토스 API 오류: {exc.message}"
+
+
+def _raise_toss_http_error(exc: TossApiError) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN if exc.is_invalid_ip else status.HTTP_502_BAD_GATEWAY,
+        detail=_toss_api_error_detail(exc),
+    )
+
+
 async def _post_proxy_json(operation: str, payload: dict) -> httpx.Response:
     async with httpx.AsyncClient(timeout=PROXY_TIMEOUT) as client:
         response = await client.post(
@@ -320,7 +341,7 @@ async def process_kolrabi_order(
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="제주다팜 발주로 출력할 콜라비 또는 성주참외 알뜰과 주문을 찾지 못했습니다.",
+                detail="제주다팜 발주로 출력할 콜라비 또는 초당옥수수 주문을 찾지 못했습니다.",
             )
 
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
@@ -406,11 +427,35 @@ async def process_chamdureup_tracking(
 @app.post("/api/process/myeongi-order")
 async def process_myeongi_order(
     delivery_file: UploadFile = File(...),
+    toss_from_date: str = Form(""),
+    toss_to_date: str = Form(""),
+    include_toss: str = Form(""),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
-        output_bytes, filename, stats = myeongi_order.process(delivery_bytes)
+        # 토스 쥬얼리 주문(수박·성주참외·신비복숭아·망고수박)을 토스 API로 수집해 함께 발주.
+        # 토스 신비복숭아 수집은 이 페이지(명이)로 일원화됨.
+        toss_entries = []
+        toss_error = ""
+        collect_dates = None
+        if toss_from_date and toss_to_date:
+            collect_dates = (toss_from_date, toss_to_date)
+        elif include_toss.lower() == "true":
+            today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+            collect_dates = (today, today)
+        if collect_dates:
+            try:
+                toss_entries = await tomato_order.collect_toss_jewelry_orders(*collect_dates)
+            except Exception as toss_exc:
+                toss_error = str(toss_exc)
+                logger.warning(f"토스 쥬얼리 수집 실패(발주는 계속): {toss_exc}")
+
+        output_bytes, filename, stats = myeongi_order.process(
+            delivery_bytes, toss_entries=toss_entries
+        )
+        if toss_error:
+            stats = {**(stats or {}), "toss_error": toss_error}
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
         )
@@ -420,6 +465,27 @@ async def process_myeongi_order(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.exception("명이나물 발주 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/event-winner-order")
+async def process_event_winner_order(
+    winners_file: UploadFile = File(...),
+    user: dict = Depends(verify_token),
+):
+    """라이브 이벤트 당첨자 CSV → 쥬얼리프룻 발주서 (가성비 랜덤과)."""
+    try:
+        csv_bytes = await winners_file.read()
+        output_bytes, filename, stats = event_order.process(csv_bytes)
+        logger.info(f"이벤트 당첨자 발주 처리 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("이벤트 당첨자 발주 처리 중 오류")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",
@@ -436,31 +502,44 @@ async def process_tomato_order(
 ):
     try:
         delivery_bytes = await delivery_file.read()
-        toss_watermelon_entries = []
+        # 신비복숭아 3·4kg은 쿠팡(DeliveryList) + 토스(API)에서 모두 제이비티 발주로 합친다.
+        # (1·2kg은 명이/쥬얼리 메뉴, 수박·성주참외 등 다른 토스 품목은 명이로 일원화)
+        toss_peach_entries = []
+        toss_peach_error = ""
+        collect_dates = None
         if toss_from_date and toss_to_date:
-            toss_watermelon_entries = await tomato_order.collect_toss_watermelon_orders(
-                toss_from_date,
-                toss_to_date,
-            )
+            collect_dates = (toss_from_date, toss_to_date)
         elif include_toss.lower() == "true":
             today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
-            toss_watermelon_entries = await tomato_order.collect_toss_watermelon_orders(today, today)
+            collect_dates = (today, today)
+        if collect_dates:
+            try:
+                toss_peach_entries = await tomato_order.collect_toss_peach_orders(
+                    *collect_dates, kgs=tomato_order.JBT_PEACH_KGS
+                )
+            except Exception as toss_exc:
+                toss_peach_error = str(toss_exc)
+                logger.warning(f"토스 신비복숭아 3·4kg 수집 실패(발주는 계속): {toss_exc}")
 
-        results = tomato_order.process_outputs(
-            delivery_bytes,
-            toss_watermelon_entries=toss_watermelon_entries,
-        )
+        results = tomato_order.process_outputs(delivery_bytes, toss_peach_entries=toss_peach_entries)
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="제이비티 발주로 출력할 대저토마토·성주참외(중소/로얄)·남해땅두릅·수박 6/7/8kg·초당옥수수 주문을 찾지 못했습니다. 성주참외 알뜰과는 콜라비/제주다팜 메뉴에서 출력됩니다.",
+                detail="제이비티 발주로 출력할 대저토마토·남해땅두릅·초당옥수수·신비복숭아 주문을 찾지 못했습니다. 수박·성주참외(로얄/중소)는 쥬얼리프룻 메뉴, 알뜰과는 콜라비 메뉴에서 출력됩니다.",
             )
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
         for _, _, item_stats in results:
             await record_sales_from_process_stats(user["user_id"], item_stats, ymd=sales_ymd)
 
+        toss_peach_info = {}
+        if toss_peach_entries:
+            toss_peach_info["toss_peach_orders"] = len(toss_peach_entries)
+        if toss_peach_error:
+            toss_peach_info["toss_peach_error"] = toss_peach_error
+
         if len(results) == 1:
             output_bytes, filename, stats = results[0]
+            stats = {**(stats or {}), **toss_peach_info}
             response = make_excel_response(output_bytes, filename, stats)
         else:
             kst = timezone(timedelta(hours=9))
@@ -468,6 +547,7 @@ async def process_tomato_order(
             stats = {
                 "files": len(results),
                 "total": sum(int((item_stats or {}).get("total", 0)) for _, _, item_stats in results),
+                **toss_peach_info,
             }
             response = make_zip_response(
                 [(output_bytes, output_name) for output_bytes, output_name, _ in results],
@@ -492,25 +572,54 @@ async def process_tomato_order(
 async def process_toss_watermelon_order(
     toss_from_date: str = Form(""),
     toss_to_date: str = Form(""),
+    alwayz_file: UploadFile | None = File(default=None),
     user: dict = Depends(verify_token),
 ):
     try:
+        alwayz_bytes = await alwayz_file.read() if alwayz_file else None
+        # ※ 토스 수집은 명이(쥬얼리) 메뉴로 일원화됨 — 이 메뉴는 올웨이즈 파일만 처리.
+        del toss_from_date, toss_to_date
         today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
-        from_date = toss_from_date or today
-        to_date = toss_to_date or today
-        output_bytes, filename, stats = await tomato_order.process_toss_watermelon_order(
+        from_date = to_date = today
+        results = await tomato_order.process_toss_watermelon_order(
             from_date,
             to_date,
+            alwayz_bytes=alwayz_bytes,
+            collect_toss=False,
         )
-        await record_sales_from_process_stats(
-            user["user_id"], stats, ymd=from_date if from_date == to_date else None
+        if not results:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="토스/올웨이즈에서 발주 대상 주문을 찾지 못했습니다.",
+            )
+        sales_ymd = from_date if from_date == to_date else None
+        for _, _, item_stats in results:
+            await record_sales_from_process_stats(user["user_id"], item_stats, ymd=sales_ymd)
+
+        if len(results) == 1:
+            output_bytes, filename, stats = results[0]
+            logger.info(f"토스 발주 처리 완료(단일): {stats}")
+            return make_excel_response(output_bytes, filename, stats)
+
+        kst = timezone(timedelta(hours=9))
+        zip_name = f"토스발주묶음_쥬얼리_제이비티({datetime.now(kst).strftime('%Y%m%d')}).zip"
+        zip_stats = {
+            "files": len(results),
+            "total": sum(int((s or {}).get("total", 0)) for _, _, s in results),
+            "filenames": [fn for _, fn, _ in results],
+        }
+        logger.info(f"토스 발주 처리 완료(묶음): {zip_stats}")
+        return make_zip_response(
+            [(b, fn) for b, fn, _ in results],
+            zip_name,
+            zip_stats,
         )
-        logger.info(f"토스 수박 6/7/8kg 발주 처리 완료: {stats}")
-        return make_excel_response(output_bytes, filename, stats)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        logger.exception("토스 수박 6/7/8kg 발주 처리 중 오류")
+        logger.exception("토스 발주 처리 중 오류")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",
@@ -536,7 +645,7 @@ async def process_temu_order(
                 return make_excel_response(output_bytes, filename, stats)
 
             kst = timezone(timedelta(hours=9))
-            filename = f"테무_수박_발주묶음({datetime.now(kst).strftime('%Y%m%d')}).zip"
+            filename = f"테무_발주묶음({datetime.now(kst).strftime('%Y%m%d')}).zip"
             stats = temu_order.combine_output_stats(outputs)
             logger.info(f"테무 파일 발주 묶음 처리 완료: {stats}")
             return make_zip_response(
@@ -727,6 +836,9 @@ async def process_goguma_order(
         )
         logger.info(f"고구마 발주 처리 완료: {stats}")
         return make_excel_response(output_bytes, filename, stats)
+    except TossApiError as e:
+        logger.warning("Goguma Toss order collection failed: %s", e.message)
+        _raise_toss_http_error(e)
     except FileNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -740,6 +852,7 @@ async def process_goguma_order(
 class GogumaAutoRequest(BaseModel):
     from_date: str
     to_date: str
+    include_toss: bool = False
 
 
 @app.post("/api/process/goguma-auto")
@@ -751,13 +864,13 @@ async def process_goguma_auto(
         if _goguma_proxy_enabled():
             proxy_response = await _post_proxy_json(
                 "goguma-auto",
-                {"from_date": req.from_date, "to_date": req.to_date},
+                {"from_date": req.from_date, "to_date": req.to_date, "include_toss": req.include_toss},
             )
             await _record_proxy_sales(user["user_id"], proxy_response)
             return _proxy_excel_response(proxy_response)
 
         output_bytes, filename, stats = await goguma_auto.process_from_api(
-            req.from_date, req.to_date
+            req.from_date, req.to_date, include_toss=req.include_toss
         )
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=req.from_date if req.from_date == req.to_date else None
@@ -875,6 +988,56 @@ async def process_toss_watermelon_tracking(
         )
 
 
+@app.post("/api/process/alwayz-jbt-tracking")
+async def process_alwayz_jbt_tracking(
+    tomato_reply_file: UploadFile = File(...),
+    alwayz_file: UploadFile = File(...),
+    _token: dict = Depends(verify_token),
+):
+    """제이비티 회신 파일 운송장번호를 올웨이즈 주문내역 파일에 입력해 반환."""
+    try:
+        tomato_reply_bytes = await tomato_reply_file.read()
+        alwayz_bytes = await alwayz_file.read()
+        output_bytes, filename, stats = tomato_tracking.process_alwayz_tracking(
+            tomato_reply_bytes, alwayz_bytes
+        )
+        logger.info(f"올웨이즈 송장 처리 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("올웨이즈 송장 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/toss-excel-tracking")
+async def process_toss_excel_tracking(
+    tomato_reply_file: UploadFile = File(...),
+    toss_export_file: UploadFile = File(...),
+    _token: dict = Depends(verify_token),
+):
+    """거래처 회신 운송장번호를 토스 '엑셀 일괄발송' 파일에 채워 반환."""
+    try:
+        reply_bytes = await tomato_reply_file.read()
+        toss_export_bytes = await toss_export_file.read()
+        output_bytes, filename, stats = tomato_tracking.process_toss_excel_tracking(
+            reply_bytes, toss_export_bytes
+        )
+        logger.info(f"토스 엑셀 송장 입력 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("토스 엑셀 송장 입력 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
 @app.post("/api/process/goguma-tracking-api")
 async def process_goguma_tracking_api_endpoint(
     haedal_file: UploadFile = File(...),
@@ -944,6 +1107,9 @@ async def process_toss_order(
         )
         logger.info(f"토스 발주 처리 완료: {stats}")
         return make_excel_response(output_bytes, filename, stats)
+    except TossApiError as e:
+        logger.warning("Toss order API failed: %s", e.message)
+        _raise_toss_http_error(e)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except FileNotFoundError as e:
@@ -984,6 +1150,9 @@ async def process_toss_tracking_api_endpoint(
             f"성공={result['success']}, 실패={result['fail']}, 스킵={result['skip']}"
         )
         return result
+    except TossApiError as e:
+        logger.warning("Toss tracking API failed: %s", e.message)
+        _raise_toss_http_error(e)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -1037,6 +1206,9 @@ async def internal_process_goguma_order(
             delivery_bytes, template_bytes, alwayz_bytes, toss_entries, toss_file_bytes
         )
         return make_excel_response(output_bytes, filename, stats)
+    except TossApiError as e:
+        logger.warning("Internal goguma Toss order collection failed: %s", e.message)
+        _raise_toss_http_error(e)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except FileNotFoundError as e:
@@ -1057,7 +1229,7 @@ async def internal_process_goguma_auto(
     del _guard
     try:
         output_bytes, filename, stats = await goguma_auto.process_from_api(
-            req.from_date, req.to_date
+            req.from_date, req.to_date, include_toss=req.include_toss
         )
         return make_excel_response(output_bytes, filename, stats)
     except CoupangApiError as e:
@@ -1108,6 +1280,9 @@ async def internal_process_toss_order(
             req.from_date, req.to_date
         )
         return make_excel_response(output_bytes, filename, stats)
+    except TossApiError as e:
+        logger.warning("Internal toss order API failed: %s", e.message)
+        _raise_toss_http_error(e)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except FileNotFoundError as e:
@@ -1129,6 +1304,9 @@ async def internal_process_toss_tracking_api(
     try:
         haedal_bytes = await haedal_file.read()
         return await toss_auto.process_toss_tracking(haedal_bytes)
+    except TossApiError as e:
+        logger.warning("Internal toss tracking API failed: %s", e.message)
+        _raise_toss_http_error(e)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:

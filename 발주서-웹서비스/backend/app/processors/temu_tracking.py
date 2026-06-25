@@ -32,7 +32,8 @@ TEMPLATE_NAME = "테무_배송확인_템플릿.xlsx"
 SHIP_SHEET = "배송 확인"
 SHIP_FROM = "식품애착"           # 배송 출발지(테무 배송설정 등록 이름)
 CARRIER_SMALL = "롯데택배"       # 2/3/5kg (쥬얼리프룻)
-CARRIER_LARGE = "Hanjin"         # 6/7/8kg (제이비티)
+CARRIER_LARGE = "롯데택배"       # 6/7/8kg — 2026-06부터 제이비티→쥬얼리프룻 발주 전환, 기본 롯데
+                                  # (실제 송장파일에 택배사가 있으면 그 값이 우선 적용됨)
 SMALL_KGS = {2, 3, 5}
 LARGE_KGS = {6, 7, 8}
 
@@ -227,7 +228,7 @@ def _parse_tracking_files(tracking_files: list[tuple[str, bytes]]):
             header_i = None
             for i, row in enumerate(rows[:10]):
                 joined = " ".join(_norm(c) for c in row if c is not None)
-                if any(k in joined for k in ("송장", "운송장", "추적")) and any(
+                if any(k in joined for k in ("송장", "운송장", "추적", "출고번호")) and any(
                     k in joined for k in ("수령인", "이름", "성함", "주문", "받는")
                 ):
                     header_i = i
@@ -240,18 +241,24 @@ def _parse_tracking_files(tracking_files: list[tuple[str, bytes]]):
                 key = _norm(v)
                 if not key:
                     continue
-                if "tracking" not in col and any(k in key for k in ("송장", "운송장", "추적")) and "주문" not in key:
+                if "tracking" not in col and any(k in key for k in ("송장", "운송장", "추적", "출고번호")) and "주문" not in key:
                     col["tracking"] = j
-                if "order" not in col and any(k in key for k in ("주문번호", "주문id", "주문 id")):
+                if "order" not in col and any(k in key for k in ("주문번호", "주문id", "orderid", "orderno")):
                     col["order"] = j
-                if "courier" not in col and any(k in key for k in ("택배사", "배송사", "운송사", "courier", "carrier")):
+                if "courier" not in col and any(
+                    k in key for k in ("택배사", "배송사", "운송사", "지불조건", "courier", "carrier")
+                ):
                     col["courier"] = j
-                if "name" not in col and (any(k in key for k in ("수령인", "성함", "받는")) or key == "이름"):
+                if "name" not in col and (
+                    any(k in key for k in ("수령인", "성함", "받는", "받으시는분")) or key == "이름"
+                ):
                     col["name"] = j
-                if "phone" not in col and any(k in key for k in ("연락처", "전화")):
+                if "phone" not in col and any(k in key for k in ("연락처", "전화", "핸드폰", "휴대폰", "이동통신")):
                     col["phone"] = j
-                if "addr" not in col and "주소" in key:
+                if "addr" not in col and any(k in key for k in ("주소", "총주소")):
                     col["addr"] = j
+                if "product" not in col and any(k in key for k in ("품목명", "상품명", "제품명", "상품")):
+                    col["product"] = j
 
             t = col.get("tracking")
             if t is None:
@@ -272,6 +279,7 @@ def _parse_tracking_files(tracking_files: list[tuple[str, bytes]]):
                     "name": _norm(row[col["name"]]) if col.get("name") is not None and col["name"] < len(row) else "",
                     "phone": _digits(row[col["phone"]]) if col.get("phone") is not None and col["phone"] < len(row) else "",
                     "address": _norm(row[col["addr"]]) if col.get("addr") is not None and col["addr"] < len(row) else "",
+                    "product": _norm(row[col["product"]]) if col.get("product") is not None and col["product"] < len(row) else "",
                 }
                 total += 1
                 if entry["order_id"]:
@@ -305,6 +313,11 @@ def _match(order: dict, by_order: dict, by_name: dict) -> dict | None:
                 c for c in cands
                 if c["address"] and (c["address"] in order["address"] or order["address"] in c["address"])
             ]
+            if len(pick) == 1:
+                return pick[0]
+        option_key = _norm(order.get("option"))
+        if option_key:
+            pick = [c for c in cands if c.get("product") and option_key in c["product"]]
             if len(pick) == 1:
                 return pick[0]
     return None

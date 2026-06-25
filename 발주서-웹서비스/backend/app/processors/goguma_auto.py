@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
-from app.coupang.client import coupang_client
+from app.coupang.client import coupang_goguma_client
 from app.processors import goguma_order
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ async def collect_orders(from_date: str, to_date: str) -> list[dict]:
         next_token = None
 
         while True:
-            result = await coupang_client.get_order_sheets(
+            result = await coupang_goguma_client.get_order_sheets(
                 created_at_from=from_date,
                 created_at_to=to_date,
                 order_status=order_status,

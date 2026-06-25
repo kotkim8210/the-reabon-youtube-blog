@@ -183,7 +183,7 @@ function ProductForm({
               </div>
               <input value={opt.vendor_option_name}
                 onChange={e => updateOption(i, 'vendor_option_name', e.target.value)}
-                placeholder="발주서에 표시될 이름"
+                placeholder="발주서 표시명 (예: 꿀고구마 {kg})"
                 className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400" />
               <input value={opt.template_target_cell}
                 onChange={e => updateOption(i, 'template_target_cell', e.target.value)}
@@ -221,6 +221,10 @@ function ProductForm({
           <strong>셀 비움</strong> = 행 추가 모드 (고객별 발주서)&nbsp;·&nbsp;
           <strong>셀 입력(예:N5)</strong> = 합산 모드 (수량만 기재)&nbsp;·&nbsp;
           <span className="text-emerald-600">단가 입력 시 발주서 단가 관리에 활용</span>
+        </p>
+        <p className="text-[10px] text-gray-400 mt-1">
+          표시명에 <strong>{'{kg}'}</strong>·<strong>{'{n}'}</strong> 넣으면 주문 옵션에서 자동 치환 —
+          예: <code className="text-indigo-500">꿀고구마 {'{kg}'}</code> + 주문 "5kg" → <code className="text-indigo-500">꿀고구마 5kg</code>
         </p>
       </div>
 

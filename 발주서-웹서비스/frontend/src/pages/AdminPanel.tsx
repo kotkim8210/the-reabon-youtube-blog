@@ -3,6 +3,7 @@ import { isAuthDisabled, useUser } from '../App';
 import {
   fetchUsers, createUser, toggleUserActive,
   fetchBlockedIPs, blockIP, unblockIP,
+  downloadTemuKolrabiGoodsWorkbook, downloadBlob,
   UserInfo, BlockedIP,
 } from '../api';
 
@@ -16,8 +17,9 @@ function AdminPanel() {
   const [newIP, setNewIP] = useState('');
   const [ipReason, setIpReason] = useState('');
   const [loading, setLoading] = useState(false);
+  const [goodsLoading, setGoodsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'users' | 'ips'>('users');
+  const [tab, setTab] = useState<'users' | 'ips' | 'goods'>('users');
 
   useEffect(() => {
     if (canAccess) {
@@ -94,6 +96,19 @@ function AdminPanel() {
     }
   };
 
+  const handleTemuKolrabiDownload = async () => {
+    setGoodsLoading(true);
+    setError('');
+    try {
+      const result = await downloadTemuKolrabiGoodsWorkbook();
+      downloadBlob(result.blob, result.filename);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '테무 콜라비 대량등록 엑셀 생성에 실패했습니다.');
+    } finally {
+      setGoodsLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">사용자 관리</h1>
@@ -121,6 +136,14 @@ function AdminPanel() {
           }`}
         >
           IP 차단 ({blockedIPs.length})
+        </button>
+        <button
+          onClick={() => setTab('goods')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            tab === 'goods' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          상품등록
         </button>
       </div>
 
@@ -288,6 +311,30 @@ function AdminPanel() {
             )}
           </div>
         </>
+      )}
+
+      {tab === 'goods' && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900">테무 콜라비 대량 상품등록</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                테무 업로드용 엑셀 템플릿에 콜라비 2kg, 3kg, 5kg SKU를 채워서 다운로드합니다.
+              </p>
+              <p className="text-xs text-gray-400 mt-2">
+                생성된 파일은 테무 판매자센터의 대량 상품등록 화면에서 직접 업로드하세요.
+              </p>
+            </div>
+            <button
+              onClick={handleTemuKolrabiDownload}
+              disabled={goodsLoading}
+              className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold
+                         hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {goodsLoading ? '생성 중...' : '테무 콜라비 엑셀 다운로드'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -51,6 +51,12 @@ def _semantic_option_keys(*values: object) -> set[str]:
         keys.update(f"kolrabi:{weight}kg" for weight in weights)
     if "참외" in text and any(token in text for token in ("알뜰", "혼합", "랜덤")):
         keys.update(f"chamoe-altteul:{weight}kg" for weight in weights)
+    # 초당옥수수 동명이인 구분: orderlist는 상품명에, DeliveryList는 옵션에 등급/수량이 있어
+    # 통째 문자열 비교로는 안 맞는다. 등급(특품/중품/상품/정품)+수량(N개) 의미키로 양쪽을 맞춘다.
+    if "옥수수" in text:
+        grade = next((g for g in ("특품", "중품", "상품", "정품") if g in text), "")
+        counts = set(re.findall(r"(\d+)\s*개", text))
+        keys.update(f"corn:{grade}:{count}개" for count in counts)
     return keys
 
 

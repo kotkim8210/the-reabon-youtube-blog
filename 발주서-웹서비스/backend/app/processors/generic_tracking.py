@@ -31,7 +31,11 @@ def normalize_text(value: object) -> str:
 def valid_tracking(value: object) -> str:
     text = normalize(value)
     digits = re.sub(r"\D", "", text)
-    if re.fullmatch(r"01[016789]\d{7,8}", digits):
+    if not digits:
+        return ""
+    # 0으로 시작하는 번호(휴대폰 010, 안심번호 0502/0503/0504, 유선 02/0XX, 우편번호 등)는
+    # 운송장이 아니다. 안심번호(0504-XXXX-XXXX=12자리)가 운송장으로 오인되던 버그 차단.
+    if digits.startswith("0"):
         return ""
     if 8 <= len(digits) <= 20:
         return digits
@@ -84,9 +88,8 @@ def detect_columns(ws) -> tuple[int, dict[str, int]]:
 def row_tracking(ws, row_idx: int, tracking_col: int | None, skip_cols: set[int] | None = None) -> str:
     skip_cols = skip_cols or set()
     if tracking_col:
-        tracking = valid_tracking(ws.cell(row=row_idx, column=tracking_col).value)
-        if tracking:
-            return tracking
+        # 송장 열이 감지되면 그 열만 신뢰 — 비어 있으면 빈값(스캔 금지). 전화/안심번호 오인 차단.
+        return valid_tracking(ws.cell(row=row_idx, column=tracking_col).value)
     max_col = min(ws.max_column, 50)
     scan_order = list(range(9, max_col + 1)) + list(range(1, min(8, max_col) + 1))
     for col_idx in scan_order:

@@ -57,9 +57,9 @@ interface ToolConfig {
 
 const toolConfigs: Record<string, ToolConfig> = {
   'kolrabi-order': {
-    title: '콜라비+성주참외 알뜰과(제주다팜) 발주서 생성',
+    title: '콜라비(제주다팜) 발주서 생성',
     description:
-      'DeliveryList에서 콜라비와 성주참외 가정용 혼합과 주문을 추출하여 제주다팜 발주서를 함께 생성합니다.',
+      'DeliveryList에서 콜라비(제주다팜) 발주서를 생성합니다. 성주참외 알뜰과는 명이나물(쥬얼리팜) 메뉴에서 함께 출력됩니다.',
     icon: '🥬',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'green',
@@ -101,7 +101,7 @@ const toolConfigs: Record<string, ToolConfig> = {
   'myeongi-order': {
     title: '명이나물+애플초당옥수수 발주서 생성',
     description:
-      'DeliveryList에서 쥬얼리프룻 발주 대상인 명이나물과 애플초당옥수수 주문을 추출하여 pbfcompany 발주서를 생성합니다. 수박 6/7/8kg은 제이비티 메뉴에서 출력합니다.',
+      'DeliveryList에서 쥬얼리프룻 발주 대상인 명이나물·애플초당옥수수·망고수박·수박 6/7/8kg·성주참외(로얄/중소) 주문을 추출하여 pbfcompany 발주서를 생성합니다.',
     icon: '🌿',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'green',
@@ -112,10 +112,10 @@ const toolConfigs: Record<string, ToolConfig> = {
     },
   },
   'tomato-order': {
-    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박 6/7/8kg 발주서 생성',
+    title: '대저토마토·남해땅두릅·신비복숭아 발주서 생성',
     description:
-      'DeliveryList에서 제이비티 발주 대상인 대저토마토·성주참외 중소/로얄·남해땅두릅·수박 6/7/8kg 주문을 추출하고, 토스 API 수박 주문도 함께 합칩니다.',
-    icon: '🍅🍈🌿🍉',
+      'DeliveryList에서 제이비티 발주 대상인 대저토마토·남해땅두릅·초당옥수수·신비복숭아 주문을 추출합니다. 수박·성주참외는 쥬얼리프룻 메뉴에서 출력합니다.',
+    icon: '🍅🍈🌿🍑',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'red',
     colorClasses: {
@@ -123,30 +123,29 @@ const toolConfigs: Record<string, ToolConfig> = {
       text: 'text-red-700',
       badge: 'bg-red-100 text-red-700',
     },
-    tossDateRange: true,
-    tossDateTitle: '토스 수박 6/7/8kg 주문 수집',
-    tossDateDescription: '날짜가 있으면 토스 API 수박 6/7/8kg 주문만 제이비티 발주서에 합칩니다.',
   },
   'toss-watermelon-order': {
-    title: '토스 수박 6/7/8kg 발주서 생성',
+    title: '올웨이즈 쥬얼리 발주서 생성 + 토스 운송장 등록',
     description:
-      'DeliveryList 없이 토스 API에서 수박 6/7/8kg 주문만 수집하여 제이비티 발주서를 생성합니다.',
+      '올웨이즈 주문내역 파일을 올리면 쥬얼리프룻 발주서로 출력합니다. ※ 토스 주문 수집은 명이나물(쥬얼리) 메뉴로 일원화되었습니다. (아래 토스 운송장 자동등록은 그대로 사용)',
     icon: '🍉',
-    files: [],
+    files: [
+      {
+        key: 'alwayz',
+        label: '올웨이즈 주문내역 파일',
+      },
+    ],
     color: 'red',
     colorClasses: {
       bg: 'bg-red-50',
       text: 'text-red-700',
       badge: 'bg-red-100 text-red-700',
     },
-    tossDateRange: true,
-    tossDateTitle: '토스 수박 6/7/8kg 주문 수집',
-    tossDateDescription: '선택한 기간의 토스 수박 6/7/8kg 주문만 제이비티 발주서로 출력합니다.',
   },
   'temu-order': {
-    title: '테무 수박 발주서 생성',
+    title: '테무 수박·성주참외·고구마 발주서 생성',
     description:
-      '테무 order_export 엑셀/CSV를 업로드하면 수박 발주서를 만들고, 아래에서 테무 배송확인 송장입력 파일도 생성할 수 있습니다.',
+      '테무 order_export 엑셀/CSV를 업로드하면 수박·성주참외는 쥬얼리팜 발주서, 고구마는 해달 발주서(한진양식)로 만들고, 아래에서 테무 배송확인 송장입력 파일도 생성할 수 있습니다.',
     icon: '🛒',
     files: [
       {
@@ -161,14 +160,6 @@ const toolConfigs: Record<string, ToolConfig> = {
       bg: 'bg-red-50',
       text: 'text-red-700',
       badge: 'bg-red-100 text-red-700',
-    },
-    textArea: {
-      key: 'order_text',
-      label: '테무 주문상세 텍스트(엑셀 없을 때만)',
-      placeholder:
-        '테무 주문상세 페이지에서 Ctrl+A → Ctrl+C 후 여기에 붙여넣으세요.\n주문 ID, 수령인 이름, 전화번호, 배송 주소, 상품명, 수량이 포함되어야 합니다.',
-      helperText: '엑셀 파일 업로드가 우선 처리됩니다. 텍스트 방식은 긴급 예비용입니다.',
-      required: false,
     },
   },
   'temu-tracking': {
@@ -194,9 +185,9 @@ const toolConfigs: Record<string, ToolConfig> = {
     },
   },
   'chamoe-mixed-order': {
-    title: '성주참외 알뜰과(제주다팜) 발주서 생성',
+    title: '성주참외 알뜰과(쥬얼리팜) 발주서 생성',
     description:
-      '쿠팡 가정용 혼합과 주문만 추출하여 제주다팜 성주참외 알뜰과 발주서를 생성합니다.',
+      '쿠팡 가정용 혼합과 주문만 추출하여 쥬얼리팜 가성비 혼합과 발주서를 생성합니다.',
     icon: '🍈',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'green',
@@ -243,9 +234,9 @@ const toolConfigs: Record<string, ToolConfig> = {
     },
   },
   'tomato-tracking': {
-    title: '대저토마토·성주참외(중소/로얄)·남해땅두릅·수박 6/7/8kg·초당옥수수 운송장번호 입력',
+    title: '대저토마토·남해땅두릅·초당옥수수·신비복숭아 운송장번호 입력',
     description:
-      '제이비티 회신 파일의 운송장번호와 택배사(K열)를 DeliveryList에 자동으로 매핑합니다. 제주다팜 성주참외 알뜰과는 콜라비+성주참외 알뜰과 메뉴를 사용하세요.',
+      '제이비티 회신 파일의 운송장번호와 택배사(K열)를 DeliveryList에 자동으로 매핑합니다. 수박·성주참외는 쥬얼리프룻/콜라비 메뉴를 사용하세요.',
     icon: '🍅🍈🌿📦',
     files: [
       { key: 'tomato_reply', label: '제이비티 회신 파일' },
@@ -259,9 +250,9 @@ const toolConfigs: Record<string, ToolConfig> = {
     },
   },
   'tracking-input': {
-    title: '콜라비+성주참외 알뜰과 운송장번호 입력',
+    title: '콜라비(제주다팜) 운송장번호 입력',
     description:
-      '콜라비와 제주다팜 성주참외 알뜰과가 함께 들어 있는 Orderlist 파일의 운송장번호를 DeliveryList에 자동으로 매핑합니다.',
+      '콜라비(제주다팜) Orderlist 파일의 운송장번호를 DeliveryList에 자동으로 매핑합니다. 성주참외 알뜰과는 명이나물(쥬얼리팜) 메뉴를 사용하세요.',
     icon: '📦',
     files: [
       { key: 'orderlist', label: 'Orderlist 파일' },
@@ -360,11 +351,16 @@ function ProcessPage() {
   const [temuTrackingLoading, setTemuTrackingLoading] = useState(false);
   const [temuTrackingResult, setTemuTrackingResult] = useState<ProcessResult | null>(null);
   const [temuTrackingError, setTemuTrackingError] = useState('');
+  const [alwayzReplyFile, setAlwayzReplyFile] = useState<File | null>(null);
+  const [alwayzOrderFile, setAlwayzOrderFile] = useState<File | null>(null);
+  const [alwayzTrackingLoading, setAlwayzTrackingLoading] = useState(false);
+  const [alwayzTrackingResult, setAlwayzTrackingResult] = useState<ProcessResult | null>(null);
+  const [alwayzTrackingError, setAlwayzTrackingError] = useState('');
 
   const allFilesUploaded = useMemo(() => {
     if (!config) return false;
     if (toolId === 'temu-order') {
-      return Boolean(files.order_file) || Boolean((extraValues.order_text || '').trim());
+      return Boolean(files.order_file);
     }
     const requiredFilesUploaded = config.files
       .filter((f) => !f.optional)
@@ -448,6 +444,25 @@ function ProcessPage() {
       setTrackingError(err instanceof Error ? err.message : '운송장 등록 중 오류가 발생했습니다.');
     } finally {
       setTrackingLoading(false);
+    }
+  };
+
+  const handleAlwayzTracking = async () => {
+    if (!alwayzReplyFile || !alwayzOrderFile) return;
+    setAlwayzTrackingLoading(true);
+    setAlwayzTrackingError('');
+    setAlwayzTrackingResult(null);
+    try {
+      const res = await processFile('alwayz-jbt-tracking', {
+        tomato_reply: alwayzReplyFile,
+        alwayz: alwayzOrderFile,
+      });
+      setAlwayzTrackingResult(res);
+      downloadBlob(res.blob, res.filename);
+    } catch (err) {
+      setAlwayzTrackingError(err instanceof Error ? err.message : '올웨이즈 운송장 입력 중 오류가 발생했습니다.');
+    } finally {
+      setAlwayzTrackingLoading(false);
     }
   };
 
@@ -784,15 +799,15 @@ function ProcessPage() {
               📦
             </div>
             <div>
-              <h3 className="text-base font-bold text-gray-900">토스 수박 6/7/8kg 운송장 등록</h3>
+              <h3 className="text-base font-bold text-gray-900">토스 운송장 자동등록 (API)</h3>
               <p className="text-sm text-gray-500 mt-0.5">
-                제이비티 회신 파일을 올리면 토스 수박 6/7/8kg 주문에 운송장번호를 자동 등록합니다.
+                거래처 회신 파일(제이비티/쥬얼리/신비복숭아 회신)을 올리면 토스 주문(수박·성주참외·신비복숭아)에 운송장번호를 토스 API로 자동 등록합니다. 결제완료 주문은 상품준비중으로 자동 전환됩니다.
               </p>
             </div>
           </div>
 
           <FileUpload
-            label="제이비티 회신 파일"
+            label="거래처 회신 파일 (제이비티/쥬얼리/신비복숭아 회신)"
             file={trackingFile}
             onFileSelect={(file) => {
               setTrackingFile(file || null);
@@ -847,6 +862,98 @@ function ProcessPage() {
                     </p>
                   ))}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {toolId === 'toss-watermelon-order' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6 animate-slide-up">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-xl">
+              📦
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">올웨이즈 운송장 입력</h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                쥬얼리프룻 회신(orderlist) 파일의 운송장번호를 올웨이즈 주문내역 파일(W열)에 채워 다운로드합니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            <FileUpload
+              label="쥬얼리프룻 회신(orderlist) 파일"
+              file={alwayzReplyFile}
+              onFileSelect={(file) => {
+                setAlwayzReplyFile(file || null);
+                setAlwayzTrackingResult(null);
+                setAlwayzTrackingError('');
+              }}
+            />
+            <FileUpload
+              label="올웨이즈 주문내역 파일"
+              file={alwayzOrderFile}
+              onFileSelect={(file) => {
+                setAlwayzOrderFile(file || null);
+                setAlwayzTrackingResult(null);
+                setAlwayzTrackingError('');
+              }}
+            />
+          </div>
+
+          <div className="mt-6 flex items-center gap-3">
+            <button
+              onClick={handleAlwayzTracking}
+              disabled={!alwayzReplyFile || !alwayzOrderFile || alwayzTrackingLoading}
+              className="bg-purple-600 text-white px-6 py-3 rounded-xl font-semibold text-sm
+                         hover:bg-purple-700 active:bg-purple-800
+                         disabled:opacity-50 disabled:cursor-not-allowed
+                         transition-all duration-200 flex items-center gap-2"
+            >
+              {alwayzTrackingLoading ? '입력 중...' : '올웨이즈 운송장 입력'}
+            </button>
+            {(alwayzReplyFile || alwayzOrderFile || alwayzTrackingResult || alwayzTrackingError) && (
+              <button
+                onClick={() => {
+                  setAlwayzReplyFile(null);
+                  setAlwayzOrderFile(null);
+                  setAlwayzTrackingResult(null);
+                  setAlwayzTrackingError('');
+                }}
+                disabled={alwayzTrackingLoading}
+                className="text-gray-500 hover:text-gray-700 px-4 py-3 rounded-xl
+                           font-medium text-sm hover:bg-gray-100 transition-all duration-200"
+              >
+                초기화
+              </button>
+            )}
+          </div>
+
+          {alwayzTrackingError && (
+            <div className="mt-5 bg-red-50 border border-red-200 rounded-2xl p-5 animate-fade-in">
+              <h4 className="text-sm font-bold text-red-800 mb-0.5">오류 발생</h4>
+              <p className="text-sm text-red-600">{alwayzTrackingError}</p>
+            </div>
+          )}
+
+          {alwayzTrackingResult && (
+            <div className="mt-5 bg-green-50 border border-green-200 rounded-2xl p-5 animate-fade-in">
+              <h4 className="text-sm font-bold text-green-800 mb-1">올웨이즈 운송장 입력 완료</h4>
+              {alwayzTrackingResult.stats && (
+                <div className="space-y-0.5 mb-3">
+                  {formatStats(alwayzTrackingResult.stats).map((line, i) => (
+                    <p key={i} className="text-sm text-green-700">{line}</p>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => downloadBlob(alwayzTrackingResult.blob, alwayzTrackingResult.filename)}
+                className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl
+                           font-semibold text-sm hover:bg-green-700 transition-all shadow-sm"
+              >
+                {alwayzTrackingResult.filename} 다운로드
+              </button>
             </div>
           )}
         </div>

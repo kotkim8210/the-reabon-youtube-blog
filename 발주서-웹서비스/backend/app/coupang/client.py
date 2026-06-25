@@ -8,7 +8,7 @@ import re
 import httpx
 
 from app.coupang.auth import generate_hmac_signature
-from app.config import COUPANG_VENDOR_ID, COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY
+from app import config
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +64,17 @@ def _build_query_string(params: dict | None) -> str:
 class CoupangClient:
     """Async client for Coupang Open API with rate limiting and retry."""
 
-    def __init__(self):
-        self.vendor_id = COUPANG_VENDOR_ID
-        self.access_key = COUPANG_ACCESS_KEY
-        self.secret_key = COUPANG_SECRET_KEY
+    def __init__(
+        self,
+        vendor_id: str = "",
+        access_key: str = "",
+        secret_key: str = "",
+        account_label: str = "default",
+    ):
+        self.vendor_id = vendor_id
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.account_label = account_label
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -286,5 +293,22 @@ class CoupangClient:
         return await self._request("PUT", path, json_body=body)
 
 
-# Singleton instance
-coupang_client = CoupangClient()
+# Singleton instances
+coupang_client = CoupangClient(
+    config.COUPANG_VENDOR_ID,
+    config.COUPANG_ACCESS_KEY,
+    config.COUPANG_SECRET_KEY,
+    account_label="default",
+)
+coupang_goguma_client = CoupangClient(
+    config.COUPANG_GOGUMA_VENDOR_ID,
+    config.COUPANG_GOGUMA_ACCESS_KEY,
+    config.COUPANG_GOGUMA_SECRET_KEY,
+    account_label="goguma",
+)
+coupang_produce_client = CoupangClient(
+    config.COUPANG_PRODUCE_VENDOR_ID,
+    config.COUPANG_PRODUCE_ACCESS_KEY,
+    config.COUPANG_PRODUCE_SECRET_KEY,
+    account_label="produce",
+)

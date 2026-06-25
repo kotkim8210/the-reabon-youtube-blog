@@ -39,30 +39,24 @@ def _combined_text(product_name: object, option_text: object) -> str:
 
 
 def is_jejudafarm_corn_order(product_name: object, option_text: object) -> bool:
+    """초당옥수수(제주다팜 발주) 여부. 애플초당옥수수(쥬얼리프룻)는 제외."""
     text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
-    return (
-        "초당옥수수" in text
-        and "애플초당옥수수" not in text
-        and "중품" not in text
-        and "특품" not in text
-    )
+    return "초당옥수수" in text and "애플" not in text
 
 
 def convert_corn_option(product_name: object, option_text: object) -> str | None:
-    """Convert 초당옥수수 DeliveryList text to 제주다팜 발주 옵션."""
-    text = _combined_text(product_name, option_text)
+    """초당옥수수 DeliveryList → 제주다팜 발주 옵션 '초당옥수수({중품/특품}) {n}개'.
+
+    애플초당옥수수는 제외(쥬얼리프룻). 등급(중품/특품)과 수량(개/입)이 있어야 발주 대상.
+    """
     if not is_jejudafarm_corn_order(product_name, option_text):
         return None
-
+    text = _combined_text(product_name, option_text)
     count_match = re.search(r"(\d+)\s*(?:개|입)", text)
-    if not count_match:
+    grade = "중품" if "중품" in text else "특품" if "특품" in text else ""
+    if not count_match or not grade:
         return None
-    count = count_match.group(1)
-    if count not in ("5", "10", "15", "20"):
-        return None
-
-    grade = "중품" if "중품" in text else "특품"
-    return f"초당옥수수({grade}) {count}개"
+    return f"초당옥수수({grade}) {count_match.group(1)}개"
 
 
 def clear_stray_header_numbers(ws) -> None:
@@ -307,7 +301,13 @@ def process_corn(delivery_file_bytes: bytes) -> tuple[bytes, str, dict] | None:
 
 
 def process_outputs(delivery_file_bytes: bytes) -> list[tuple[bytes, str, dict]]:
-    """Return 제주다팜 order files together: 콜라비 + 성주참외 알뜰과."""
+    """제주다팜 발주서 목록 반환 — 콜라비 + 초당옥수수.
+
+    ※ 성주참외 알뜰과(쥬얼리팜)는 2026-06부터 쥬얼리팜(myeongi) 발주로 이관 —
+      DeliveryList의 알뜰과는 명이나물(쥬얼리프룻) 메뉴에서 함께 출력된다.
+    ※ 초당옥수수는 2026-06부터 제이비티가 아닌 제주다팜 발주로 이관(공급가 인하).
+      애플초당옥수수는 계속 쥬얼리프룻(myeongi) 발주.
+    """
     results: list[tuple[bytes, str, dict]] = []
 
     kolrabi_result = process(delivery_file_bytes)
@@ -315,8 +315,8 @@ def process_outputs(delivery_file_bytes: bytes) -> list[tuple[bytes, str, dict]]
     if int((kolrabi_stats or {}).get("total") or 0) > 0:
         results.append(kolrabi_result)
 
-    chamoe_result = chamoe_mixed_order.process(delivery_file_bytes)
-    if chamoe_result:
-        results.append(chamoe_result)
+    corn_result = process_corn(delivery_file_bytes)
+    if corn_result and int((corn_result[2] or {}).get("total") or 0) > 0:
+        results.append(corn_result)
 
     return results

@@ -44,12 +44,20 @@ const SUPPLIER_MONITOR_KEYS = [
   { key: 'kolrabi', accent: 'sky' },
   { key: 'corn-jbt', accent: 'amber' },
   { key: 'chamoe-altteul', accent: 'amber' },
-  { key: 'chamoe-jbt', accent: 'emerald' },
   { key: 'tomato-jbt', accent: 'sky' },
-  { key: 'watermelon-jbt', accent: 'emerald' },
+  { key: 'watermelon-jewelry', accent: 'emerald' },
   { key: 'dureup-jbt', accent: 'amber' },
   { key: 'apple-corn-jewelryfruit', accent: 'emerald' },
+  { key: 'potato-jewelry', accent: 'emerald' },
+  { key: 'peach-jewelry', accent: 'emerald' },
+  { key: 'peach-jbt', accent: 'sky' },
 ] as const;
+
+// 한시 모니터: 해당 날짜(YYYY-MM-DD)가 지나면 화면에서 자동 숨김
+const SUPPLIER_MONITOR_EXPIRY: Partial<Record<string, string>> = {
+  'peach-jewelry': '2026-06-29',
+  'peach-jbt': '2026-06-29',
+};
 
 type SupplierMonitorKey = (typeof SUPPLIER_MONITOR_KEYS)[number]['key'];
 type AccentTone = (typeof SUPPLIER_MONITOR_KEYS)[number]['accent'];
@@ -60,12 +68,24 @@ const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   kolrabi: '콜라비',
   'corn-jbt': '초당옥수수',
   'chamoe-altteul': '성주참외 알뜰',
-  'chamoe-jbt': '성주참외 로얄과',
   'tomato-jbt': '대저토마토',
-  'watermelon-jbt': '수박',
+  'watermelon-jewelry': '망고수박',
   'dureup-jbt': '남해땅두릅',
   'apple-corn-jewelryfruit': '애플초당옥수수',
+  'potato-jewelry': '홍감자',
+  'peach-jewelry': '신비복숭아 1·2kg(쥬얼리)',
+  'peach-jbt': '신비복숭아 3·4kg(제이비티)',
 };
+
+/** 한시 모니터 만료 필터: 오늘이 expiresOn(YYYY-MM-DD)을 지나면 제외 */
+function activeSupplierMonitorKeys(): typeof SUPPLIER_MONITOR_KEYS[number][] {
+  const today = new Date();
+  const todayIso = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  return SUPPLIER_MONITOR_KEYS.filter((m) => {
+    const exp = SUPPLIER_MONITOR_EXPIRY[m.key];
+    return !exp || todayIso <= exp;
+  });
+}
 
 function isSupplierMonitorKey(value: string): value is SupplierMonitorKey {
   return SUPPLIER_MONITOR_KEYS.some((monitor) => monitor.key === value);
@@ -531,7 +551,7 @@ export default function OrderAutomationDashboard() {
 
     try {
       const results = await Promise.all(
-        SUPPLIER_MONITOR_KEYS.map(async (config) => {
+        activeSupplierMonitorKeys().map(async (config) => {
           try {
             return {
               ok: true as const,

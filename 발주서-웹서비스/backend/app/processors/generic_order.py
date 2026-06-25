@@ -22,6 +22,29 @@ def normalize(value) -> str:
     return re.sub(r"\s+", " ", s)
 
 
+def apply_option_template(vendor_name: str, source_option: str) -> str:
+    """vendor_option_name의 placeholder를 주문 옵션 텍스트로 치환.
+
+    - {kg}  → 옵션에서 'Nkg' 추출 (예: '5kg')
+    - {n}   → 옵션에서 'N개/N입' 추출 (예: '10개')
+    - {원본} → 주문 옵션 원문 그대로
+    placeholder가 없으면 vendor_name을 그대로 반환(하위호환).
+    예: vendor='꿀고구마 {kg}' + 주문옵션 '5kg 1박스' → '꿀고구마 5kg'
+    """
+    if not vendor_name or "{" not in vendor_name:
+        return vendor_name
+    result = vendor_name
+    if "{kg}" in result:
+        m = re.search(r"(\d+(?:\.\d+)?)\s*kg", source_option, re.IGNORECASE)
+        result = result.replace("{kg}", f"{m.group(1)}kg" if m else "")
+    if "{n}" in result:
+        m = re.search(r"(\d+)\s*(?:개|입)", source_option)
+        result = result.replace("{n}", f"{m.group(1)}개" if m else "")
+    if "{원본}" in result:
+        result = result.replace("{원본}", source_option)
+    return re.sub(r"\s+", " ", result).strip()
+
+
 async def process_generic_order(
     user_id: int,
     delivery_bytes: bytes,
@@ -208,7 +231,7 @@ async def _process_row_mode(
         matched_kw = None
         for opt_kw, vendor_name in option_map.items():
             if opt_kw in l_val:
-                vendor_option = vendor_name
+                vendor_option = apply_option_template(vendor_name, l_val)
                 matched_kw = opt_kw
                 break
         try:

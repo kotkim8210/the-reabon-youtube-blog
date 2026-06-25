@@ -213,3 +213,57 @@ async def process_delivery(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_zip}"},
     )
+
+
+# --- Tracking (운송장 입력 셀프서비스) ---
+
+@router.post("/tracking")
+async def tenant_tracking(
+    reply_files: list[UploadFile] | None = File(default=None),
+    reply_file: UploadFile | None = File(default=None),
+    delivery_file: UploadFile = File(...),
+    user: dict = Depends(verify_token),
+):
+    """회신/송장 파일(여러 개 가능) + DeliveryList → 운송장 자동 입력.
+
+    unified_tracking이 각 파일을 자동 판별(품목별 프로세서 → 맞춤 범용 송장 폴백)하므로
+    사용자가 등록한 상품과 무관하게 회신 파일 형식을 자동 인식한다.
+    """
+    from app.processors import unified_tracking
+
+    all_reply_files = list(reply_files or [])
+    if reply_file is not None:
+        all_reply_files.append(reply_file)
+
+    if not all_reply_files:
+        raise HTTPException(status_code=400, detail="회신/송장 파일을 1개 이상 업로드해 주세요.")
+    for f in all_reply_files:
+        if not (f.filename or "").endswith((".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail=f"회신/송장 파일은 엑셀만 가능합니다: {f.filename}")
+    if not (delivery_file.filename or "").endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="DeliveryList는 엑셀 파일만 가능합니다.")
+
+    reply_bytes_list = [
+        (f.filename or f"reply_{index + 1}.xlsx", await f.read())
+        for index, f in enumerate(all_reply_files)
+    ]
+    delivery_bytes = await delivery_file.read()
+
+    try:
+        output_bytes, filename, stats = unified_tracking.process(reply_bytes_list, delivery_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive API guard
+        raise HTTPException(status_code=500, detail=f"운송장 입력 중 오류가 발생했습니다: {exc}") from exc
+
+    output = BytesIO(output_bytes)
+    encoded_name = quote(filename, safe="")
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"}
+    if stats:
+        import json
+        headers["X-Stats"] = json.dumps(stats, ensure_ascii=False)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )

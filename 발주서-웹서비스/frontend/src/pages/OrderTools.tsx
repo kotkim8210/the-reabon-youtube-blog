@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { SlidersHorizontal, Layers, FileSpreadsheet, Settings, UploadCloud } from 'lucide-react';
+import { SlidersHorizontal, Layers, Settings, UploadCloud } from 'lucide-react';
 import ProcessCard from '../components/ProcessCard';
 import { useUser } from '../App';
 import { getVisibleTools } from '../lib/toolCatalog';
@@ -107,36 +107,6 @@ function OrderTools() {
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
       </button>
-
-      <section className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-              <FileSpreadsheet size={20} />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-emerald-950">성주참외 알뜰과(제주다팜) 발주</p>
-              <p className="mt-1 text-sm leading-6 text-emerald-800">
-                쿠팡 가정용 혼합과 주문만 추출해 제주다팜 알뜰참외 발주서를 바로 생성합니다.
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <button
-              onClick={() => navigate('/process/chamoe-mixed-order')}
-              className="inline-flex items-center justify-center rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-800"
-            >
-              알뜰과 발주서 생성
-            </button>
-            <button
-              onClick={() => navigate('/process/tracking-input')}
-              className="inline-flex items-center justify-center rounded-lg border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100"
-            >
-              알뜰과 송장번호 입력
-            </button>
-          </div>
-        </div>
-      </section>
 
       {tools.length === 0 ? (
         <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center text-slate-400 text-sm">
