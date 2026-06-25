@@ -40,8 +40,29 @@ def test_carrier_name_mapping():
     assert T._temu_carrier_name("CJ대한통운") == "CJ 대한통운"
 
 
+def test_shipping_template_headers_match_temu():
+    # 번들 템플릿 헤더가 테무 공식 다운로드본과 정확히 같아야 업로드가 인식됨.
+    # (2열이 '상품 주문 ID' 가 아니면 테무가 '정보 누락'으로 거부)
+    import openpyxl
+    from app.config import TEMPLATE_DIR
+
+    wb = openpyxl.load_workbook(TEMPLATE_DIR / T.TEMPLATE_NAME)
+    assert T.SHIP_SHEET in wb.sheetnames and "정의" in wb.sheetnames, wb.sheetnames
+    ws = wb[T.SHIP_SHEET]
+    headers = [ws.cell(1, c).value for c in range(1, 7)]
+    assert headers == [
+        "주문 ID",
+        "상품 주문 ID",
+        "수량",
+        "배송 출발지:",
+        "배송사",
+        "추적 번호",
+    ], headers
+
+
 if __name__ == "__main__":
     test_csv_item_id_header_variant()
     test_xlsx_item_id_header_variant_still_works()
     test_carrier_name_mapping()
+    test_shipping_template_headers_match_temu()
     print("ALL TESTS PASSED")
