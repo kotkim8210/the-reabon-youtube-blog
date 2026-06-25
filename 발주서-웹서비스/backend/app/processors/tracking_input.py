@@ -57,6 +57,8 @@ def _semantic_option_keys(*values: object) -> set[str]:
         grade = next((g for g in ("특품", "중품", "상품", "정품") if g in text), "")
         counts = set(re.findall(r"(\d+)\s*개", text))
         keys.update(f"corn:{grade}:{count}개" for count in counts)
+    if "밤호박" in text:
+        keys.update(f"bamhobak:{weight}kg" for weight in weights)
     return keys
 
 

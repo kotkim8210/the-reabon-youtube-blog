@@ -59,6 +59,31 @@ def convert_corn_option(product_name: object, option_text: object) -> str | None
     return f"초당옥수수({grade}) {count_match.group(1)}개"
 
 
+# 제주다팜 미니밤호박(보우짱 로얄과) 옵션 중량 (주문사이트 기준)
+BAMHOBAK_WEIGHTS = {"1", "2", "3", "4", "5", "8", "10"}
+
+
+def is_bamhobak_order(product_name: object, option_text: object) -> bool:
+    """제주 미니밤호박(보우짱) 제주다팜 발주 여부."""
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    return "밤호박" in text
+
+
+def convert_bamhobak_option(product_name: object, option_text: object) -> str | None:
+    """미니밤호박 DeliveryList → 제주다팜 발주 품목 '제주 미니밤호박 보우짱 로얄과 {n}kg'.
+
+    DeliveryList 옵션 예: '1박스 로얄 정품 3kg' → '제주 미니밤호박 보우짱 로얄과 3kg'.
+    중량은 제주다팜 옵션(1·2·3·4·5·8·10kg)에 있어야 발주 대상.
+    """
+    if not is_bamhobak_order(product_name, option_text):
+        return None
+    text = _combined_text(product_name, option_text)
+    match = re.search(r"(\d+)\s*kg", text, re.IGNORECASE)
+    if not match or match.group(1) not in BAMHOBAK_WEIGHTS:
+        return None
+    return f"제주 미니밤호박 보우짱 로얄과 {match.group(1)}kg"
+
+
 def clear_stray_header_numbers(ws) -> None:
     for col in range(14, ws.max_column + 1):
         cell = ws.cell(row=1, column=col)
@@ -300,6 +325,111 @@ def process_corn(delivery_file_bytes: bytes) -> tuple[bytes, str, dict] | None:
     return output.read(), filename, stats
 
 
+def process_bamhobak(delivery_file_bytes: bytes) -> tuple[bytes, str, dict] | None:
+    """Process DeliveryList rows for 제주다팜 미니밤호박(보우짱 로얄과) 발주."""
+    dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes), data_only=True)
+    dl_ws = dl_wb.active
+
+    filtered_rows: list[tuple] = []
+    for row in dl_ws.iter_rows(min_row=2):
+        product_name = normalize(row[10].value) if len(row) > 10 else ""
+        option = normalize(row[11].value) if len(row) > 11 else ""
+        converted = convert_bamhobak_option(product_name, option)
+        if converted:
+            filtered_rows.append((row, converted))
+
+    if not filtered_rows:
+        return None
+
+    template_path = TEMPLATE_DIR / "콜라비_제주다팜_원본.xlsx"
+    if not template_path.exists():
+        raise FileNotFoundError(
+            f"Template not found: {template_path}. "
+            f"Please place the template file in the templates directory."
+        )
+
+    tmpl_wb = load_workbook(filename=str(template_path))
+    first_sheet_name = tmpl_wb.sheetnames[0]
+    for name in tmpl_wb.sheetnames[1:]:
+        del tmpl_wb[name]
+    ws = tmpl_wb[first_sheet_name]
+    clear_stray_header_numbers(ws)
+
+    font11 = Font(size=11)
+    start_row = 2
+    for r in range(2, ws.max_row + 2):
+        if ws.cell(row=r, column=2).value is None:
+            start_row = r
+            break
+
+    option_totals: dict[str, dict] = {}
+    for i, (row, product) in enumerate(filtered_rows):
+        out_row = start_row + i
+
+        name = normalize(row[26].value) if len(row) > 26 else ""
+        phone = normalize(row[27].value) if len(row) > 27 else ""
+        zipcode = normalize(row[28].value) if len(row) > 28 else ""
+        address = normalize(row[29].value) if len(row) > 29 else ""
+        memo = normalize(row[30].value) if len(row) > 30 else ""
+        option = normalize(row[11].value) if len(row) > 11 else ""
+        qty_val = row[22].value if len(row) > 22 else ""
+        qty = normalize(qty_val)
+        order_no = normalize(row[2].value) if len(row) > 2 else ""
+
+        try:
+            qty_int = int(float(qty_val)) if qty_val not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+
+        if zipcode:
+            try:
+                zipcode = str(int(float(zipcode))).zfill(5)
+            except (ValueError, TypeError):
+                zipcode = zipcode.zfill(5)
+
+        mapping = {
+            2: name,
+            3: phone,
+            5: zipcode,
+            6: address,
+            8: product,
+            9: qty,
+            10: "식품애착",
+            11: "010-5700-7756",
+            13: memo,
+        }
+
+        for col, value in mapping.items():
+            cell = ws.cell(row=out_row, column=col, value=value)
+            cell.font = font11
+
+        bucket = option_totals.setdefault(
+            option or product,
+            {
+                "coupang_option_keyword": option or product,
+                "vendor_option_name": product,
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order_no:
+            bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
+    output = BytesIO()
+    tmpl_wb.save(output)
+    output.seek(0)
+
+    now = datetime.now(KST)
+    filename = f"제주다팜_아이티소프트_미니밤호박발주({now.strftime('%Y%m%d')}).xlsx"
+    stats = {
+        "total": len(filtered_rows),
+        "product": "미니밤호박(제주다팜)",
+        "options": list(option_totals.values()),
+    }
+    return output.read(), filename, stats
+
+
 def process_outputs(delivery_file_bytes: bytes) -> list[tuple[bytes, str, dict]]:
     """제주다팜 발주서 목록 반환 — 콜라비 + 초당옥수수.
 
@@ -318,5 +448,9 @@ def process_outputs(delivery_file_bytes: bytes) -> list[tuple[bytes, str, dict]]
     corn_result = process_corn(delivery_file_bytes)
     if corn_result and int((corn_result[2] or {}).get("total") or 0) > 0:
         results.append(corn_result)
+
+    bamhobak_result = process_bamhobak(delivery_file_bytes)
+    if bamhobak_result and int((bamhobak_result[2] or {}).get("total") or 0) > 0:
+        results.append(bamhobak_result)
 
     return results

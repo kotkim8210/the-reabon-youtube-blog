@@ -341,7 +341,7 @@ async def process_kolrabi_order(
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="제주다팜 발주로 출력할 콜라비 또는 초당옥수수 주문을 찾지 못했습니다.",
+                detail="제주다팜 발주로 출력할 콜라비·초당옥수수·미니밤호박 주문을 찾지 못했습니다.",
             )
 
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
