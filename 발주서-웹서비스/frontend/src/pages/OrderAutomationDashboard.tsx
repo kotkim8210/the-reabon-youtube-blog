@@ -49,6 +49,7 @@ const SUPPLIER_MONITOR_KEYS = [
   { key: 'dureup-jbt', accent: 'amber' },
   { key: 'apple-corn-jewelryfruit', accent: 'emerald' },
   { key: 'potato-jewelry', accent: 'emerald' },
+  { key: 'bamhobak-jewelry', accent: 'emerald' },
   { key: 'peach-jewelry', accent: 'emerald' },
   { key: 'peach-jbt', accent: 'sky' },
 ] as const;
@@ -73,6 +74,7 @@ const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   'dureup-jbt': '남해땅두릅',
   'apple-corn-jewelryfruit': '애플초당옥수수',
   'potato-jewelry': '홍감자',
+  'bamhobak-jewelry': '미니밤호박 3·5·10kg(쥬얼리)',
   'peach-jewelry': '신비복숭아 1·2kg(쥬얼리)',
   'peach-jbt': '신비복숭아 3·4kg(제이비티)',
 };
