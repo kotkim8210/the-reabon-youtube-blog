@@ -37,6 +37,7 @@ CARRIER_SMALL = "롯데택배"       # 2/3/5kg (쥬얼리프룻)
 CARRIER_LARGE = "롯데택배"       # 6/7/8kg — 2026-06부터 제이비티→쥬얼리프룻 발주 전환, 기본 롯데
                                   # (실제 송장파일에 택배사가 있으면 그 값이 우선 적용됨)
 CARRIER_HANJIN = "Hanjin"        # 테무는 한진택배를 'Hanjin'(영문)으로만 인식 — 송장파일 '한진' 명시 건(예: 고구마 해달)은 Hanjin으로 등록
+CARRIER_CJ = "CJ"                # 테무 드롭다운은 CJ대한통운을 'CJ'(영문)로만 인식 — 송장파일 'CJ대한통운' 건(예: 고구마)은 CJ로 등록
 SMALL_KGS = {2, 3, 5}
 LARGE_KGS = {6, 7, 8}
 
@@ -88,7 +89,7 @@ def _temu_carrier_name(value) -> str:
     if "롯데" in compact or "lotte" in compact:
         return CARRIER_SMALL
     if "cj" in compact or "대한통운" in compact:
-        return "CJ 대한통운"
+        return CARRIER_CJ
     return text
 
 
