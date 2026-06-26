@@ -9,6 +9,7 @@ from app.processors.myeongi_order import (
     convert_option,
     is_apple_corn_order,
     is_house_watermelon_order,
+    is_jewelry_bamhobak_order,
     is_jewelry_chamoe_order,
     is_jewelry_peach_order,
     is_jewelry_potato_order,
@@ -43,6 +44,7 @@ def is_jewelryfruit_tracking_target(product_name: str, option_text: str) -> bool
         or is_jewelry_chamoe_order(product_name, option_text)    # 성주참외 로얄/중소 (2026-06 쥬얼리 전환)
         or is_jewelry_peach_order(product_name, option_text)     # 신비복숭아 1·2kg (3·4kg은 제이비티)
         or is_jewelry_potato_order(product_name, option_text)    # 햇 홍감자 (2026 여름 쥬얼리 발주)
+        or is_jewelry_bamhobak_order(product_name, option_text)  # 미니밤호박 3·5·10kg (1kg은 제주다팜)
     )
 
 
@@ -116,6 +118,7 @@ def process(
     has_watermelon = False
     has_chamoe = False
     has_peach = False
+    has_bamhobak = False
     delivery_name_counts = name_counts(
         normalize(dl_ws.cell(row=row_idx, column=27).value)
         for row_idx in range(2, dl_ws.max_row + 1)
@@ -210,6 +213,8 @@ def process(
                 has_chamoe = True
             if is_jewelry_peach_order(dl_product, dl_option):
                 has_peach = True
+            if is_jewelry_bamhobak_order(dl_product, dl_option):
+                has_bamhobak = True
         else:
             skipped += 1
 
@@ -231,6 +236,8 @@ def process(
         product_parts.append("성주참외")
     if has_peach:
         product_parts.append("신비복숭아")
+    if has_bamhobak:
+        product_parts.append("미니밤호박")
     product_label = "_".join(product_parts) if product_parts else "쥬얼리프룻"
     filename = f"DeliveryList_{product_label}_운송장입력완료_{now.strftime('%Y%m%d')}.xlsx"
     stats = {"filled": filled, "skipped": skipped}

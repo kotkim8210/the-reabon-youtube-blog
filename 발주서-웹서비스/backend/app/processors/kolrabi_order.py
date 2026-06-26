@@ -59,12 +59,14 @@ def convert_corn_option(product_name: object, option_text: object) -> str | None
     return f"초당옥수수({grade}) {count_match.group(1)}개"
 
 
-# 제주다팜 미니밤호박(보우짱 로얄과) 옵션 중량 (주문사이트 기준)
-BAMHOBAK_WEIGHTS = {"1", "2", "3", "4", "5", "8", "10"}
+# 제주다팜 미니밤호박(보우짱 로얄과) 옵션 중량.
+# 2026-06부터 3·5·10kg은 쥬얼리프룻(myeongi)이 더 싼 공급가로 발주 전환 →
+# 제주다팜은 1kg만 발주(쥬얼리 시트에 1kg 규격 없음). 3/5/10kg은 myeongi_order에서 처리.
+BAMHOBAK_WEIGHTS = {"1"}
 
 
 def is_bamhobak_order(product_name: object, option_text: object) -> bool:
-    """제주 미니밤호박(보우짱) 제주다팜 발주 여부."""
+    """제주 미니밤호박(보우짱) 제주다팜 발주 여부 (1kg만; 3·5·10kg은 쥬얼리프룻)."""
     text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
     return "밤호박" in text
 
@@ -72,8 +74,8 @@ def is_bamhobak_order(product_name: object, option_text: object) -> bool:
 def convert_bamhobak_option(product_name: object, option_text: object) -> str | None:
     """미니밤호박 DeliveryList → 제주다팜 발주 품목 '제주 미니밤호박 보우짱 로얄과 {n}kg'.
 
-    DeliveryList 옵션 예: '1박스 로얄 정품 3kg' → '제주 미니밤호박 보우짱 로얄과 3kg'.
-    중량은 제주다팜 옵션(1·2·3·4·5·8·10kg)에 있어야 발주 대상.
+    DeliveryList 옵션 예: '1박스 로얄 정품 1kg' → '제주 미니밤호박 보우짱 로얄과 1kg'.
+    제주다팜 발주 대상은 1kg만 (3·5·10kg은 쥬얼리프룻 발주로 이관).
     """
     if not is_bamhobak_order(product_name, option_text):
         return None

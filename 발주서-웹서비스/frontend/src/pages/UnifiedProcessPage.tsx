@@ -120,19 +120,19 @@ const productConfigs: Record<string, ProductConfig> = {
     },
   },
   kolrabi: {
-    title: '콜라비·초당옥수수·미니밤호박(제주다팜)',
-    description: '취급품목: 콜라비·초당옥수수·미니밤호박(보우짱 로얄과) 제주다팜 발주서 생성 + 운송장번호 입력 · 애플초당옥수수와 성주참외 알뜰과는 명이나물(쥬얼리) 메뉴',
+    title: '콜라비·초당옥수수·미니밤호박 1kg(제주다팜)',
+    description: '취급품목: 콜라비·초당옥수수·미니밤호박(보우짱 로얄과) 1kg 제주다팜 발주서 생성 + 운송장번호 입력 · 미니밤호박 3·5·10kg과 애플초당옥수수·성주참외 알뜰과는 명이나물(쥬얼리) 메뉴',
     icon: '🥬',
     bgClass: 'bg-green-50',
     order: {
-      title: '콜라비·초당옥수수·미니밤호박 발주서 생성',
+      title: '콜라비·초당옥수수·미니밤호박 1kg 발주서 생성',
       icon: '📋',
       apiToolId: 'kolrabi-order',
       files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
       buttonLabel: '발주서 생성',
     },
     tracking: {
-      title: '콜라비·초당옥수수·미니밤호박 운송장번호 입력',
+      title: '콜라비·초당옥수수·미니밤호박 1kg 운송장번호 입력',
       icon: '📦',
       apiToolId: 'tracking-input',
       files: [
@@ -143,12 +143,12 @@ const productConfigs: Record<string, ProductConfig> = {
     },
   },
   myeongi: {
-    title: '명이나물+애플초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자',
-    description: '쥬얼리프룻 발주서 생성 + 운송장번호 입력 · 취급품목: 명이나물·애플초당옥수수·망고수박·수박·성주참외·신비복숭아·홍감자',
+    title: '명이나물+애플초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자+미니밤호박',
+    description: '쥬얼리프룻 발주서 생성 + 운송장번호 입력 · 취급품목: 명이나물·애플초당옥수수·망고수박·수박·성주참외·신비복숭아·홍감자·미니밤호박(보우짱 로얄과 3·5·10kg, 1kg은 제주다팜 메뉴)',
     icon: '🌿',
     bgClass: 'bg-green-50',
     order: {
-      title: '명이나물+애플초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자 발주서 생성',
+      title: '명이나물+애플초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자+미니밤호박 발주서 생성',
       icon: '📋',
       apiToolId: 'myeongi-order',
       files: [{ key: 'delivery', label: 'DeliveryList 파일 (쿠팡)' }],
@@ -159,7 +159,7 @@ const productConfigs: Record<string, ProductConfig> = {
       tossDateHint: '기본 2일(어제~오늘) 토스 주문(수박·성주참외·신비복숭아 1·2kg·망고수박·홍감자)을 쥬얼리프룻 발주서에 합칩니다. 신비복숭아 3·4kg은 제이비티 메뉴로. 배송중·송장입력 건은 자동 제외. (추가발주는 "오늘", 안 합치려면 "수집안함")',
     },
     tracking: {
-      title: '명이나물+애플초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자 운송장번호 입력',
+      title: '명이나물+애플초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자+미니밤호박 운송장번호 입력',
       icon: '📦',
       apiToolId: 'myeongi-tracking',
       files: [

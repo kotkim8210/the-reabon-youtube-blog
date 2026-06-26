@@ -107,6 +107,34 @@ def _jewelry_potato_option(product_name: object, option_text: object) -> str | N
     return " ".join(parts)
 
 
+# 제주 미니밤호박(보우짱) — 2026-06부터 3·5·10kg은 제주다팜→쥬얼리프룻 발주 전환(공급가 인하).
+# 1kg은 계속 제주다팜(kolrabi_order)에서 발주. 쥬얼리 시트 옵션: '로얄과 3/5/10kg'.
+BAMHOBAK_JEWELRY_WEIGHTS = {"3", "5", "10"}
+
+
+def is_jewelry_bamhobak_order(product_name: object, option_text: object) -> bool:
+    """미니밤호박 쥬얼리프룻 발주 여부 (3·5·10kg만; 1kg은 제주다팜)."""
+    text = _combined_text(product_name, option_text).replace(" ", "")
+    if "밤호박" not in text:
+        return False
+    m = re.search(r"(\d+)\s*kg", text, re.IGNORECASE)
+    return bool(m) and m.group(1) in BAMHOBAK_JEWELRY_WEIGHTS
+
+
+def _jewelry_bamhobak_option(product_name: object, option_text: object) -> str | None:
+    """미니밤호박 DeliveryList → 쥬얼리프룻 발주 품목 '미니 밤호박 보우짱 로얄과 {n}kg'.
+
+    3·5·10kg만 대상(1kg은 제주다팜). 등급은 못난이가 명시되면 못난이, 아니면 로얄과(기본).
+    """
+    if not is_jewelry_bamhobak_order(product_name, option_text):
+        return None
+    text = _combined_text(product_name, option_text)
+    m = re.search(r"(\d+)\s*kg", text, re.IGNORECASE)
+    kg = m.group(1) if m else ""
+    grade = "못난이" if "못난이" in text else "로얄과"
+    return f"미니 밤호박 보우짱 {grade} {kg}kg"
+
+
 # 일반 수박 6/7/8kg — 2026-06부터 제이비티가 아닌 쥬얼리팜(쥬얼리프룻) 발주.
 def is_house_watermelon_order(product_name: object, option_text: object) -> bool:
     from app.processors.tomato_order import delivery_watermelon_kg, JBT_WATERMELON_KGS
@@ -317,6 +345,10 @@ def convert_option(option_text: str, product_name: str = "") -> str | None:
     if potato:
         return potato
 
+    bamhobak = _jewelry_bamhobak_option(product_name, option_text)
+    if bamhobak:
+        return bamhobak
+
     text = str(option_text).strip()
     if not text:
         # 옵션(L)이 비면 상품명(K)으로 폴백 — 품목명 공란 방지(명이나물 행 전용 분기).
@@ -358,6 +390,7 @@ def process(
     has_chamoe = False
     has_peach = False
     has_potato = False
+    has_bamhobak = False
     for row in dl_ws.iter_rows(min_row=2):
         k_val = normalize(row[10].value) if len(row) > 10 else ""
         option = normalize(row[11].value) if len(row) > 11 else ""
@@ -387,6 +420,10 @@ def process(
             # 햇 홍감자 → 쥬얼리프룻 발주
             filtered_rows.append(row)
             has_potato = True
+        elif is_jewelry_bamhobak_order(k_val, option):
+            # 미니밤호박 3·5·10kg → 쥬얼리프룻 발주 (1kg은 제주다팜)
+            filtered_rows.append(row)
+            has_bamhobak = True
 
     template_path = TEMPLATE_DIR / "명이나물_pbfcompany_원본.xlsx"
     if not template_path.exists():
@@ -533,6 +570,8 @@ def process(
         product_parts.append("신비복숭아")
     if has_potato:
         product_parts.append("홍감자")
+    if has_bamhobak:
+        product_parts.append("미니밤호박")
     product_label = "_".join(product_parts)
     product_name = "+".join(product_parts) if product_parts else "쥬얼리프룻"
     if product_label:
