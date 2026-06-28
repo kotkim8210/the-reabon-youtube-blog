@@ -130,6 +130,10 @@ const productConfigs: Record<string, ProductConfig> = {
       apiToolId: 'kolrabi-order',
       files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
       buttonLabel: '발주서 생성',
+      tossDateRange: true,
+      tossDefaultDays: 1,
+      tossDateTitle: '토스 주문 수집 (제주다팜 미니밤호박)',
+      tossDateHint: '기본 2일(어제~오늘) 토스 미니밤호박 1kg 주문을 제주다팜 미니밤호박 발주서에 합칩니다. 3·5·10kg은 명이(쥬얼리) 메뉴. 배송중·송장입력 건은 자동 제외. (추가발주는 "오늘", 안 합치려면 "수집안함")',
     },
     tracking: {
       title: '콜라비·초당옥수수·미니밤호박 1kg 운송장번호 입력',
@@ -608,8 +612,8 @@ function UnifiedProcessPage() {
         />
       </div>
 
-      {/* 토스 운송장 자동등록 (API) — 명이(쥬얼리) 페이지 전용 */}
-      {productId === 'myeongi' && (
+      {/* 토스 운송장 자동등록 (API) — 명이(쥬얼리) · 콜라비(제주다팜 미니밤호박) 페이지 */}
+      {(productId === 'myeongi' || productId === 'kolrabi') && (
         <div className="mt-4 animate-slide-up">
           <TossApiTrackingCard />
         </div>

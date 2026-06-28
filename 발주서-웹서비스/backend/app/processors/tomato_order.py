@@ -361,6 +361,67 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
     return entries
 
 
+async def collect_toss_bamhobak_orders(from_date: str, to_date: str) -> list[dict]:
+    """토스 API에서 제주다팜 미니밤호박(보우짱) 1kg 주문을 수집.
+
+    1kg만 제주다팜 발주 대상(3·5·10kg은 쥬얼리프룻 별도). convert_bamhobak_option이
+    1kg만 발주명을 돌려주므로 그 외 무게는 자동 제외된다.
+    각 entry에 'product'(제주다팜 발주 품목명 '제주 미니밤호박 보우짱 로얄과 1kg')를 포함.
+    """
+    from app.toss.client import toss_client
+    from app.processors.kolrabi_order import convert_bamhobak_option
+
+    orders = await toss_client.get_orders(
+        start_date=from_date,
+        end_date=to_date,
+        status=None,
+    )
+
+    entries: list[dict] = []
+    for item in orders:
+        text = _toss_item_text(item)
+        if "밤호박" not in text.replace(" ", ""):
+            continue
+        order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
+        if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
+            continue
+        # 배송중/배송완료거나 송장 입력된 건은 발주서에서 제외 → 과거 주문 재발주 방지
+        if _toss_order_done(item):
+            continue
+
+        option = normalize(item.get("optionName") or "")
+        product_name = normalize(item.get("productName") or "") or text
+        product = convert_bamhobak_option(product_name, option)
+        if not product:  # 1kg만 통과 (3·5·10kg은 쥬얼리프룻)
+            continue
+
+        address = _toss_address(item)
+        entries.append(
+            {
+                "name": item.get("receiverName") or "",
+                "phone": item.get("receiverRealPhone") or item.get("receiverPhone") or "",
+                "zipcode": _toss_zipcode(item),
+                "address": address,
+                "qty": str(item.get("quantity") or 1),
+                "product_name": item.get("productName") or "토스 미니밤호박",
+                "option": option,
+                "product": product,
+                "memo": item.get("shippingNote") or "",
+                "order_id": toss_order_id(item)
+                or stable_order_id(
+                    "toss-bamhobak",
+                    item.get("receiverName"),
+                    item.get("receiverRealPhone") or item.get("receiverPhone"),
+                    address,
+                    option,
+                    item.get("quantity") or 1,
+                ),
+            }
+        )
+
+    return entries
+
+
 def parse_alwayz_jbt_rows(alwayz_bytes: bytes) -> tuple[list, dict]:
     """올웨이즈 주문내역(.xlsx)에서 제이비티 발주 대상 행을 추출.
 

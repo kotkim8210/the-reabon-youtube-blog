@@ -332,11 +332,32 @@ async def health_check():
 @app.post("/api/process/kolrabi-order")
 async def process_kolrabi_order(
     delivery_file: UploadFile = File(...),
+    toss_from_date: str = Form(""),
+    toss_to_date: str = Form(""),
+    include_toss: str = Form(""),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
-        results = kolrabi_order.process_outputs(delivery_bytes)
+        # 토스 미니밤호박 1kg 주문을 토스 API로 수집해 미니밤호박 발주서에 합친다.
+        toss_bamhobak_entries = []
+        toss_error = ""
+        collect_dates = None
+        if toss_from_date and toss_to_date:
+            collect_dates = (toss_from_date, toss_to_date)
+        elif include_toss.lower() == "true":
+            today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+            collect_dates = (today, today)
+        if collect_dates:
+            try:
+                toss_bamhobak_entries = await tomato_order.collect_toss_bamhobak_orders(*collect_dates)
+            except Exception as toss_exc:
+                toss_error = str(toss_exc)
+                logger.warning(f"토스 미니밤호박 수집 실패(발주는 계속): {toss_exc}")
+
+        results = kolrabi_order.process_outputs(
+            delivery_bytes, toss_bamhobak_entries=toss_bamhobak_entries
+        )
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -349,6 +370,8 @@ async def process_kolrabi_order(
 
         if len(results) == 1:
             output_bytes, filename, stats = results[0]
+            if toss_error:
+                stats = {**(stats or {}), "toss_error": toss_error}
             response = make_excel_response(output_bytes, filename, stats)
         else:
             kst = timezone(timedelta(hours=9))
@@ -357,6 +380,8 @@ async def process_kolrabi_order(
                 "files": len(results),
                 "total": sum(int((item_stats or {}).get("total", 0)) for _, _, item_stats in results),
             }
+            if toss_error:
+                stats["toss_error"] = toss_error
             response = make_zip_response(
                 [(output_bytes, output_name) for output_bytes, output_name, _ in results],
                 filename,
