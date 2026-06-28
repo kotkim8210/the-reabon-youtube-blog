@@ -33,7 +33,6 @@ import {
   type SupplierPriceMonitorData,
 } from '../../api';
 import StatusCard from './StatusCard';
-import ChamoeAltteulSupplierPriceCard from './ChamoeAltteulSupplierPriceCard';
 import KolrabiSupplierPriceCard from './KolrabiSupplierPriceCard';
 import { CS_INQUIRIES, INVENTORY_ALERTS, MARKET_SCORES, RECENT_ORDERS } from './mockData';
 
@@ -374,8 +373,6 @@ function DashboardHome() {
           )}
 
           {isAdmin && <KolrabiSupplierPriceCard />}
-
-          {isAdmin && <ChamoeAltteulSupplierPriceCard />}
 
           <section className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
             <div className="mb-6 flex items-center justify-between">

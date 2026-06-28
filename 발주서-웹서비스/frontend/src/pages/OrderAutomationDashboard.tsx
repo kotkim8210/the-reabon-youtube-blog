@@ -43,7 +43,7 @@ import { useUser } from '../App';
 const SUPPLIER_MONITOR_KEYS = [
   { key: 'kolrabi', accent: 'sky' },
   { key: 'corn-jbt', accent: 'amber' },
-  { key: 'chamoe-altteul', accent: 'amber' },
+  { key: 'chamoe-jewelry', accent: 'emerald' },
   { key: 'tomato-jbt', accent: 'sky' },
   { key: 'watermelon-jewelry', accent: 'emerald' },
   { key: 'dureup-jbt', accent: 'amber' },
@@ -68,7 +68,7 @@ const DEFAULT_HIDDEN_SUPPLIER_MONITOR_KEYS: SupplierMonitorKey[] = ['tomato-jbt'
 const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   kolrabi: '콜라비',
   'corn-jbt': '초당옥수수',
-  'chamoe-altteul': '성주참외 알뜰',
+  'chamoe-jewelry': '성주참외(쥬얼리)',
   'tomato-jbt': '대저토마토',
   'watermelon-jewelry': '망고수박',
   'dureup-jbt': '남해땅두릅',

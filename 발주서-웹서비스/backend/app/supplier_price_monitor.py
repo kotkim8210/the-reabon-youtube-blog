@@ -206,6 +206,31 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("미니밤호박 로얄과 10kg", "로얄과 10kg", 10, sheet_name="쥬얼리프룻"),
         ),
     ),
+    "chamoe-jewelry": SupplierMonitorConfig(
+        key="chamoe-jewelry",
+        source_type="google_sheet",
+        supplier_name="쥬얼리프룻",
+        product_name="성주참외",
+        sheet_csv_url=GOOGLE_SHEET_JEWELRYFRUIT_PEACH_CSV,
+        sheet_product_name="성주참외",
+        sheet_product_column="E",
+        sheet_option_column="F",
+        sheet_vip_column="I",
+        sheet_price_fallback_column="G",
+        sheet_previous_column="G",
+        template_path=TEMPLATE_DIR / "성주참외_쥬얼리프룻_소싱현황_원본.xlsx",
+        output_prefix="성주참외_쥬얼리프룻_V1",
+        output_name_pattern="성주참외 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
+        skip_missing_options=True,
+        options=(
+            # 2026-06 제주다팜 알뜰과 발주 폐지, 전 등급 쥬얼리프룻 통합. 중소과는 쿠팡 판매중지(제외).
+            SupplierOptionConfig("성주참외 가성비 랜덤과 2kg", "가성비 혼합과 2kg", 8, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("성주참외 가성비 랜덤과 3kg", "가성비 혼합과 3kg", 9, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("성주참외 가성비 랜덤과 5kg", "가성비 혼합과 5kg", 10, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("성주참외 로얄과 3kg", "로얄과 3kg", 11, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("성주참외 로얄과 5kg", "로얄과 5kg", 12, sheet_name="쥬얼리프룻"),
+        ),
+    ),
     "kolrabi": SupplierMonitorConfig(
         key="kolrabi",
         source_type="adminplus",
@@ -391,7 +416,7 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
 }
 
 # watermelon-jbt(수박)·chamoe-jbt(성주참외)는 발주처가 제이비티→쥬얼리로 이전돼 무용 → 일시중지(숨김)
-PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt"}
+PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt", "chamoe-altteul"}
 
 MONITOR_CONFIGS["dureup-jbt"] = replace(
     MONITOR_CONFIGS["dureup-jbt"],
