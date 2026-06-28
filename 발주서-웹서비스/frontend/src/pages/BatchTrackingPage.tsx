@@ -71,7 +71,7 @@ const VENDORS: VendorConfig[] = [
     id: 'kolrabi',
     toolId: 'tracking-input',
     preferenceIds: ['kolrabi-unified'],
-    label: '콜라비+성주참외 알뜰과',
+    label: '콜라비·초당옥수수·미니밤호박 1kg',
     icon: '🥬',
     color: {
       border: 'border-blue-200',

@@ -121,7 +121,7 @@ const productConfigs: Record<string, ProductConfig> = {
   },
   kolrabi: {
     title: '콜라비·초당옥수수·미니밤호박 1kg(제주다팜)',
-    description: '취급품목: 콜라비·초당옥수수·미니밤호박(보우짱 로얄과) 1kg 제주다팜 발주서 생성 + 운송장번호 입력 · 미니밤호박 3·5·10kg과 애플초당옥수수·성주참외 알뜰과는 명이나물(쥬얼리) 메뉴',
+    description: '취급품목: 콜라비·초당옥수수·미니밤호박(보우짱 로얄과) 1kg 제주다팜 발주서 생성 + 운송장번호 입력 · 미니밤호박 3·5·10kg과 애플초당옥수수·성주참외는 명이나물(쥬얼리) 메뉴',
     icon: '🥬',
     bgClass: 'bg-green-50',
     order: {

@@ -7,7 +7,6 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
-from app.processors import chamoe_mixed_order
 
 
 KST = timezone(timedelta(hours=9))

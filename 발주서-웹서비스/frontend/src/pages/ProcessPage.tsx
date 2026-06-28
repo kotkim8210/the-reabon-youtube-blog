@@ -59,7 +59,7 @@ const toolConfigs: Record<string, ToolConfig> = {
   'kolrabi-order': {
     title: '콜라비(제주다팜) 발주서 생성',
     description:
-      'DeliveryList에서 콜라비(제주다팜) 발주서를 생성합니다. 성주참외 알뜰과는 명이나물(쥬얼리팜) 메뉴에서 함께 출력됩니다.',
+      'DeliveryList에서 콜라비(제주다팜) 발주서를 생성합니다. 성주참외는 명이나물(쥬얼리팜) 메뉴에서 함께 출력됩니다.',
     icon: '🥬',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'green',
@@ -101,7 +101,7 @@ const toolConfigs: Record<string, ToolConfig> = {
   'myeongi-order': {
     title: '명이나물+애플초당옥수수 발주서 생성',
     description:
-      'DeliveryList에서 쥬얼리프룻 발주 대상인 명이나물·애플초당옥수수·망고수박·수박 6/7/8kg·성주참외(로얄/중소) 주문을 추출하여 pbfcompany 발주서를 생성합니다.',
+      'DeliveryList에서 쥬얼리프룻 발주 대상인 명이나물·애플초당옥수수·망고수박·수박 6/7/8kg·성주참외(로얄과/가성비 랜덤과) 주문을 추출하여 pbfcompany 발주서를 생성합니다.',
     icon: '🌿',
     files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
     color: 'green',
@@ -184,19 +184,6 @@ const toolConfigs: Record<string, ToolConfig> = {
       badge: 'bg-red-100 text-red-700',
     },
   },
-  'chamoe-mixed-order': {
-    title: '성주참외 알뜰과(쥬얼리팜) 발주서 생성',
-    description:
-      '쿠팡 가정용 혼합과 주문만 추출하여 쥬얼리팜 가성비 혼합과 발주서를 생성합니다.',
-    icon: '🍈',
-    files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
-    color: 'green',
-    colorClasses: {
-      bg: 'bg-green-50',
-      text: 'text-green-700',
-      badge: 'bg-green-100 text-green-700',
-    },
-  },
   'goguma-order': {
     title: '고구마 발주서 생성',
     description:
@@ -252,7 +239,7 @@ const toolConfigs: Record<string, ToolConfig> = {
   'tracking-input': {
     title: '콜라비(제주다팜) 운송장번호 입력',
     description:
-      '콜라비(제주다팜) Orderlist 파일의 운송장번호를 DeliveryList에 자동으로 매핑합니다. 성주참외 알뜰과는 명이나물(쥬얼리팜) 메뉴를 사용하세요.',
+      '콜라비(제주다팜) Orderlist 파일의 운송장번호를 DeliveryList에 자동으로 매핑합니다. 성주참외는 명이나물(쥬얼리팜) 메뉴를 사용하세요.',
     icon: '📦',
     files: [
       { key: 'orderlist', label: 'Orderlist 파일' },

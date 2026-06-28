@@ -22,7 +22,6 @@ from app.coupang.client import CoupangApiError
 from app.toss.client import TossApiError
 from app.processors import (
     batch_tracking_merge,
-    chamoe_mixed_order,
     chamdureup_order,
     chamdureup_tracking,
     event_order,
@@ -525,7 +524,7 @@ async def process_tomato_order(
         if not results:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="제이비티 발주로 출력할 대저토마토·남해땅두릅·초당옥수수·신비복숭아 주문을 찾지 못했습니다. 수박·성주참외(로얄/중소)는 쥬얼리프룻 메뉴, 알뜰과는 콜라비 메뉴에서 출력됩니다.",
+                detail="제이비티 발주로 출력할 대저토마토·남해땅두릅·초당옥수수·신비복숭아 주문을 찾지 못했습니다. 수박·성주참외는 쥬얼리프룻 메뉴에서 출력됩니다.",
             )
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
         for _, _, item_stats in results:
@@ -696,38 +695,6 @@ async def process_temu_tracking(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.exception("테무 송장 대량등록 중 오류")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
-        )
-
-
-@app.post("/api/process/chamoe-mixed-order")
-async def process_chamoe_mixed_order(
-    delivery_file: UploadFile = File(...),
-    user: dict = Depends(verify_token),
-):
-    try:
-        delivery_bytes = await delivery_file.read()
-        result = chamoe_mixed_order.process(delivery_bytes)
-        if result is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="제주다팜 성주참외 알뜰과로 발주할 쿠팡 가정용 혼합과 주문을 찾지 못했습니다.",
-            )
-
-        output_bytes, filename, stats = result
-        await record_sales_from_process_stats(
-            user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
-        )
-        logger.info(f"성주참외 알뜰과(제주다팜) 발주 처리 완료: {stats}")
-        return make_excel_response(output_bytes, filename, stats)
-    except HTTPException:
-        raise
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.exception("성주참외 알뜰과(제주다팜) 발주 처리 중 오류")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",

@@ -37,7 +37,7 @@ export const TOOL_CATALOG: ToolConfig[] = [
   {
     id: 'kolrabi-unified',
     title: '콜라비·초당옥수수·미니밤호박 1kg(제주다팜)',
-    description: '콜라비·초당옥수수·미니밤호박 1kg 제주다팜 발주서 생성 + 운송장번호 입력 (미니밤호박 3·5·10kg·애플초당옥수수·성주참외 알뜰과는 명이나물 메뉴)',
+    description: '콜라비·초당옥수수·미니밤호박 1kg 제주다팜 발주서 생성 + 운송장번호 입력 (미니밤호박 3·5·10kg·애플초당옥수수·성주참외는 명이나물 메뉴)',
     icon: '🥬',
     color: 'green',
     kind: 'unified',

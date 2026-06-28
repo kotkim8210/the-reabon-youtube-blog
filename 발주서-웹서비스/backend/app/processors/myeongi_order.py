@@ -141,28 +141,36 @@ def is_house_watermelon_order(product_name: object, option_text: object) -> bool
     return delivery_watermelon_kg(str(product_name or ""), str(option_text or "")) in JBT_WATERMELON_KGS
 
 
-# 성주참외 전체(로얄/중소/알뜰과) — 2026-06부터 쥬얼리팜 발주.
-# 로얄과/중소과 → '로얄과 Nkg'/'중소과 Nkg', 알뜰과(가정용 혼합과) → '가성비 혼합과 Nkg'.
-# ※ 알뜰과도 콜라비 메뉴가 아닌 명이나물(쥬얼리프룻) 메뉴에서 함께 출력한다.
+# 성주참외 전체 — 2026-06부터 제주다팜 알뜰과 발주 폐지, 전 등급 쥬얼리프룻으로 발주 통합.
+# 쿠팡 옵션 → 발주 품목명:
+#   가정용 로얄과 → '성주참외 로얄과 {kg}kg (R)'
+#   가정용 혼합과 → '성주참외 가성비 랜덤과 {kg}kg (R)'
 def is_jewelry_chamoe_order(product_name: object, option_text: object) -> bool:
     return "성주참외" in str(product_name or "")
+
+
+def _chamoe_jewelry_label(product_name: object, option_text: object) -> str:
+    """성주참외 → 쥬얼리프룻 발주 품목명 '성주참외 {등급} {kg}kg (R)'.
+
+    로얄과→'로얄과', 가정용 혼합과/알뜰/랜덤→'가성비 랜덤과', 중소→'중소과'.
+    """
+    text = _combined_text(product_name, option_text)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
+    kg = _fmt_kg(m.group(1)) if m else ""
+    if "로얄" in text:
+        grade = "로얄과"
+    elif "중소" in text:
+        grade = "중소과"
+    else:  # 혼합/알뜰/랜덤/등급미표기 → 가성비 랜덤과
+        grade = "가성비 랜덤과"
+    base = f"성주참외 {grade}"
+    return f"{base} {kg}kg (R)" if kg else f"{base} (R)"
 
 
 def _jewelry_chamoe_option(product_name: object, option_text: object) -> str | None:
     if not is_jewelry_chamoe_order(product_name, option_text):
         return None
-    text = _combined_text(product_name, option_text)
-    kg_match = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
-    kg = kg_match.group(1) if kg_match else ""
-    if "로얄" in text:
-        grade = "로얄과"
-    elif "중소" in text:
-        grade = "중소과"
-    elif "혼합" in text or "알뜰" in text or "랜덤" in text:
-        grade = "가성비 혼합과"
-    else:
-        grade = "성주참외"
-    return f"{grade} {kg}kg".strip() if kg else grade
+    return _chamoe_jewelry_label(product_name, option_text)
 
 
 def _house_watermelon_option(product_name: object, option_text: object) -> str | None:
@@ -230,23 +238,14 @@ def _peach_label(product_name: object, option_text: object) -> str:
 
 
 def _external_chamoe_product(product_name: object, option_text: object) -> str | None:
-    """토스/테무 등 외부 채널의 성주참외 → 쥬얼리팜 발주 품목명.
+    """토스/테무 등 외부 채널의 성주참외 → 쥬얼리프룻 발주 품목명.
 
-    쿠팡(_jewelry_chamoe_option)과 달리 알뜰과(혼합과)도 한 발주서에 포함한다
-    (외부 채널은 알뜰과 전용 버튼이 없으므로 전부 쥬얼리팜으로 출력).
+    쿠팡(_jewelry_chamoe_option)과 동일 표기 '성주참외 {등급} {kg}kg (R)'.
     """
     text = _combined_text(product_name, option_text)
     if "참외" not in text:
         return None
-    kg_match = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
-    kg = _fmt_kg(kg_match.group(1)) if kg_match else ""
-    if "로얄" in text:
-        grade = "로얄과"
-    elif "중소" in text:
-        grade = "중소과"
-    else:
-        grade = "가성비 혼합과"   # 혼합/알뜰/랜덤/등급미표기 기본값
-    return f"{grade} {kg}kg".strip() if kg else grade
+    return _chamoe_jewelry_label(product_name, option_text)
 
 
 def jewelry_external_product(
