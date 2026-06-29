@@ -853,8 +853,6 @@ export const fetchMyeongiSupplierPriceMonitor = () =>
   apiGet<SupplierPriceMonitorData>('/dashboard/supplier-price-monitor/myeongi');
 export const fetchKolrabiSupplierPriceMonitor = () =>
   apiGet<SupplierPriceMonitorData>('/dashboard/supplier-price-monitor/kolrabi');
-export const fetchChamoeAltteulSupplierPriceMonitor = () =>
-  apiGet<SupplierPriceMonitorData>('/dashboard/supplier-price-monitor/chamoe-altteul');
 export const fetchSupplierPriceMonitor = (key: string) =>
   apiGet<SupplierPriceMonitorData>(`/dashboard/supplier-price-monitor/${encodeURIComponent(key)}`);
 
@@ -870,10 +868,6 @@ export async function downloadMyeongiSupplierPriceMonitorWorkbook(): Promise<Pro
 
 export async function downloadKolrabiSupplierPriceMonitorWorkbook(): Promise<ProcessResult> {
   return downloadSupplierPriceMonitorWorkbook('kolrabi');
-}
-
-export async function downloadChamoeAltteulSupplierPriceMonitorWorkbook(): Promise<ProcessResult> {
-  return downloadSupplierPriceMonitorWorkbook('chamoe-altteul');
 }
 
 export async function downloadSupplierPriceMonitorWorkbook(key: string): Promise<ProcessResult> {

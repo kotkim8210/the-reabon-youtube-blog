@@ -184,19 +184,6 @@ const toolConfigs: Record<string, ToolConfig> = {
       badge: 'bg-red-100 text-red-700',
     },
   },
-  'dailyfood-order': {
-    title: '홍매실(황매실) 발주서 생성 (데일리푸드)',
-    description:
-      'DeliveryList에서 홍매실(황매실) 주문을 추출하여 데일리푸드 발주서를 생성합니다. 쿠팡 옵션 → 홍매실(왕특/혼합과) Nkg로 매칭.',
-    icon: '🟡',
-    files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
-    color: 'green',
-    colorClasses: {
-      bg: 'bg-green-50',
-      text: 'text-green-700',
-      badge: 'bg-green-100 text-green-700',
-    },
-  },
   'goguma-order': {
     title: '고구마 발주서 생성',
     description:

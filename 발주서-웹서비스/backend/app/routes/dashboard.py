@@ -17,7 +17,6 @@ from app.coupang.risk import calculate_all_risk_scores
 from app.supplier_price_monitor import (
     is_supplier_monitor_paused,
     refresh_supplier_price_snapshots,
-    run_chamoe_altteul_monitor,
     run_kolrabi_monitor,
     run_myeongi_monitor,
     run_supplier_monitor,
@@ -191,18 +190,6 @@ async def get_kolrabi_supplier_price_monitor(_token: dict = Depends(require_admi
 @router.post("/supplier-price-monitor/kolrabi/download")
 async def download_kolrabi_supplier_price_monitor(_token: dict = Depends(require_admin)):
     summary, output_bytes, filename = await run_kolrabi_monitor()
-    return _make_excel_response(output_bytes, filename, summary)
-
-
-@router.get("/supplier-price-monitor/chamoe-altteul")
-async def get_chamoe_altteul_supplier_price_monitor(_token: dict = Depends(require_admin)):
-    summary, _, _ = await run_chamoe_altteul_monitor()
-    return summary
-
-
-@router.post("/supplier-price-monitor/chamoe-altteul/download")
-async def download_chamoe_altteul_supplier_price_monitor(_token: dict = Depends(require_admin)):
-    summary, output_bytes, filename = await run_chamoe_altteul_monitor()
     return _make_excel_response(output_bytes, filename, summary)
 
 

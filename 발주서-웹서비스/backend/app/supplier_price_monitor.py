@@ -270,22 +270,6 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("초당옥수수 특품 20개", "초당옥수수(특품) 20개", 15, sheet_name="쥬얼리프룻"),
         ),
     ),
-    "chamoe-altteul": SupplierMonitorConfig(
-        key="chamoe-altteul",
-        source_type="adminplus",
-        base_url="https://kkangta55.adminplus.co.kr",
-        supplier_name="제주다팜",
-        product_name="알뜰 참외",
-        search_value="참외",
-        template_path=TEMPLATE_DIR / "성주참외_제주다팜_알뜰과_소싱현황_원본.xlsx",
-        output_prefix="성주참외_제주다팜_알뜰과_V3",
-        output_name_pattern="성주참외 소싱현황관리_V3_{date}_제주다팜 가정용혼합알뜰과.xlsx",
-        options=(
-            SupplierOptionConfig("성주참외 알뜰 랜덤과 2kg", "알뜰 참외 [랜덤과] 2kg (2-15입내외) [박스포함]", 11, sheet_name="제이비티"),
-            SupplierOptionConfig("성주참외 알뜰 랜덤과 3kg", "알뜰 참외 [랜덤과] 3kg (3-25입내외) [박스포함]", 13, sheet_name="제이비티"),
-            SupplierOptionConfig("성주참외 알뜰 랜덤과 5kg", "알뜰 참외 [랜덤과] 5kg (5-45입내외) [박스포함]", 12, sheet_name="제이비티"),
-        ),
-    ),
     "chamoe-jbt": SupplierMonitorConfig(
         key="chamoe-jbt",
         source_type="google_sheet",
@@ -416,7 +400,7 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
 }
 
 # watermelon-jbt(수박)·chamoe-jbt(성주참외)는 발주처가 제이비티→쥬얼리로 이전돼 무용 → 일시중지(숨김)
-PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt", "chamoe-altteul"}
+PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt"}
 
 MONITOR_CONFIGS["dureup-jbt"] = replace(
     MONITOR_CONFIGS["dureup-jbt"],
@@ -1046,10 +1030,6 @@ async def run_myeongi_monitor() -> tuple[dict, bytes, str]:
 
 async def run_kolrabi_monitor() -> tuple[dict, bytes, str]:
     return await run_supplier_monitor("kolrabi")
-
-
-async def run_chamoe_altteul_monitor() -> tuple[dict, bytes, str]:
-    return await run_supplier_monitor("chamoe-altteul")
 
 
 if __name__ == "__main__":
