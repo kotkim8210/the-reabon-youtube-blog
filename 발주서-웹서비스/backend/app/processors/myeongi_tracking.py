@@ -92,11 +92,13 @@ def process(
             })
 
     # Build indexes
-    order_by_order_no = {}
+    # 한 주문번호에 여러 품목(예: 황혜영이 수박+참외를 한 주문번호로 주문)이면 회신에
+    # 송장이 여러 건 → 주문번호별 리스트로 보관해야 각 행에 서로 다른 송장이 들어간다.
+    order_by_order_no = defaultdict(list)
     order_by_name = defaultdict(list)
     for entry in order_entries:
         if entry["order_no"]:
-            order_by_order_no[entry["order_no"]] = entry
+            order_by_order_no[entry["order_no"]].append(entry)
         if entry["name"]:
             order_by_name[entry["name"]].append(entry)
 
@@ -147,11 +149,16 @@ def process(
 
         matched = None
 
-        # 1차: 주문번호 매칭
+        # 1차: 주문번호 매칭 (한 주문에 여러 품목이면 같은 주문번호가 여러 건)
+        # 미사용 건 중 옵션이 맞는 것 우선, 옵션으로 못 가르면 미사용 첫 건을 쓴다.
+        # → 수박+참외를 같은 주문번호로 주문해도 두 송장이 각각 두 행에 들어간다.
         if dl_order_no and dl_order_no in order_by_order_no:
-            candidate = order_by_order_no[dl_order_no]
-            if id(candidate) not in used_entries:
-                matched = candidate
+            ono_avail = [c for c in order_by_order_no[dl_order_no] if id(c) not in used_entries]
+            if len(ono_avail) == 1:
+                matched = ono_avail[0]
+            elif ono_avail:
+                opt_avail = [c for c in ono_avail if options_match(c.get("option_keys"), dl_option_keys)]
+                matched = opt_avail[0] if opt_avail else ono_avail[0]
 
         # 폴백: 이름/전화/주소 매칭
         if matched is None and dl_name:
