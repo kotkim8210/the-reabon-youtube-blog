@@ -3,7 +3,8 @@
 Flow:
 1. 해달 발주서에서 (이름, 전화, 주소, 운송장번호) 추출
 2. 올웨이즈 주문 파일에서 빈 W열(운송장번호) 행 탐색
-3. 이름/전화/주소 매칭으로 운송장번호를 W열에 입력, U열에 "한진택배" 입력
+3. 이름/전화/주소 매칭으로 운송장번호를 W열에 입력, U열에 실제 택배사 입력
+   (회신파일의 택배사를 읽어 올웨이즈 표기로 정규화. 없으면 기본 한진택배)
 """
 
 import re
@@ -14,7 +15,11 @@ from collections import defaultdict
 from openpyxl import load_workbook
 
 from app.processors.goguma_order import transform_alwayz_option, transform_option
-from app.processors.haedal_tracking_parser import detect_haedal_columns, find_tracking_in_row
+from app.processors.haedal_tracking_parser import (
+    detect_haedal_columns,
+    find_courier_in_row,
+    find_tracking_in_row,
+)
 from app.processors.tracking_match import (
     name_counts,
     option_key_set,
@@ -30,6 +35,27 @@ def normalize(value) -> str:
     if value is None:
         return ""
     return re.sub(r'\s+', '', str(value).strip())
+
+
+def _alwayz_courier(value: object, default: str = "한진택배") -> str:
+    """회신파일 택배사 → 올웨이즈가 인식하는 택배사명. 값 없으면 기본 한진택배."""
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return default
+    c = re.sub(r"\s+", "", text).lower()
+    if "대한통운" in c or "cj" in c:
+        return "CJ대한통운"
+    if "한진" in c:
+        return "한진택배"
+    if "롯데" in c:
+        return "롯데택배"
+    if "우체국" in c or "epost" in c:
+        return "우체국택배"
+    if "로젠" in c or "logen" in c:
+        return "로젠택배"
+    if "현대" in c:
+        return "현대택배"
+    return text
 
 
 def process(
@@ -62,11 +88,16 @@ def process(
 
         tracking = find_tracking_in_row(hd_ws, row_idx, cols.tracking)
         if tracking:
+            skip_cols = tuple(
+                c for c in (cols.name, cols.phone, cols.address, cols.product, cols.tracking) if c
+            )
+            courier = find_courier_in_row(hd_ws, row_idx, cols.courier, skip_cols)
             haedal_entries.append({
                 "name": name,
                 "phone": phone,
                 "address": address,
                 "tracking": tracking,
+                "courier": courier,
                 "option_keys": option_key_set(product, transform_option(str(product or ""))),
             })
 
@@ -152,7 +183,7 @@ def process(
 
         if matched:
             w_cell.value = matched["tracking"]
-            al_ws.cell(row=row_idx, column=21).value = "한진택배"  # U = 택배사
+            al_ws.cell(row=row_idx, column=21).value = _alwayz_courier(matched.get("courier"))  # U = 택배사(회신 실제 택배사)
             used_entries.add(id(matched))
             filled += 1
         else:
