@@ -35,14 +35,6 @@ export const TOOL_CATALOG: ToolConfig[] = [
     kind: 'unified',
   },
   {
-    id: 'dailyfood-order',
-    title: '홍매실(황매실) · 데일리푸드',
-    description: '데일리푸드 홍매실(황매실) 발주서 생성 (DeliveryList의 매실 주문 → 데일리푸드 양식)',
-    icon: '🟡',
-    color: 'amber',
-    kind: 'order',
-  },
-  {
     id: 'kolrabi-unified',
     title: '콜라비·초당옥수수·미니밤호박 1kg(제주다팜)',
     description: '콜라비·초당옥수수·미니밤호박 1kg 제주다팜 발주서 생성 + 운송장번호 입력 (미니밤호박 3·5·10kg·애플초당옥수수·성주참외는 명이나물 메뉴)',
