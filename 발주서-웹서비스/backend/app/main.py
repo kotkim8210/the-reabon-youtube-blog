@@ -24,6 +24,7 @@ from app.processors import (
     batch_tracking_merge,
     chamdureup_order,
     chamdureup_tracking,
+    dailyfood_order,
     event_order,
     gaegeolmu_order,
     gaegeolmu_tracking,
@@ -442,6 +443,38 @@ async def process_chamdureup_tracking(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.exception("참두릅 운송장 입력 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/dailyfood-order")
+async def process_dailyfood_order(
+    delivery_file: UploadFile = File(...),
+    user: dict = Depends(verify_token),
+):
+    """데일리푸드 홍매실(황매실) 발주서 생성."""
+    try:
+        delivery_bytes = await delivery_file.read()
+        result = dailyfood_order.process(delivery_bytes)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="데일리푸드 발주로 출력할 홍매실(황매실) 주문을 찾지 못했습니다.",
+            )
+        output_bytes, filename, stats = result
+        await record_sales_from_process_stats(
+            user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
+        )
+        logger.info(f"데일리푸드 홍매실 발주 처리 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("데일리푸드 홍매실 발주 처리 중 오류")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",
