@@ -182,13 +182,48 @@ def _house_watermelon_option(product_name: object, option_text: object) -> str |
     return f"가정용 수박 {kg}kg 내외"
 
 
+# 거반도 납작복숭아(도넛복숭아) → 쥬얼리프룻 발주. 쿠팡 500g/1kg/2kg → '거반도 {size} (과수 내외)'.
+# 상품명에 '복숭아'가 들어가 신비복숭아 로직과 충돌하므로, 항상 먼저 분기하고 peach 함수에서 제외한다.
+def _is_geobando(product_name: object, option_text: object) -> bool:
+    t = _combined_text(product_name, option_text).replace(" ", "")
+    return "거반도" in t or "납작복숭아" in t
+
+
+def is_jewelry_geobando_order(product_name: object, option_text: object) -> bool:
+    if not _is_geobando(product_name, option_text):
+        return False
+    t = _combined_text(product_name, option_text).replace(" ", "")
+    return ("2kg" in t) or ("1kg" in t) or ("500g" in t)
+
+
+_GEOBANDO_LABELS = {
+    "2kg": "거반도 2kg (8~16과 내외)",
+    "1kg": "거반도 1kg (4~10과 내외)",
+    "500g": "거반도 500g (2~5과 내외)",
+}
+
+
+def _jewelry_geobando_option(product_name: object, option_text: object) -> str | None:
+    if not is_jewelry_geobando_order(product_name, option_text):
+        return None
+    t = _combined_text(product_name, option_text).replace(" ", "")
+    for key in ("2kg", "1kg", "500g"):  # 2kg 먼저 (1kg/500g 오매칭 방지)
+        if key in t:
+            return _GEOBANDO_LABELS[key]
+    return None
+
+
 # 신비복숭아 1·2kg → 쥬얼리프룻 발주 (3·4kg은 제이비티, 800g은 제외)
 def is_jewelry_peach_order(product_name: object, option_text: object) -> bool:
     from app.processors.tomato_order import peach_kg, JEWELRY_PEACH_KGS
+    if _is_geobando(product_name, option_text):  # 거반도 납작복숭아는 신비복숭아 아님
+        return False
     return peach_kg(str(product_name or ""), str(option_text or "")) in JEWELRY_PEACH_KGS
 
 
 def _jewelry_peach_option(product_name: object, option_text: object) -> str | None:
+    if _is_geobando(product_name, option_text):  # 거반도는 신비복숭아 아님
+        return None
     from app.processors.tomato_order import peach_kg, JEWELRY_PEACH_KGS
     kg = peach_kg(str(product_name or ""), str(option_text or ""))
     if kg not in JEWELRY_PEACH_KGS:
@@ -361,6 +396,10 @@ def convert_option(option_text: str, product_name: str = "") -> str | None:
     if chamoe:
         return chamoe
 
+    geobando = _jewelry_geobando_option(product_name, option_text)
+    if geobando:
+        return geobando
+
     peach = _jewelry_peach_option(product_name, option_text)
     if peach:
         return peach
@@ -414,6 +453,7 @@ def process(
     has_watermelon = False
     has_chamoe = False
     has_peach = False
+    has_geobando = False
     has_potato = False
     has_bamhobak = False
     for row in dl_ws.iter_rows(min_row=2):
@@ -440,6 +480,10 @@ def process(
             # 성주참외(로얄/중소)도 쥬얼리팜 발주 (알뜰과는 별도 버튼)
             filtered_rows.append(row)
             has_chamoe = True
+        elif is_jewelry_geobando_order(k_val, option):
+            # 거반도 납작복숭아 500g·1·2kg → 쥬얼리프룻
+            filtered_rows.append(row)
+            has_geobando = True
         elif is_jewelry_peach_order(k_val, option):
             # 신비복숭아 1·2kg → 쥬얼리프룻 (3·4kg은 제이비티)
             filtered_rows.append(row)
@@ -557,7 +601,9 @@ def process(
             cell = ws.cell(row=out_row, column=col, value=value)
             cell.font = font11
 
-        if "복숭아" in product:
+        if "거반도" in product:
+            has_geobando = True
+        elif "복숭아" in product:
             has_peach = True
         elif "망고수박" in product:
             has_mango = True
@@ -598,6 +644,8 @@ def process(
         product_parts.append("성주참외")
     if has_peach:
         product_parts.append("신비복숭아")
+    if has_geobando:
+        product_parts.append("거반도복숭아")
     if has_potato:
         product_parts.append("홍감자")
     if has_bamhobak:
