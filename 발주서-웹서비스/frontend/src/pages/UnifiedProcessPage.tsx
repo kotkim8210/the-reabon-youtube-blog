@@ -445,7 +445,7 @@ function ProcessSection({
 }
 
 // ── 토스 운송장 자동등록(API) 카드 (고구마식) ──────────────────────
-function TossApiTrackingCard() {
+function TossApiTrackingCard({ supplierLabel = '쥬얼리' }: { supplierLabel?: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
@@ -473,7 +473,7 @@ function TossApiTrackingCard() {
         <div>
           <h3 className="text-base font-bold text-gray-900">토스 운송장 자동등록 (API)</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            쥬얼리 거래처 회신(orderlist) 파일을 올리면 토스 주문에 운송장번호를 토스 API로 자동 등록합니다.
+            {supplierLabel} 거래처 회신(orderlist) 파일을 올리면 토스 주문에 운송장번호를 토스 API로 자동 등록합니다.
             결제완료 주문은 상품준비중으로 자동 전환됩니다.
           </p>
           <p className="text-xs font-semibold text-amber-700 mt-1">
@@ -483,7 +483,7 @@ function TossApiTrackingCard() {
       </div>
 
       <FileUpload
-        label="쥬얼리 거래처 회신(orderlist) 파일"
+        label={`${supplierLabel} 거래처 회신(orderlist) 파일`}
         file={file}
         onFileSelect={(f) => {
           setFile(f || null);
@@ -529,7 +529,7 @@ function TossApiTrackingCard() {
           </div>
           {Number((result.toss_success as number) ?? 0) === 0 && (
             <p className="mt-2 text-xs text-amber-700">
-              성공 0건이면 올린 파일이 DeliveryList(쿠팡)일 수 있어요. 토스 고객이 포함된 <b>쥬얼리 회신(orderlist)</b> 파일인지 확인하세요.
+              성공 0건이면 올린 파일이 DeliveryList(쿠팡)일 수 있어요. 토스 고객이 포함된 <b>{supplierLabel} 회신(orderlist)</b> 파일인지 확인하세요.
             </p>
           )}
         </div>
@@ -709,7 +709,7 @@ function UnifiedProcessPage() {
       {/* 토스 운송장 자동등록 (API) — 명이(쥬얼리) · 콜라비(제주다팜 미니밤호박) 페이지 */}
       {(productId === 'myeongi' || productId === 'kolrabi') && (
         <div className="mt-4 animate-slide-up">
-          <TossApiTrackingCard />
+          <TossApiTrackingCard supplierLabel={productId === 'kolrabi' ? '제주다팜' : '쥬얼리'} />
         </div>
       )}
 

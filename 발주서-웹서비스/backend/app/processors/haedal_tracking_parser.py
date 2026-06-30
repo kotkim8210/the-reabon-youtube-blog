@@ -80,16 +80,28 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
                 continue
             if not found.get("tracking") and _contains_any(header, ("송장번호", "운송장번호", "출고번호")):
                 found["tracking"] = col_idx
-            if not found.get("name") and _contains_any(header, ("수취인명", "수령인명", "받는분", "받으시는분", "수하인명")):
+            if (
+                not found.get("name")
+                and _contains_any(header, ("수취인명", "수령인명", "받는분", "받으시는분", "수하인명", "수령인", "수취인", "받는사람"))
+                and not _contains_any(header, ("연락처", "전화", "번호", "주소", "우편", "일자", "메모"))
+            ):
                 found["name"] = col_idx
             if not found.get("phone") and (
-                _contains_any(header, ("수취인이동통신", "수취인휴대", "수취인전화", "수령인전화", "받는분전화", "휴대폰", "전화번호"))
+                _contains_any(header, (
+                    "수취인이동통신", "수취인휴대", "수취인전화", "수령인전화", "받는분전화", "휴대폰", "전화번호",
+                    "수령인연락처", "수취인연락처", "받는분연락처",
+                ))
                 and not _contains_any(header, ("주문자", "주문인", "발송", "보내는"))
+                and "연락처2" not in header  # '수령인연락처2'(보조)는 건너뛰고 '연락처1'(주)를 잡는다
             ):
                 found["phone"] = col_idx
             if not found.get("address") and _contains_any(header, ("수취인주소", "수령인주소", "받는분주소", "주소")):
                 found["address"] = col_idx
-            if not found.get("product") and _contains_any(header, ("상품명", "품명", "제품명", "상품")):
+            # '상품명'은 잡되 '상품주문번호'(번호/주문/코드 포함)는 제외 → 상품명 열을 정확히 찾는다
+            if not found.get("product") and (
+                _contains_any(header, ("상품명", "품명", "제품명"))
+                or (_contains_any(header, ("상품", "제품")) and not _contains_any(header, ("번호", "주문", "코드")))
+            ):
                 found["product"] = col_idx
             if not found.get("courier") and _contains_any(header, ("택배사", "택배회사", "배송사", "택배사명")):
                 found["courier"] = col_idx
