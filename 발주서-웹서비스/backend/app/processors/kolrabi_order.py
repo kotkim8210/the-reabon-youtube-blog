@@ -93,11 +93,16 @@ def clear_stray_header_numbers(ws) -> None:
             cell.value = None
 
 
-def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
+def process(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict]:
     """Process delivery list for 콜라비 orders.
 
     Args:
         delivery_file_bytes: Raw bytes of the DeliveryList Excel file.
+        toss_entries: 토스 API에서 수집한 콜라비 주문(선택). 각 entry는 발주 품목명
+            (product='콜라비 정품 {kg}kg')이 확정돼 있어 DeliveryList 행 뒤에 추가된다.
 
     Returns:
         Tuple of (output_bytes, filename, stats_dict).
@@ -206,6 +211,47 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
             if order_no:
                 bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
 
+    # 토스 콜라비 entry는 발주 품목명(product)이 확정돼 있어 DeliveryList 행 뒤에 추가.
+    base_row = start_row + len(filtered_rows)
+    for j, entry in enumerate(toss_entries or []):
+        out_row = base_row + j
+        name = normalize(entry.get("name"))
+        phone = normalize(entry.get("phone"))
+        zipcode = normalize(entry.get("zipcode"))
+        address = normalize(entry.get("address"))
+        memo = normalize(entry.get("memo"))
+        product = entry.get("product") or ""
+        try:
+            qty_int = int(float(entry.get("qty"))) if entry.get("qty") not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+        order_no = entry.get("order_id") or ""
+        if zipcode:
+            try:
+                zipcode = str(int(float(zipcode))).zfill(5)
+            except (ValueError, TypeError):
+                zipcode = zipcode.zfill(5)
+        mapping = {
+            2: name, 3: phone, 5: zipcode, 6: address, 8: product,
+            9: str(qty_int), 10: "식품애착", 11: "010-5700-7756", 13: memo,
+        }
+        for col, value in mapping.items():
+            cell = ws.cell(row=out_row, column=col, value=value)
+            cell.font = font11
+        if product:
+            bucket = option_totals.setdefault(
+                entry.get("option") or product,
+                {
+                    "coupang_option_keyword": entry.get("option") or product,
+                    "vendor_option_name": product,
+                    "quantity": 0,
+                    "orders": [],
+                },
+            )
+            bucket["quantity"] += qty_int
+            if order_no:
+                bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
     # Save to bytes
     output = BytesIO()
     tmpl_wb.save(output)
@@ -214,7 +260,7 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
     now = datetime.now(KST)
     filename = f"제주다팜_아이티소프트_콜라비발주({now.strftime('%Y%m%d')}).xlsx"
     stats = {
-        "total": len(filtered_rows),
+        "total": len(filtered_rows) + len(toss_entries or []),
         "product": "콜라비",
         "options": list(option_totals.values()),
     }
@@ -490,6 +536,7 @@ def process_bamhobak(
 
 def process_outputs(
     delivery_file_bytes: bytes,
+    toss_colrabi_entries: list[dict] | None = None,
     toss_bamhobak_entries: list[dict] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
     """제주다팜 발주서 목록 반환 — 콜라비 + 초당옥수수 + 미니밤호박.
@@ -503,7 +550,7 @@ def process_outputs(
     """
     results: list[tuple[bytes, str, dict]] = []
 
-    kolrabi_result = process(delivery_file_bytes)
+    kolrabi_result = process(delivery_file_bytes, toss_entries=toss_colrabi_entries)
     kolrabi_stats = kolrabi_result[2] if len(kolrabi_result) > 2 else {}
     if int((kolrabi_stats or {}).get("total") or 0) > 0:
         results.append(kolrabi_result)

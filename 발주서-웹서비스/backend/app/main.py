@@ -340,7 +340,8 @@ async def process_kolrabi_order(
 ):
     try:
         delivery_bytes = await delivery_file.read()
-        # 토스 미니밤호박 1kg 주문을 토스 API로 수집해 미니밤호박 발주서에 합친다.
+        # 토스 제주다팜 주문(콜라비 + 미니밤호박 1kg)을 토스 API로 수집해 각 발주서에 합친다.
+        toss_colrabi_entries = []
         toss_bamhobak_entries = []
         toss_error = ""
         collect_dates = None
@@ -351,13 +352,17 @@ async def process_kolrabi_order(
             collect_dates = (today, today)
         if collect_dates:
             try:
-                toss_bamhobak_entries = await tomato_order.collect_toss_bamhobak_orders(*collect_dates)
+                toss_jeju = await tomato_order.collect_toss_jejudapam_orders(*collect_dates)
+                toss_colrabi_entries = toss_jeju.get("colrabi", [])
+                toss_bamhobak_entries = toss_jeju.get("bamhobak", [])
             except Exception as toss_exc:
                 toss_error = str(toss_exc)
-                logger.warning(f"토스 미니밤호박 수집 실패(발주는 계속): {toss_exc}")
+                logger.warning(f"토스 제주다팜(콜라비·미니밤호박) 수집 실패(발주는 계속): {toss_exc}")
 
         results = kolrabi_order.process_outputs(
-            delivery_bytes, toss_bamhobak_entries=toss_bamhobak_entries
+            delivery_bytes,
+            toss_colrabi_entries=toss_colrabi_entries,
+            toss_bamhobak_entries=toss_bamhobak_entries,
         )
         if not results:
             raise HTTPException(

@@ -132,8 +132,8 @@ const productConfigs: Record<string, ProductConfig> = {
       buttonLabel: '발주서 생성',
       tossDateRange: true,
       tossDefaultDays: 1,
-      tossDateTitle: '토스 주문 수집 (제주다팜 미니밤호박)',
-      tossDateHint: '기본 2일(어제~오늘) 토스 미니밤호박 1kg 주문을 제주다팜 미니밤호박 발주서에 합칩니다. 3·5·10kg은 명이(쥬얼리) 메뉴. 배송중·송장입력 건은 자동 제외. (추가발주는 "오늘", 안 합치려면 "수집안함")',
+      tossDateTitle: '토스 주문 수집 (제주다팜 콜라비·미니밤호박)',
+      tossDateHint: '기본 2일(어제~오늘) 토스 콜라비·미니밤호박 1kg 주문을 제주다팜 발주서에 합칩니다. 미니밤호박 3·5·10kg은 명이(쥬얼리) 메뉴. 배송중·송장입력 건은 자동 제외. (추가발주는 "오늘", 안 합치려면 "수집안함")',
     },
     tracking: {
       title: '콜라비·미니밤호박 1kg 운송장번호 입력',

@@ -422,6 +422,69 @@ async def collect_toss_bamhobak_orders(from_date: str, to_date: str) -> list[dic
     return entries
 
 
+async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
+    """토스 API에서 제주다팜 발주 대상(콜라비 + 미니밤호박 1kg) 주문을 수집.
+
+    반환: {"colrabi": [...], "bamhobak": [...]} — 각 entry에 'product'(제주다팜 발주 품목명) 포함.
+    콜라비는 3/5/10kg('콜라비 정품 {kg}kg'), 미니밤호박은 1kg만(3·5·10kg은 쥬얼리).
+    배송중·송장입력 건은 자동 제외.
+    """
+    from app.toss.client import toss_client
+    from app.processors.kolrabi_order import convert_quantity, convert_bamhobak_option
+
+    orders = await toss_client.get_orders(start_date=from_date, end_date=to_date, status=None)
+
+    colrabi: list[dict] = []
+    bamhobak: list[dict] = []
+    for item in orders:
+        text = _toss_item_text(item)
+        compact = text.replace(" ", "")
+        if "콜라비" not in compact and "밤호박" not in compact:
+            continue
+        order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
+        if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
+            continue
+        if _toss_order_done(item):
+            continue
+
+        option = normalize(item.get("optionName") or "")
+        product_name = normalize(item.get("productName") or "") or text
+        address = _toss_address(item)
+
+        def _entry(product: str, tag: str) -> dict:
+            return {
+                "name": item.get("receiverName") or "",
+                "phone": item.get("receiverRealPhone") or item.get("receiverPhone") or "",
+                "zipcode": _toss_zipcode(item),
+                "address": address,
+                "qty": str(item.get("quantity") or 1),
+                "product_name": item.get("productName") or "토스 주문",
+                "option": option,
+                "product": product,
+                "memo": item.get("shippingNote") or "",
+                "order_id": toss_order_id(item)
+                or stable_order_id(
+                    tag,
+                    item.get("receiverName"),
+                    item.get("receiverRealPhone") or item.get("receiverPhone"),
+                    address,
+                    option,
+                    item.get("quantity") or 1,
+                ),
+            }
+
+        if "콜라비" in compact:
+            product = convert_quantity(f"{option} {product_name}")  # '콜라비 정품 {kg}kg' (3/5/10kg)
+            if product:
+                colrabi.append(_entry(product, "toss-colrabi"))
+        elif "밤호박" in compact:
+            product = convert_bamhobak_option(product_name, option)  # 1kg만
+            if product:
+                bamhobak.append(_entry(product, "toss-bamhobak"))
+
+    return {"colrabi": colrabi, "bamhobak": bamhobak}
+
+
 def parse_alwayz_jbt_rows(alwayz_bytes: bytes) -> tuple[list, dict]:
     """올웨이즈 주문내역(.xlsx)에서 제이비티 발주 대상 행을 추출.
 
