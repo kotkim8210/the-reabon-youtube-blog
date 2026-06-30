@@ -248,6 +248,21 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("콜라비 정품 10kg", "콜라비(정품 300~750g) 10kg", 10),
         ),
     ),
+    # 제주다팜 미니밤호박 1kg (3/5/10kg는 쥬얼리프룻=bamhobak-jewelry, 1kg만 제주다팜 adminplus)
+    "bamhobak-jeju": SupplierMonitorConfig(
+        key="bamhobak-jeju",
+        source_type="adminplus",
+        base_url="https://kkangta55.adminplus.co.kr",
+        supplier_name="제주다팜",
+        product_name="제주 미니밤호박 보우짱 로얄과",
+        product_code="10000015",  # 동명 3건(소과/못난이/로얄과) 중 '로얄과' 직접 지정해 오매칭 방지
+        template_path=TEMPLATE_DIR / "밤호박_제주다팜_소싱현황_원본.xlsx",
+        output_prefix="밤호박_제주다팜_V1",
+        output_name_pattern="미니밤호박 소싱현황관리(제주다팜)_V1_{date}.xlsx",
+        options=(
+            SupplierOptionConfig("미니밤호박 로얄과 1kg", "1kg", 8),
+        ),
+    ),
     "corn-jbt": SupplierMonitorConfig(
         key="corn-jbt",
         source_type="google_sheet",
