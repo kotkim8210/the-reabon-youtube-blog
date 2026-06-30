@@ -24,6 +24,7 @@ from app.processors import (
     batch_tracking_merge,
     chamdureup_order,
     chamdureup_tracking,
+    daangn_order,
     event_order,
     gaegeolmu_order,
     gaegeolmu_tracking,
@@ -442,6 +443,33 @@ async def process_chamdureup_tracking(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.exception("참두릅 운송장 입력 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/daangn-order")
+async def process_daangn_order(
+    text: str = Form(...),
+    user: dict = Depends(verify_token),
+):
+    """당근마켓 주문 상세 텍스트 → 쥬얼리프룻 발주서."""
+    try:
+        result = daangn_order.process(text)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="당근 주문 텍스트에서 발주할 주문을 찾지 못했습니다. (상품·옵션(예: '대과 2kg 1개')·받는 사람 줄이 있는지 확인)",
+            )
+        output_bytes, filename, stats = result
+        await record_sales_from_process_stats(user["user_id"], stats, ymd=None)
+        logger.info(f"당근 발주 처리 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("당근 발주 처리 중 오류")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",

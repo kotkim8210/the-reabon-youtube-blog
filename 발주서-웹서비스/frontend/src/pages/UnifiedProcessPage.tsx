@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Pencil, Check, X } from 'lucide-react';
 import FileUpload from '../components/FileUpload';
-import { processFile, downloadBlob, ProcessResult, processTossWatermelonTracking } from '../api';
+import { processFile, downloadBlob, ProcessResult, processTossWatermelonTracking, processDaangnOrder } from '../api';
 import { useUser } from '../App';
 import { loadToolPrefs, setSectionTitle } from '../lib/toolCatalog';
 
@@ -538,6 +538,100 @@ function TossApiTrackingCard() {
   );
 }
 
+// ── 당근마켓 주문 발주 카드 (텍스트 붙여넣기) ─────────────────────
+function DaangnOrderCard() {
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<ProcessResult | null>(null);
+  const [error, setError] = useState('');
+
+  const run = async () => {
+    if (!text.trim()) return;
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await processDaangnOrder(text);
+      setResult(res);
+      downloadBlob(res.blob, res.filename);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '당근 발주 처리 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-4">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-xl">🥕</div>
+        <div>
+          <h3 className="text-base font-bold text-gray-900">당근마켓 주문 발주 (붙여넣기)</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            당근 <b>주문 상세</b> 화면 내용을 복사해 붙여넣으면 쥬얼리프룻 발주서로 변환·다운로드합니다.
+            여러 건은 '주문 상세' 단위로 이어붙여 한 번에 처리할 수 있습니다. (예: 대극천 복숭아)
+          </p>
+        </div>
+      </div>
+
+      <textarea
+        value={text}
+        onChange={(e) => { setText(e.target.value); setResult(null); setError(''); }}
+        placeholder={'당근 주문 상세 텍스트를 붙여넣으세요.\n예) 대극천 복숭아 / 대과 2kg 1개 / 받는 사람 ... / 배송지 ... / 연락처 ...'}
+        rows={8}
+        className="w-full rounded-xl border border-gray-200 p-3 text-sm font-mono leading-5
+                   focus:outline-none focus:ring-2 focus:ring-orange-300 resize-y"
+      />
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={run}
+          disabled={!text.trim() || loading}
+          className="bg-orange-500 text-white px-5 py-2.5 rounded-xl font-semibold text-sm
+                     hover:bg-orange-600 active:bg-orange-700
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+        >
+          {loading ? '생성 중...' : '발주서 생성'}
+        </button>
+        {(text || result || error) && (
+          <button
+            onClick={() => { setText(''); setResult(null); setError(''); }}
+            disabled={loading}
+            className="text-gray-500 hover:text-gray-700 px-4 py-2.5 rounded-xl font-medium text-sm hover:bg-gray-100 transition-all"
+          >
+            초기화
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm text-red-600">{error}</p>
+        </div>
+      )}
+
+      {result && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+          <p className="text-sm font-bold text-green-800 mb-2">당근 발주서 생성 완료 (자동 다운로드됨)</p>
+          {result.stats && (
+            <div className="space-y-0.5 mb-3">
+              {formatStats(result.stats).map((line, i) => (
+                <p key={i} className="text-sm text-green-700">{line}</p>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => downloadBlob(result.blob, result.filename)}
+            className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-green-700 transition-all"
+          >
+            다시 다운로드
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── 메인 페이지 ───────────────────────────────────────────────────
 function UnifiedProcessPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -616,6 +710,13 @@ function UnifiedProcessPage() {
       {(productId === 'myeongi' || productId === 'kolrabi') && (
         <div className="mt-4 animate-slide-up">
           <TossApiTrackingCard />
+        </div>
+      )}
+
+      {/* 당근마켓 주문 발주 (텍스트 붙여넣기) — 명이(쥬얼리) 페이지 */}
+      {productId === 'myeongi' && (
+        <div className="mt-4 animate-slide-up">
+          <DaangnOrderCard />
         </div>
       )}
 

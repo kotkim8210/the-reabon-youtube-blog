@@ -778,6 +778,41 @@ export async function processTossTrackingApi(
   return res.json();
 }
 
+export async function processDaangnOrder(text: string): Promise<ProcessResult> {
+  const formData = new FormData();
+  formData.append('text', text);
+
+  const res = await fetch(`${BASE_URL}/process/daangn-order`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('인증이 만료되었습니다.');
+    }
+    const data = await res.json().catch(() => ({ detail: '처리 중 오류가 발생했습니다.' }));
+    throw new Error(apiErrorMessage(data.detail, '처리 중 오류가 발생했습니다.'));
+  }
+
+  const blob = await res.blob();
+  const contentDisposition = res.headers.get('Content-Disposition') || '';
+  let filename = '당근_쥬얼리프룻_발주.xlsx';
+  const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
+  if (filenameMatch) filename = decodeURIComponent(filenameMatch[1]);
+
+  let stats: Record<string, unknown> | null = null;
+  const statsHeader = res.headers.get('X-Stats');
+  if (statsHeader) {
+    try { stats = JSON.parse(statsHeader); } catch { /* ignore */ }
+  }
+
+  return { blob, filename, stats };
+}
+
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
