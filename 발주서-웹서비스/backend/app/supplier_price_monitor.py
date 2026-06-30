@@ -85,6 +85,7 @@ class SupplierMonitorConfig:
     product_code: str | None = None  # 설정 시 이름검색 대신 이 상품코드를 직접 사용(동명이상품 오매칭 방지)
     sheet_csv_url: str | None = None
     sheet_product_name: str | None = None
+    sheet_product_exclude: tuple[str, ...] = ()  # 상품명에 이 키워드가 있으면 제외(부분일치 충돌 방지, 예: '애플')
     sheet_product_column: str = "D"
     sheet_option_column: str = "E"
     sheet_quantity_column: str | None = None
@@ -250,24 +251,30 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
     "corn-jbt": SupplierMonitorConfig(
         key="corn-jbt",
         source_type="google_sheet",
-        supplier_name="제주다팜",
+        supplier_name="쥬얼리프룻",
         product_name="초당옥수수",
-        sheet_csv_url=GOOGLE_SHEET_JEJUDAPAM_VEGETABLE_CSV,
-        sheet_product_name="초당 옥수수",
-        sheet_quantity_column="F",
-        sheet_previous_column="I",
+        # 2026-06 제주다팜→쥬얼리프룻 발주 이관 → 마진방어도 쥬얼리 시트로.
+        # '초당옥수수'는 '애플초당옥수수'와 부분일치하므로 exclude로 분리한다.
+        sheet_csv_url=GOOGLE_SHEET_JEWELRYFRUIT_KG_CSV,
+        sheet_product_name="초당옥수수",
+        sheet_product_exclude=("애플", "미백", "흑찰"),
+        sheet_product_column="E",
+        sheet_option_column="F",
+        sheet_vip_column="I",
+        sheet_price_fallback_column="G",
+        sheet_previous_column="G",
         template_path=TEMPLATE_DIR / "초당옥수수_소싱현황_원본.xlsx",
-        output_prefix="초당옥수수_제주다팜_V1",
-        output_name_pattern="초당옥수수 소싱현황관리_V1_{date}.xlsx",
+        output_prefix="초당옥수수_쥬얼리프룻_V1",
+        output_name_pattern="초당옥수수 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
         options=(
-            SupplierOptionConfig("초당옥수수 중품 5개", "초당옥수수(중품) 5개", 8, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("초당옥수수 중품 10개", "초당옥수수(중품) 10개", 9, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("초당옥수수 중품 15개", "초당옥수수(중품) 15개", 10, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("초당옥수수 중품 20개", "초당옥수수(중품) 20개", 11, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("초당옥수수 특품 5개", "초당옥수수(특품) 5개", 12, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("초당옥수수 특품 10개", "초당옥수수(특품) 10개", 13, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("초당옥수수 특품 15개", "초당옥수수(특품) 15개", 14, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("초당옥수수 특품 20개", "초당옥수수(특품) 20개", 15, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("초당옥수수 중품 5개", "중품 5개입", 8, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("초당옥수수 중품 10개", "중품 10개입", 9, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("초당옥수수 중품 15개", "중품 15개입", 10, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("초당옥수수 중품 20개", "중품 20개입", 11, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("초당옥수수 특품 5개", "특품 5개입", 12, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("초당옥수수 특품 10개", "특품 10개입", 13, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("초당옥수수 특품 15개", "특품 15개입", 14, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("초당옥수수 특품 20개", "특품 20개입", 15, sheet_name="쥬얼리프룻"),
         ),
     ),
     "chamoe-jbt": SupplierMonitorConfig(
@@ -715,6 +722,8 @@ async def _fetch_google_sheet_prices(
         vip_price = row[vip_index]
         if fallback_index is not None and not vip_price.strip():
             vip_price = row[fallback_index]
+        if config.sheet_product_exclude and any(ex in product_name for ex in config.sheet_product_exclude):
+            continue  # '초당옥수수' 필터가 '애플초당옥수수' 등 부분일치로 잘못 잡는 것 방지
         if not _sheet_product_matches(product_name, config.sheet_product_name) or not option_name or not vip_price.strip():
             continue
         option_keys = _google_sheet_option_keys(product_name, option_name, quantity_name)
