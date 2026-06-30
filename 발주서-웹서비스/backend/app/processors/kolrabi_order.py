@@ -21,15 +21,16 @@ def normalize(value) -> str:
 
 
 def convert_quantity(option_text: str) -> str | None:
-    """Convert option like '3kg 1박스' to '콜라비 정품 3kg'."""
+    """콜라비 옵션 → '콜라비 정품 {kg}kg'.
+
+    옵션 표기가 '3kg 1박스'·'1박스 3kg'·'로얄과 특품 3kg' 등 어떤 순서/접두여도 3·5·10kg을
+    추출해 매칭한다. (process()에서 상품명에 '콜라비'가 있을 때만 호출 → 과매칭 없음)
+    """
     if not option_text:
         return None
-    text = str(option_text).strip()
-    match = re.match(r"(\d+)kg\s+1박스", text)
-    if match:
-        weight = match.group(1)
-        if weight in ("3", "5", "10"):
-            return f"콜라비 정품 {weight}kg"
+    match = re.search(r"(\d+)\s*kg", str(option_text), re.IGNORECASE)
+    if match and match.group(1) in ("3", "5", "10"):
+        return f"콜라비 정품 {match.group(1)}kg"
     return None
 
 
