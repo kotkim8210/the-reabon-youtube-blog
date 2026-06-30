@@ -318,11 +318,36 @@ def _apple_corn_option(product_name: object, option_text: object) -> str | None:
     return f"애플초당옥수수(특품) {count}개"
 
 
+# 일반 초당옥수수 — 2026-06부터 제주다팜→쥬얼리프룻 발주 이관. 애플초당옥수수는 별도(_apple_corn).
+def is_jewelry_corn_order(product_name: object, option_text: object) -> bool:
+    text = _combined_text(product_name, option_text)
+    return "초당옥수수" in text and "애플" not in text
+
+
+def _jewelry_corn_option(product_name: object, option_text: object) -> str | None:
+    """일반 초당옥수수 DeliveryList → 쥬얼리프룻 발주 품목 '초당옥수수({중품/특품}) {n}개'.
+
+    등급(중품/특품)과 수량(개/입)이 있어야 발주 대상. 애플초당옥수수는 제외.
+    """
+    if not is_jewelry_corn_order(product_name, option_text):
+        return None
+    text = _combined_text(product_name, option_text)
+    count_match = re.search(r"(\d+)\s*(?:개|입)", text)
+    grade = "중품" if "중품" in text else "특품" if "특품" in text else ""
+    if not count_match or not grade:
+        return None
+    return f"초당옥수수({grade}) {count_match.group(1)}개"
+
+
 def convert_option(option_text: str, product_name: str = "") -> str | None:
     """Convert DeliveryList option text to the vendor-facing product name."""
     apple_corn = _apple_corn_option(product_name, option_text)
     if apple_corn:
         return apple_corn
+
+    corn = _jewelry_corn_option(product_name, option_text)
+    if corn:
+        return corn
 
     mango = _mango_watermelon_option(product_name, option_text)
     if mango:
@@ -384,6 +409,7 @@ def process(
     filtered_rows = []
     has_myeongi = False
     has_apple_corn = False
+    has_corn = False
     has_mango = False
     has_watermelon = False
     has_chamoe = False
@@ -399,6 +425,9 @@ def process(
         elif is_apple_corn_order(k_val, option):
             filtered_rows.append(row)
             has_apple_corn = True
+        elif is_jewelry_corn_order(k_val, option):
+            filtered_rows.append(row)
+            has_corn = True
         elif is_mango_watermelon_order(k_val, option):
             # 망고수박 = 쥬얼리프룻 발주.
             filtered_rows.append(row)
@@ -559,6 +588,8 @@ def process(
         product_parts.append("명이나물")
     if has_apple_corn:
         product_parts.append("애플초당옥수수")
+    if has_corn:
+        product_parts.append("초당옥수수")
     if has_mango:
         product_parts.append("망고수박")
     if has_watermelon:

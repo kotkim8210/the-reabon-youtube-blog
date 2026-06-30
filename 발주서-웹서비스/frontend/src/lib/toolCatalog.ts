@@ -28,7 +28,7 @@ export const TOOL_CATALOG: ToolConfig[] = [
   },
   {
     id: 'myeongi-unified',
-    title: '명이나물+애플초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자+미니밤호박',
+    title: '명이나물+애플초당옥수수+초당옥수수+망고수박+수박+성주참외+신비복숭아+홍감자+미니밤호박',
     description: '쥬얼리프룻 발주서 생성(쿠팡+토스 통합) + 운송장번호 입력 · 미니밤호박 3·5·10kg 포함',
     icon: '🌿',
     color: 'green',
@@ -36,8 +36,8 @@ export const TOOL_CATALOG: ToolConfig[] = [
   },
   {
     id: 'kolrabi-unified',
-    title: '콜라비·초당옥수수·미니밤호박 1kg(제주다팜)',
-    description: '콜라비·초당옥수수·미니밤호박 1kg 제주다팜 발주서 생성 + 운송장번호 입력 (미니밤호박 3·5·10kg·애플초당옥수수·성주참외는 명이나물 메뉴)',
+    title: '콜라비·미니밤호박 1kg(제주다팜)',
+    description: '콜라비·미니밤호박 1kg 제주다팜 발주서 생성 + 운송장번호 입력 (미니밤호박 3·5·10kg·초당옥수수·애플초당옥수수·성주참외는 명이나물 메뉴)',
     icon: '🥬',
     color: 'green',
     kind: 'unified',
@@ -45,7 +45,7 @@ export const TOOL_CATALOG: ToolConfig[] = [
   {
     id: 'tomato-unified',
     title: '대저토마토·남해땅두릅·신비복숭아',
-    description: '제이비티엠 발주서 생성 + 운송장번호 입력 (초당옥수수는 콜라비(제주다팜) 메뉴로 이동)',
+    description: '제이비티엠 발주서 생성 + 운송장번호 입력 (초당옥수수는 명이나물(쥬얼리) 메뉴로 이동)',
     icon: '🍅🍈🌿🍑',
     color: 'red',
     kind: 'unified',

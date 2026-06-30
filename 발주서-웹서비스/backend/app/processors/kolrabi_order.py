@@ -508,9 +508,7 @@ def process_outputs(
     if int((kolrabi_stats or {}).get("total") or 0) > 0:
         results.append(kolrabi_result)
 
-    corn_result = process_corn(delivery_file_bytes)
-    if corn_result and int((corn_result[2] or {}).get("total") or 0) > 0:
-        results.append(corn_result)
+    # 초당옥수수는 2026-06부터 쥬얼리프룻(myeongi) 발주로 이관 — 여기서 출력하지 않는다.
 
     bamhobak_result = process_bamhobak(delivery_file_bytes, toss_entries=toss_bamhobak_entries)
     if bamhobak_result and int((bamhobak_result[2] or {}).get("total") or 0) > 0:

@@ -11,6 +11,7 @@ from app.processors.myeongi_order import (
     is_house_watermelon_order,
     is_jewelry_bamhobak_order,
     is_jewelry_chamoe_order,
+    is_jewelry_corn_order,
     is_jewelry_peach_order,
     is_jewelry_potato_order,
     is_mango_watermelon_order,
@@ -45,6 +46,7 @@ def is_jewelryfruit_tracking_target(product_name: str, option_text: str) -> bool
         or is_jewelry_peach_order(product_name, option_text)     # 신비복숭아 1·2kg (3·4kg은 제이비티)
         or is_jewelry_potato_order(product_name, option_text)    # 햇 홍감자 (2026 여름 쥬얼리 발주)
         or is_jewelry_bamhobak_order(product_name, option_text)  # 미니밤호박 3·5·10kg (1kg은 제주다팜)
+        or is_jewelry_corn_order(product_name, option_text)      # 초당옥수수 (2026-06 제주다팜→쥬얼리 전환)
     )
 
 
@@ -116,6 +118,7 @@ def process(
     skipped = 0
     has_myeongi = False
     has_apple_corn = False
+    has_corn = False
     has_mango = False
     has_watermelon = False
     has_chamoe = False
@@ -212,6 +215,8 @@ def process(
                 has_myeongi = True
             if is_apple_corn_order(dl_product, dl_option):
                 has_apple_corn = True
+            if is_jewelry_corn_order(dl_product, dl_option):
+                has_corn = True
             if is_mango_watermelon_order(dl_product, dl_option):
                 has_mango = True
             if is_house_watermelon_order(dl_product, dl_option):
@@ -235,6 +240,8 @@ def process(
         product_parts.append("명이나물")
     if has_apple_corn:
         product_parts.append("애플초당옥수수")
+    if has_corn:
+        product_parts.append("초당옥수수")
     if has_mango:
         product_parts.append("망고수박")
     if has_watermelon:
