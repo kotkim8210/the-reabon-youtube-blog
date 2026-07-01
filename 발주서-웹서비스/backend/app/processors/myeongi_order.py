@@ -213,16 +213,40 @@ def _jewelry_geobando_option(product_name: object, option_text: object) -> str |
     return None
 
 
+# 노지 대극천(반납작 복숭아) → 쥬얼리프룻 발주. 쿠팡 '1박스 로얄소과 1kg' → '대극천 소과 1kg (11-16과 내외)'.
+# 역시 '복숭아' 포함이라 신비복숭아보다 먼저 분기하고 peach에서 제외. (당근 텍스트 발주 daangn_order와 별개: 쿠팡 DeliveryList용)
+def is_jewelry_daegeukcheon_order(product_name: object, option_text: object) -> bool:
+    return "대극천" in _combined_text(product_name, option_text).replace(" ", "")
+
+
+def _jewelry_daegeukcheon_option(product_name: object, option_text: object) -> str | None:
+    if not is_jewelry_daegeukcheon_order(product_name, option_text):
+        return None
+    text = _combined_text(product_name, option_text)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
+    kg = _fmt_kg(m.group(1)) if m else ""
+    # 등급: '로얄소과'/'소과'→소과, '로얄'/'대과'→로얄과 (기본 소과)
+    grade = "소과" if "소과" in text else ("로얄과" if ("로얄" in text or "대과" in text) else "소과")
+    suffix = " (11-16과 내외)" if (grade == "소과" and kg == "1") else ""  # 시트 확인 SKU
+    base = f"대극천 {grade}"
+    return f"{base} {kg}kg{suffix}" if kg else base
+
+
+# '복숭아'가 들어가지만 신비복숭아가 아닌 별도 발주 품목(거반도·대극천 등) — 신비 오분류 방지
+def _non_shinbi_peach(product_name: object, option_text: object) -> bool:
+    return _is_geobando(product_name, option_text) or is_jewelry_daegeukcheon_order(product_name, option_text)
+
+
 # 신비복숭아 1·2kg → 쥬얼리프룻 발주 (3·4kg은 제이비티, 800g은 제외)
 def is_jewelry_peach_order(product_name: object, option_text: object) -> bool:
     from app.processors.tomato_order import peach_kg, JEWELRY_PEACH_KGS
-    if _is_geobando(product_name, option_text):  # 거반도 납작복숭아는 신비복숭아 아님
+    if _non_shinbi_peach(product_name, option_text):  # 거반도·대극천은 신비복숭아 아님
         return False
     return peach_kg(str(product_name or ""), str(option_text or "")) in JEWELRY_PEACH_KGS
 
 
 def _jewelry_peach_option(product_name: object, option_text: object) -> str | None:
-    if _is_geobando(product_name, option_text):  # 거반도는 신비복숭아 아님
+    if _non_shinbi_peach(product_name, option_text):  # 거반도·대극천은 신비복숭아 아님
         return None
     from app.processors.tomato_order import peach_kg, JEWELRY_PEACH_KGS
     kg = peach_kg(str(product_name or ""), str(option_text or ""))
@@ -400,6 +424,10 @@ def convert_option(option_text: str, product_name: str = "") -> str | None:
     if geobando:
         return geobando
 
+    daegeukcheon = _jewelry_daegeukcheon_option(product_name, option_text)
+    if daegeukcheon:
+        return daegeukcheon
+
     peach = _jewelry_peach_option(product_name, option_text)
     if peach:
         return peach
@@ -454,6 +482,7 @@ def process(
     has_chamoe = False
     has_peach = False
     has_geobando = False
+    has_daegeukcheon = False
     has_potato = False
     has_bamhobak = False
     for row in dl_ws.iter_rows(min_row=2):
@@ -484,6 +513,10 @@ def process(
             # 거반도 납작복숭아 500g·1·2kg → 쥬얼리프룻
             filtered_rows.append(row)
             has_geobando = True
+        elif is_jewelry_daegeukcheon_order(k_val, option):
+            # 대극천 복숭아 → 쥬얼리프룻 (신비복숭아 아님)
+            filtered_rows.append(row)
+            has_daegeukcheon = True
         elif is_jewelry_peach_order(k_val, option):
             # 신비복숭아 1·2kg → 쥬얼리프룻 (3·4kg은 제이비티)
             filtered_rows.append(row)
@@ -603,6 +636,8 @@ def process(
 
         if "거반도" in product:
             has_geobando = True
+        elif "대극천" in product:
+            has_daegeukcheon = True
         elif "복숭아" in product:
             has_peach = True
         elif "망고수박" in product:
@@ -646,6 +681,8 @@ def process(
         product_parts.append("신비복숭아")
     if has_geobando:
         product_parts.append("거반도복숭아")
+    if has_daegeukcheon:
+        product_parts.append("대극천복숭아")
     if has_potato:
         product_parts.append("홍감자")
     if has_bamhobak:
