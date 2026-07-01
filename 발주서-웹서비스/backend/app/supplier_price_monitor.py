@@ -111,7 +111,9 @@ class SupplierMonitorConfig:
     def product_detail_url(self) -> str:
         if not self.base_url:
             raise SupplierMonitorError(f"{self.key} monitor is not configured for adminplus detail page.")
-        return f"{self.base_url}/partner/product/prt.grp.detail.pop.php"
+        # adminplus가 상세 popup을 mod= 라우터로 이관함. 구 경로(/partner/product/prt.grp.detail.pop.php)는
+        # 빈 응답(len 0)만 줘서 옵션가를 못 읽었음. actpage/pcode는 _fetch_adminplus_prices가 params로 전달.
+        return f"{self.base_url}/partner/"
 
     def output_filename(self, now: datetime) -> str:
         if self.output_name_pattern:
@@ -248,21 +250,21 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("콜라비 정품 10kg", "콜라비(정품 300~750g) 10kg", 10),
         ),
     ),
-    # 제주다팜 미니밤호박 1kg (3/5/10kg는 쥬얼리프룻=bamhobak-jewelry).
-    # 제주다팜 '로얄과'(pcode 10000015) adminplus 상세 popup엔 콜라비 같은 옵션 가격표가 없어
-    # 자동 스크랩 불가(prt.grp.detail.pop.php 0건 매칭) → manual 고정 공급가(템플릿 I8)로 표시.
-    # 공급가 변경 시 템플릿 I8(현재 ₩5,200)만 갱신하면 됨.
+    # 제주다팜 미니밤호박 1kg (3/5/10kg는 쥬얼리프룻=bamhobak-jewelry). pcode 10000015='제주 미니밤호박 보우짱 로얄과'.
+    # adminplus 상세 popup(mod= 라우터, product_detail_url)로 자동 스크랩. 옵션 '로얄과 1kg'만 대상.
     "bamhobak-jeju": SupplierMonitorConfig(
         key="bamhobak-jeju",
-        source_type="manual",
+        source_type="adminplus",
+        base_url="https://kkangta55.adminplus.co.kr",
         supplier_name="제주다팜",
-        product_name="제주 미니밤호박 보우짱 로얄과 1kg",
+        product_name="제주 미니밤호박 보우짱 로얄과",
+        product_code="10000015",
         template_path=TEMPLATE_DIR / "밤호박_제주다팜_소싱현황_원본.xlsx",
         output_prefix="밤호박_제주다팜_V1",
         output_name_pattern="미니밤호박 소싱현황관리(제주다팜)_V1_{date}.xlsx",
         skip_missing_options=True,
         options=(
-            SupplierOptionConfig("미니밤호박 로얄과 1kg", "1kg", 8),
+            SupplierOptionConfig("미니밤호박 로얄과 1kg", "로얄과 1kg", 8),
         ),
     ),
     "corn-jbt": SupplierMonitorConfig(
@@ -673,7 +675,10 @@ async def _find_product_code(client: httpx.AsyncClient, config: SupplierMonitorC
 
 
 async def _fetch_adminplus_prices(client: httpx.AsyncClient, config: SupplierMonitorConfig, product_code: str) -> dict[str, int]:
-    response = await client.get(config.product_detail_url, params={"pcode": product_code})
+    response = await client.get(
+        config.product_detail_url,
+        params={"mod": "product", "actpage": "prt.grp.detail.pop", "pcode": product_code},
+    )
     response.raise_for_status()
 
     matches = re.findall(
