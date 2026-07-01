@@ -317,7 +317,10 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
         # 신비복숭아·망고수박은 옵션 그대로, 수박/참외는 정규화
         option = normalize(item.get("optionName") or "") or _toss_watermelon_option(item)
         # 신비복숭아 3·4kg은 제이비티 발주(토마토 메뉴)로 → 쥬얼리 수집에서 제외 (1·2kg만 쥬얼리)
-        if "복숭아" in text and peach_kg(text, option) not in JEWELRY_PEACH_KGS:
+        from app.processors.myeongi_order import _non_shinbi_peach
+        # 신비복숭아 3·4kg만 제외(제이비티). 대극천·거반도는 크기 무관 쥬얼리 수집.
+        if ("복숭아" in text and not _non_shinbi_peach(text, option)
+                and peach_kg(text, option) not in JEWELRY_PEACH_KGS):
             continue
         # 품목명/무게 매칭은 상품명(K)을 우선으로 본다. 옵션(L)이 비거나 잘못 적혀도
         # 상품명에서 무게·종류를 읽도록 깨끗한 productName을 넘긴다. (없을 때만 전체 text)
@@ -326,7 +329,7 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
         # (블랙망고수박이 '수박'만 잡혀 일반수박으로 둔갑하는 실수 차단 — 무게는 그대로 추출됨)
         _compact_all = text.replace(" ", "")
         _compact_name = product_name.replace(" ", "")
-        for _kw in ("블랙망고수박", "망고수박", "홍감자"):
+        for _kw in ("블랙망고수박", "망고수박", "홍감자", "대극천", "거반도", "납작복숭아"):
             if _kw in _compact_all and _kw not in _compact_name:
                 product_name = f"{_kw} {product_name}"
                 break

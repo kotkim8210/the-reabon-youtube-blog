@@ -351,6 +351,15 @@ def jewelry_passthrough_product(
     """
     text = _combined_text(product_name, option_text)
 
+    # 거반도·대극천은 '복숭아' 포함이지만 신비복숭아 아님 → 먼저 전용 품목명으로 (토스 경로 오분류 방지)
+    geobando = _jewelry_geobando_option(product_name, option_text)
+    if geobando:
+        return geobando
+
+    daegeukcheon = _jewelry_daegeukcheon_option(product_name, option_text)
+    if daegeukcheon:
+        return daegeukcheon
+
     if "복숭아" in text:
         # 신비복숭아: '신비복숭아 {kg}kg {등급(소과/중소과/대과...)}'
         return _peach_label(product_name, option_text)
