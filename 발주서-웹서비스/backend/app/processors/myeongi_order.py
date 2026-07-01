@@ -219,17 +219,28 @@ def is_jewelry_daegeukcheon_order(product_name: object, option_text: object) -> 
     return "대극천" in _combined_text(product_name, option_text).replace(" ", "")
 
 
+# 쿠팡 대극천 (등급, kg) → 발주 품목 과수 표기 (사용자 확정 매핑 2026-07)
+_DAEGEUKCHEON_COUNTS = {
+    ("로얄과", "2"): "8-20과 내외",
+    ("로얄과", "1"): "4-10과 내외",
+    ("소과", "2"): "21-32과 내외",
+    ("소과", "1"): "11-16과 내외",
+}
+
+
 def _jewelry_daegeukcheon_option(product_name: object, option_text: object) -> str | None:
     if not is_jewelry_daegeukcheon_order(product_name, option_text):
         return None
     text = _combined_text(product_name, option_text)
     m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
     kg = _fmt_kg(m.group(1)) if m else ""
-    # 등급: '로얄소과'/'소과'→소과, '로얄'/'대과'→로얄과 (기본 소과)
+    # 등급: 로얄소과/소과→소과, 로얄대과/로얄/대과→로얄과 (기본 소과)
     grade = "소과" if "소과" in text else ("로얄과" if ("로얄" in text or "대과" in text) else "소과")
-    suffix = " (11-16과 내외)" if (grade == "소과" and kg == "1") else ""  # 시트 확인 SKU
+    count = _DAEGEUKCHEON_COUNTS.get((grade, kg), "")
     base = f"대극천 {grade}"
-    return f"{base} {kg}kg{suffix}" if kg else base
+    if kg and count:
+        return f"{base} {kg}kg ({count})"
+    return f"{base} {kg}kg" if kg else base
 
 
 # '복숭아'가 들어가지만 신비복숭아가 아닌 별도 발주 품목(거반도·대극천 등) — 신비 오분류 방지
