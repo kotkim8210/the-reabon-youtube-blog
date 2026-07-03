@@ -33,12 +33,50 @@ _GRADE_MAP = {
     "랜덤과": "랜덤과",
 }
 _GRADES = ("특대과", "중소과", "로얄과", "혼합과", "랜덤과", "대과", "중과", "소과")
+_PRODUCT_KEYWORDS = ("수박", "복숭아", "대극천")
 
 
 def _clean(value: object) -> str:
     if value is None:
         return ""
     return re.sub(r"\s+", " ", str(value).strip())
+
+
+def _fmt_kg(value: object) -> str:
+    text = str(value or "").strip()
+    try:
+        num = float(text)
+    except ValueError:
+        return text
+    return str(int(num)) if num.is_integer() else str(num).rstrip("0").rstrip(".")
+
+
+def _phone_digits(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    if digits.startswith("820") and len(digits) >= 12:
+        digits = digits[2:]
+    elif digits.startswith("82") and len(digits) >= 11:
+        digits = "0" + digits[2:]
+    return digits
+
+
+def _looks_like_phone(value: str) -> bool:
+    digits = _phone_digits(value)
+    return bool(re.fullmatch(r"01\d{8,9}", digits))
+
+
+def _normalize_phone(value: str) -> str:
+    digits = _phone_digits(value)
+    if re.fullmatch(r"010\d{8}", digits):
+        return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+    if re.fullmatch(r"01\d{8,9}", digits):
+        return digits
+    return _clean(value)
+
+
+def _clean_address(value: str) -> str:
+    address = re.sub(r"^\(?\d{4,5}\)?\s*", "", _clean(value))
+    return re.sub(r"\s*복사\s*$", "", address).strip()
 
 
 def _value_after(lines: list[str], *labels: str) -> str:
@@ -59,6 +97,12 @@ def _value_after(lines: list[str], *labels: str) -> str:
 def _daangn_product_label(product: str, grade: str, kg: str) -> str:
     """당근 상품/등급/kg → 쥬얼리프룻 발주 품목명."""
     compact = re.sub(r"\s+", "", product)
+    if "수박" in compact or "수박" in grade:
+        kg_text = _fmt_kg(kg)
+        # 당근 수박 8kg 주문은 쥬얼리프룻 공급 옵션 '8~9kg 내외'로 발주한다.
+        if kg_text == "8":
+            return "가정용 수박 8~9kg 내외"
+        return f"가정용 수박 {kg_text}kg 내외" if kg_text else "가정용 수박"
     if "대극천" in compact:
         base = "대극천"
     else:
@@ -73,6 +117,42 @@ def _daangn_product_label(product: str, grade: str, kg: str) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
+def _fallback_name_phone_address(lines: list[str], opt_idx: int) -> tuple[str, str, str]:
+    """라벨 없이 상품/이름/전화/주소만 붙인 당근 주문에서 배송 정보를 추정한다."""
+    name = phone = address = ""
+    phone_idx = -1
+    for i, line in enumerate(lines):
+        if _looks_like_phone(line):
+            phone = _normalize_phone(line)
+            phone_idx = i
+            break
+
+    search_start = opt_idx + 1 if opt_idx >= 0 else 0
+    for i in range(search_start, len(lines)):
+        line = lines[i]
+        if i == phone_idx or _looks_like_phone(line):
+            continue
+        if re.search(r"\d{4,5}|[시도군구로길읍면동리]\b|아파트|빌라|주택|호|동", line):
+            continue
+        if any(keyword in line for keyword in _PRODUCT_KEYWORDS):
+            continue
+        name = _clean(line)
+        break
+
+    if phone_idx >= 0:
+        address_lines = [
+            line for line in lines[phone_idx + 1:]
+            if line and not line.startswith(("배송메모", "공동현관", "비밀번호"))
+        ]
+    else:
+        address_lines = [
+            line for i, line in enumerate(lines[search_start:], start=search_start)
+            if line and line != name and not any(keyword in line for keyword in _PRODUCT_KEYWORDS)
+        ]
+    address = _clean_address(" ".join(address_lines))
+    return name, phone, address
+
+
 def _parse_one(block: str) -> dict | None:
     lines = [l.strip() for l in block.splitlines() if l.strip()]
     if not lines:
@@ -85,22 +165,34 @@ def _parse_one(block: str) -> dict | None:
     for i, ln in enumerate(lines):
         m = re.match(r"(.+?)\s*(\d+(?:\.\d+)?)\s*kg\s*(\d+)\s*개", ln, re.IGNORECASE)
         if m:
-            grade = next((g for g in _GRADES if g in m.group(1)), m.group(1).strip())
-            kg = m.group(2)
+            prefix = m.group(1).strip()
+            grade = next((g for g in _GRADES if g in prefix), "")
+            if not grade and not any(keyword in prefix for keyword in _PRODUCT_KEYWORDS):
+                grade = prefix
+            kg = _fmt_kg(m.group(2))
             qty = int(m.group(3))
             opt_idx = i
             break
     if opt_idx > 0:
         product = lines[opt_idx - 1]
+    elif opt_idx == 0:
+        prefix = re.match(r"(.+?)\s*(\d+(?:\.\d+)?)\s*kg\s*(\d+)\s*개", lines[opt_idx], re.IGNORECASE).group(1).strip()
+        if any(keyword in prefix for keyword in _PRODUCT_KEYWORDS):
+            product = prefix
     if not product or not kg:
         return None
 
     name = _value_after(lines, "받는 사람", "받는사람", "수령인")
     phone = _value_after(lines, "연락처", "전화")
     address_raw = _value_after(lines, "배송지", "주소")
+    if not (name and phone and address_raw):
+        fallback_name, fallback_phone, fallback_address = _fallback_name_phone_address(lines, opt_idx)
+        name = name or fallback_name
+        phone = phone or fallback_phone
+        address_raw = address_raw or fallback_address
+    phone = _normalize_phone(phone)
     # '(우편번호) 도로명주소 ... 복사' → 우편번호 괄호 제거, '복사' 꼬리 제거
-    address = re.sub(r"^\(?\d{4,5}\)?\s*", "", address_raw)
-    address = re.sub(r"\s*복사\s*$", "", address).strip()
+    address = _clean_address(address_raw)
     order_no = _value_after(lines, "주문번호")
     memo_line = next((l for l in lines if "공동현관" in l or "비밀번호" in l or l.startswith("배송메모")), "")
     memo = memo_line.replace("배송메모", "").strip(" :")
