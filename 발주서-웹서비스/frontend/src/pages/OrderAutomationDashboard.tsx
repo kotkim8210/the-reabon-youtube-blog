@@ -12,6 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   Boxes,
@@ -128,6 +129,8 @@ type CombinedMonitorRow = {
   diff: number;
   signal: 'blue' | 'red' | 'same';
   signalLabel: string;
+  margin?: number | null;
+  marginNegative?: boolean;
 };
 
 type MonitorGroup = {
@@ -142,6 +145,7 @@ type MonitorGroup = {
   upCount: number;
   downCount: number;
   sameCount: number;
+  negativeMarginCount: number;
 };
 
 function dateString(offsetDays = 0): string {
@@ -249,6 +253,9 @@ function sortByOptionWeight(
 }
 
 function groupStatusLabel(group: MonitorGroup): string {
+  if (group.negativeMarginCount > 0) {
+    return `마진 경고 ${group.negativeMarginCount} / 상승 ${group.upCount} / 하락 ${group.downCount}`;
+  }
   return `상승 ${group.upCount} / 하락 ${group.downCount} / 동일 ${group.sameCount}`;
 }
 
@@ -474,7 +481,7 @@ function SupplierMonitorCard({
         </button>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      <div className="mt-5 grid gap-3 sm:grid-cols-4">
         <div className="rounded-2xl bg-slate-50 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">상승</p>
           <p className="mt-2 text-2xl font-black text-blue-700">{monitor.data.blue_count}</p>
@@ -486,6 +493,14 @@ function SupplierMonitorCard({
         <div className="rounded-2xl bg-slate-50 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">동일</p>
           <p className="mt-2 text-2xl font-black text-slate-700">{monitor.data.same_count}</p>
+        </div>
+        <div className={`rounded-2xl p-4 ${monitor.data.negative_margin_count ? 'bg-red-50' : 'bg-slate-50'}`}>
+          <p className={`text-xs font-semibold uppercase tracking-[0.16em] ${monitor.data.negative_margin_count ? 'text-red-600' : 'text-slate-500'}`}>
+            마진 경고
+          </p>
+          <p className={`mt-2 text-2xl font-black ${monitor.data.negative_margin_count ? 'text-red-700' : 'text-slate-700'}`}>
+            {monitor.data.negative_margin_count ?? 0}
+          </p>
         </div>
       </div>
     </article>
@@ -668,6 +683,8 @@ export default function OrderAutomationDashboard() {
             diff: row.diff,
             signal: row.signal,
             signalLabel: row.signal_label,
+            margin: row.margin,
+            marginNegative: Boolean(row.margin_negative),
           })),
         )
         .sort((left, right) => {
@@ -690,6 +707,7 @@ export default function OrderAutomationDashboard() {
       upCount: combinedMonitorRows.filter((row) => row.signal === 'blue').length,
       downCount: combinedMonitorRows.filter((row) => row.signal === 'red').length,
       sameCount: combinedMonitorRows.filter((row) => row.signal === 'same').length,
+      negativeMarginCount: combinedMonitorRows.filter((row) => row.marginNegative).length,
       latestCheckedAt: latestCheckedAt ? new Date(latestCheckedAt).toISOString() : null,
     };
   }, [combinedMonitorRows, visibleSupplierMonitors]);
@@ -714,6 +732,8 @@ export default function OrderAutomationDashboard() {
               diff: row.diff,
               signal: row.signal,
               signalLabel: row.signal_label,
+              margin: row.margin,
+              marginNegative: Boolean(row.margin_negative),
             }))
             .sort(sortByOptionWeight);
 
@@ -731,6 +751,7 @@ export default function OrderAutomationDashboard() {
             upCount: rows.filter((row) => row.signal === 'blue').length,
             downCount: rows.filter((row) => row.signal === 'red').length,
             sameCount: rows.filter((row) => row.signal === 'same').length,
+            negativeMarginCount: rows.filter((row) => row.marginNegative).length,
           };
 
           return group;
@@ -1105,7 +1126,7 @@ export default function OrderAutomationDashboard() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">관리 상품</p>
               <p className="mt-3 text-3xl font-black text-slate-900">{supplierSummary.productCount}</p>
@@ -1125,6 +1146,14 @@ export default function OrderAutomationDashboard() {
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-600">하락</p>
               <p className="mt-3 text-3xl font-black text-rose-700">{supplierSummary.downCount}</p>
               <p className="mt-2 text-xs text-rose-600">전일 대비 공급가가 내린 옵션</p>
+            </div>
+            <div className="rounded-3xl border border-red-200 bg-red-50 p-5">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertTriangle size={16} />
+                <p className="text-xs font-semibold uppercase tracking-[0.16em]">마진 경고</p>
+              </div>
+              <p className="mt-3 text-3xl font-black text-red-700">{supplierSummary.negativeMarginCount}</p>
+              <p className="mt-2 text-xs text-red-600">수수료/공급가 반영 후 마이너스 옵션</p>
             </div>
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">마지막 점검</p>
@@ -1239,6 +1268,12 @@ export default function OrderAutomationDashboard() {
                                 <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${signalClass(representative.signal)}`}>
                                   {groupStatusLabel(group)}
                                 </span>
+                                {representative.marginNegative && (
+                                  <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700">
+                                    <AlertTriangle size={13} />
+                                    마진 {formatCurrency(representative.margin ?? 0)}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-4 py-4 text-xs text-slate-500">
                                 <div>{representative.cell}</div>
@@ -1287,6 +1322,12 @@ export default function OrderAutomationDashboard() {
                                     <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${signalClass(row.signal)}`}>
                                       {signalLabel(row.signal)}
                                     </span>
+                                    {row.marginNegative && (
+                                      <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700">
+                                        <AlertTriangle size={13} />
+                                        마진 {formatCurrency(row.margin ?? 0)}
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="px-4 py-3 text-xs text-slate-500">
                                     <div>{row.cell}</div>

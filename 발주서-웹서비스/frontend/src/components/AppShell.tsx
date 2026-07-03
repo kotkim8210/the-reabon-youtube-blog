@@ -111,11 +111,18 @@ export default function AppShell() {
   }, [isAdmin]);
 
   const activeSupplierAlerts = supplierAlerts
-    .filter((alert) => alert.status !== 'ok' || Number(alert.changed_items || 0) > 0)
+    .filter((alert) => (
+      alert.status !== 'ok'
+      || Number(alert.changed_items || 0) > 0
+      || Number(alert.negative_margin_count || 0) > 0
+    ))
     .sort((left, right) => {
       const leftCritical = left.status !== 'ok' ? 1 : 0;
       const rightCritical = right.status !== 'ok' ? 1 : 0;
       if (leftCritical !== rightCritical) return rightCritical - leftCritical;
+      const leftMarginWarning = Number(left.negative_margin_count || 0);
+      const rightMarginWarning = Number(right.negative_margin_count || 0);
+      if (leftMarginWarning !== rightMarginWarning) return rightMarginWarning - leftMarginWarning;
       return Number(right.changed_items || 0) - Number(left.changed_items || 0);
     });
 
@@ -284,11 +291,15 @@ export default function AppShell() {
                               </p>
                             </div>
                             <span className={`rounded-full px-2 py-1 text-[11px] font-black ${
-                              alert.status !== 'ok'
+                              alert.status !== 'ok' || Number(alert.negative_margin_count || 0) > 0
                                 ? 'bg-rose-100 text-rose-700'
                                 : 'bg-amber-100 text-amber-700'
                             }`}>
-                              {alert.status !== 'ok' ? '오류' : `${alert.changed_items}건 변동`}
+                              {alert.status !== 'ok'
+                                ? '오류'
+                                : Number(alert.negative_margin_count || 0) > 0
+                                  ? `마진 ${alert.negative_margin_count}건`
+                                  : `${alert.changed_items}건 변동`}
                             </span>
                           </div>
                           {alert.status !== 'ok' ? (
@@ -296,6 +307,11 @@ export default function AppShell() {
                           ) : (
                             <p className="mt-2 text-xs text-slate-600">
                               상승 {alert.blue_count}건 · 하락 {alert.red_count}건 · 동일 {alert.same_count}건
+                              {Number(alert.negative_margin_count || 0) > 0 && (
+                                <span className="ml-1 font-bold text-rose-700">
+                                  · 마진 경고 {alert.negative_margin_count}건
+                                </span>
+                              )}
                             </p>
                           )}
                         </button>

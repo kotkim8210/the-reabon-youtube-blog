@@ -255,6 +255,7 @@ async def init_db():
             blue_count INTEGER NOT NULL DEFAULT 0,
             red_count INTEGER NOT NULL DEFAULT 0,
             same_count INTEGER NOT NULL DEFAULT 0,
+            negative_margin_count INTEGER NOT NULL DEFAULT 0,
             output_filename TEXT DEFAULT '',
             error_message TEXT DEFAULT '',
             checked_at TEXT NOT NULL
@@ -427,6 +428,14 @@ async def init_db():
            ON option_sales(user_id, external_order_id, product_label, coupang_option_keyword, vendor_option_name)
            WHERE external_order_id <> ''"""
     )
+
+    cursor = await db.execute("PRAGMA table_info(supplier_price_monitor_runs)")
+    supplier_run_cols = {row["name"] for row in await cursor.fetchall()}
+    if "negative_margin_count" not in supplier_run_cols:
+        await db.execute(
+            "ALTER TABLE supplier_price_monitor_runs ADD COLUMN negative_margin_count INTEGER NOT NULL DEFAULT 0"
+        )
+        logger.info("Migrated: supplier_price_monitor_runs.negative_margin_count added")
 
     cursor = await db.execute("PRAGMA table_info(daily_settlement_snapshots)")
     settlement_cols = {row["name"] for row in await cursor.fetchall()}
@@ -1461,9 +1470,9 @@ async def save_supplier_price_monitor_run(
     await db.execute(
         """INSERT INTO supplier_price_monitor_runs
            (run_date, monitor_key, supplier_name, product_name, status,
-            total_items, changed_items, blue_count, red_count, same_count,
+            total_items, changed_items, blue_count, red_count, same_count, negative_margin_count,
             output_filename, error_message, checked_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             run_date,
             monitor_key,
@@ -1475,6 +1484,7 @@ async def save_supplier_price_monitor_run(
             int((summary or {}).get("blue_count") or 0),
             int((summary or {}).get("red_count") or 0),
             int((summary or {}).get("same_count") or 0),
+            int((summary or {}).get("negative_margin_count") or 0),
             (summary or {}).get("output_filename") or "",
             error_message,
             checked_at,

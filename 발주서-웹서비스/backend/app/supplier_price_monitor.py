@@ -6,7 +6,7 @@ import re
 import sys
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from html import unescape
+from html import escape, unescape
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Literal
@@ -178,12 +178,12 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
         output_name_pattern="홍감자 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
         skip_missing_options=True,
         options=(
-            # 현재 쿠팡 판매 5종(1kg중·3kg중·3kg대·5kg중·5kg대) = 쥬얼리 시트 등급+kg. 공급가는 시트 가격(G/I).
+            # 현재 쿠팡 판매 5종. 대 주문은 2026-07부터 특대로 발주/마진 계산한다.
             SupplierOptionConfig("홍감자 1kg 중", "중 1kg", 8, sheet_name="쥬얼리프룻"),
             SupplierOptionConfig("홍감자 3kg 중", "중 3kg", 9, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("홍감자 3kg 대", "대 3kg", 10, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("홍감자 3kg 특대", "특대 3kg", 10, sheet_name="쥬얼리프룻"),
             SupplierOptionConfig("홍감자 5kg 중", "중 5kg", 11, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("홍감자 5kg 대", "대 5kg", 12, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("홍감자 5kg 특대", "특대 5kg", 12, sheet_name="쥬얼리프룻"),
         ),
     ),
     "bamhobak-jewelry": SupplierMonitorConfig(
@@ -211,27 +211,23 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
     ),
     "chamoe-jewelry": SupplierMonitorConfig(
         key="chamoe-jewelry",
-        source_type="google_sheet",
+        source_type="adminplus",
+        base_url="https://pbfcompany.adminplus.co.kr",
         supplier_name="쥬얼리프룻",
         product_name="성주참외",
-        sheet_csv_url=GOOGLE_SHEET_JEWELRYFRUIT_PEACH_CSV,
-        sheet_product_name="성주참외",
-        sheet_product_column="E",
-        sheet_option_column="F",
-        sheet_vip_column="I",
-        sheet_price_fallback_column="G",
-        sheet_previous_column="G",
+        search_value="성주참외",
+        product_code="10000234",
         template_path=TEMPLATE_DIR / "성주참외_쥬얼리프룻_소싱현황_원본.xlsx",
         output_prefix="성주참외_쥬얼리프룻_V1",
         output_name_pattern="성주참외 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
         skip_missing_options=True,
         options=(
-            # 2026-06 제주다팜 알뜰과 발주 폐지, 전 등급 쥬얼리프룻 통합. 중소과는 쿠팡 판매중지(제외).
-            SupplierOptionConfig("성주참외 가성비 랜덤과 2kg", "가성비 혼합과 2kg", 8, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("성주참외 가성비 랜덤과 3kg", "가성비 혼합과 3kg", 9, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("성주참외 가성비 랜덤과 5kg", "가성비 혼합과 5kg", 10, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("성주참외 로얄과 3kg", "로얄과 3kg", 11, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("성주참외 로얄과 5kg", "로얄과 5kg", 12, sheet_name="쥬얼리프룻"),
+            # pbfcompany adminplus 옵션명은 첨부 계산기 E열 옵션명과 맞춰 찾는다.
+            SupplierOptionConfig("성주참외 가성비 랜덤과 2kg", "2kg (가정용 혼합과)_vip", 8),
+            SupplierOptionConfig("성주참외 가성비 랜덤과 3kg", "3kg (가정용 혼합과)_vip", 9),
+            SupplierOptionConfig("성주참외 가성비 랜덤과 5kg", "5kg (가정용 혼합과)_vip", 10),
+            SupplierOptionConfig("성주참외 로얄과 3kg", "3kg (가정용 로얄과)_vip", 11),
+            SupplierOptionConfig("성주참외 로얄과 5kg", "5kg (가정용 로얄과)_vip", 12),
         ),
     ),
     "kolrabi": SupplierMonitorConfig(
@@ -520,6 +516,85 @@ def _price_signal(previous_supplier_price: int, supplier_price: int) -> str:
     return "same"
 
 
+def _formula_rate(cell_value, default: float = 0.0) -> float:
+    """'=H8*5%' 류 수식에서 퍼센트를 비율(0.05)로 추출."""
+    m = re.search(r"\*\s*([\d.]+)\s*%", str(cell_value or ""))
+    return float(m.group(1)) / 100 if m else default
+
+
+def _compute_margin(ws, row: int, supplier_price: int) -> int | None:
+    """소싱현황 정식 양식 기준 마진(U, 원)을 계산. H(쿠폰가) 없으면 None.
+
+    U = 쿠폰가 - 공급가 - 마진방어 - 쿠팡수수료 - 소득세 - cs (템플릿 U열 수식과 동일).
+    수수료율(K)은 템플릿 값을 그대로 사용하므로 카테고리별(예: 홍감자 8.6%) 자동 반영.
+    """
+    def num(col: str) -> float:
+        try:
+            return float(ws[f"{col}{row}"].value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    coupon = num("H")  # 쿠폰가
+    if coupon <= 0:
+        return None
+    fee_rate = num("K") or 0.1166       # 쿠팡 수수료율(템플릿 값)
+    supply = float(supplier_price)      # 공급가(vip, 실시간)
+    logistics = num("L")
+    extra = num("M")
+    defense = coupon * _formula_rate(ws[f"N{row}"].value)  # 마진방어
+    sale = coupon + 500                                    # 판매가
+    coupang_fee = (sale * fee_rate) + (coupon * 0.0363)    # 쿠팡수수료
+    subtotal = coupon - supply - logistics - extra - defense - coupang_fee  # 1차 합계(R)
+    income_tax = subtotal * 0.16
+    cs = sale * 0.01
+    return round(coupon - supply - logistics - extra - defense - coupang_fee - income_tax - cs)
+
+
+def _formula_cache_updates(ws, row: int, supplier_price: int) -> list[tuple[str, str, int | float | None]]:
+    """Return formula cells with calculated cache values for the sourcing workbook.
+
+    The monitor patches xlsx XML directly so Excel formulas stay intact. Formula
+    cache values must also be written, otherwise downloaded files look blank
+    until Excel recalculates them locally.
+    """
+
+    def num(col: str) -> float:
+        try:
+            return float(ws[f"{col}{row}"].value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    coupon = num("H")
+    if coupon <= 0:
+        return []
+
+    fee_rate = num("K") or 0.1166
+    supply = float(supplier_price)
+    logistics = num("L")
+    extra = num("M")
+    sale = coupon + 500
+    defense = coupon * _formula_rate(ws[f"N{row}"].value)
+    coupang_fee = (sale * fee_rate) + (coupon * 0.0363)
+    vat = (coupon - (supply + logistics + extra + defense + coupang_fee)) * 0
+    subtotal = coupon - supply - logistics - extra - defense - coupang_fee - vat
+    income_tax = subtotal * 0.16
+    cs = sale * 0.01
+    margin = coupon - supply - logistics - extra - defense - coupang_fee - vat - income_tax - cs
+    margin_rate = None if sale == 0 or margin == 0 else margin / sale
+
+    return [
+        (f"G{row}", f"=H{row}+500", sale),
+        (f"N{row}", str(ws[f"N{row}"].value or f"=H{row}*3%"), defense),
+        (f"P{row}", f"=(G{row}*K{row})+(H{row}*3.63%)", coupang_fee),
+        (f"Q{row}", f"=((H{row})-(I{row}+L{row}+M{row}+N{row}+P{row}))*0%", vat),
+        (f"R{row}", f"=H{row}-I{row}-L{row}-M{row}-N{row}-P{row}-Q{row}", subtotal),
+        (f"S{row}", f"=R{row}*16%", income_tax),
+        (f"T{row}", f"=G{row}*1%", cs),
+        (f"U{row}", f"=H{row}-I{row}-L{row}-M{row}-N{row}-P{row}-Q{row}-S{row}-T{row}", margin),
+        (f"V{row}", f'=IF(U{row}=0,"",U{row}/G{row})', margin_rate),
+    ]
+
+
 def _snapshot_lookup_keys(option_name: str, supplier_option_name: str) -> set[tuple[str, str]]:
     return {
         (option_name, supplier_option_name),
@@ -533,25 +608,59 @@ def _snapshot_lookup_keys(option_name: str, supplier_option_name: str) -> set[tu
 
 def _supplier_price_lookup(prices: dict[str, int], supplier_option_name: str) -> int | None:
     normalized_name = _normalize_option_name(supplier_option_name)
-    compact_name = re.sub(r"\s+", "", normalized_name)
-    for key in (supplier_option_name, normalized_name, compact_name):
+    candidates = _supplier_price_lookup_candidates(normalized_name)
+    compact_candidates = [re.sub(r"\s+", "", candidate) for candidate in candidates]
+    for key in [supplier_option_name, *candidates, *compact_candidates]:
         if key in prices:
             return prices[key]
     for key, price in prices.items():
-        if re.sub(r"\s+", "", _normalize_option_name(key)) == compact_name:
+        compact_key = re.sub(r"\s+", "", _normalize_option_name(key))
+        if compact_key in compact_candidates:
             return price
-    partial_matches = [
-        price
-        for key, price in prices.items()
-        if compact_name
-        and (
-            compact_name in re.sub(r"\s+", "", _normalize_option_name(key))
-            or re.sub(r"\s+", "", _normalize_option_name(key)) in compact_name
-        )
-    ]
+    partial_matches = []
+    for key, price in prices.items():
+        compact_key = re.sub(r"\s+", "", _normalize_option_name(key))
+        for compact_name in compact_candidates:
+            if compact_name and (compact_name in compact_key or compact_key in compact_name):
+                partial_matches.append(price)
+                break
     if len(set(partial_matches)) == 1:
         return partial_matches[0]
     return None
+
+
+def _supplier_price_lookup_candidates(option_name: str) -> list[str]:
+    candidates: list[str] = []
+
+    def add(value: str) -> None:
+        normalized = _normalize_option_name(value)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    normalized = _normalize_option_name(option_name)
+    add(normalized)
+    without_vip = re.sub(r"\s*_vip\s*$", "", normalized, flags=re.IGNORECASE)
+    add(without_vip)
+
+    # pbfcompany 성주참외 adminplus 옵션은 계산기 E열과 표기가 다르다.
+    # 예: "2kg (가정용 혼합과)_vip" -> "성주참외 소과 2kg (R)"
+    kg_match = re.search(r"(\d+(?:\.\d+)?)\s*kg", without_vip, flags=re.IGNORECASE)
+    if kg_match and "가정용" in without_vip:
+        kg = kg_match.group(1)
+        if kg.endswith(".0"):
+            kg = kg[:-2]
+        grade = ""
+        if "로얄과" in without_vip:
+            grade = "로얄과"
+        elif any(token in without_vip for token in ("혼합과", "랜덤과", "가성비")):
+            grade = "소과"
+        if grade:
+            add(f"성주참외 {grade} {kg}kg (R)")
+            add(f"성주참외 {grade} {kg}kg")
+            add(f"{grade} {kg}kg (R)")
+            add(f"{grade} {kg}kg")
+
+    return candidates
 
 
 def _sheet_product_matches(actual: str, expected: str) -> bool:
@@ -778,14 +887,13 @@ def _load_workbooks(config: SupplierMonitorConfig):
     return editable_wb, data_wb
 
 
-def _worksheet_xml_paths(template_path: Path) -> dict[str, str]:
+def _worksheet_xml_paths_from_zip(workbook_zip: ZipFile) -> dict[str, str]:
     main_ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
     rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
     package_rel_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
-    with ZipFile(template_path, "r") as workbook_zip:
-        workbook_root = ET.fromstring(workbook_zip.read("xl/workbook.xml"))
-        rels_root = ET.fromstring(workbook_zip.read("xl/_rels/workbook.xml.rels"))
+    workbook_root = ET.fromstring(workbook_zip.read("xl/workbook.xml"))
+    rels_root = ET.fromstring(workbook_zip.read("xl/_rels/workbook.xml.rels"))
 
     relationships = {
         rel.attrib["Id"]: rel.attrib["Target"]
@@ -801,6 +909,20 @@ def _worksheet_xml_paths(template_path: Path) -> dict[str, str]:
     return paths
 
 
+def _worksheet_xml_paths(template_path: Path) -> dict[str, str]:
+    with ZipFile(template_path, "r") as workbook_zip:
+        return _worksheet_xml_paths_from_zip(workbook_zip)
+
+
+def _excel_number(value: int | float) -> str:
+    if isinstance(value, float):
+        return f"{value:.12g}"
+    return str(value)
+
+
+_CELL_VALUE_RE = re.compile(r"<v\b[^>]*/>|<v>.*?</v>", flags=re.DOTALL)
+
+
 def _replace_numeric_cell_value(sheet_xml: bytes, cell_ref: str, value: int) -> bytes:
     xml_text = sheet_xml.decode("utf-8")
     pattern = re.compile(
@@ -813,15 +935,48 @@ def _replace_numeric_cell_value(sheet_xml: bytes, cell_ref: str, value: int) -> 
         body = match.group(2)
         body = re.sub(r"<is\b[^>]*>.*?</is>", "", body, flags=re.DOTALL)
         body = re.sub(r"<f\b[^>]*>.*?</f>", "", body, flags=re.DOTALL)
-        if re.search(r"<v>.*?</v>", body, flags=re.DOTALL):
-            body = re.sub(r"<v>.*?</v>", f"<v>{value}</v>", body, count=1, flags=re.DOTALL)
-        else:
-            body = f"{body}<v>{value}</v>"
+        value_text = _excel_number(value)
+        body = _CELL_VALUE_RE.sub("", body)
+        body = f"{body}<v>{value_text}</v>"
         return f"{opening_tag}{body}{match.group(3)}"
 
     updated_xml, changed_count = pattern.subn(replace_cell, xml_text, count=1)
     if changed_count != 1:
         raise SupplierMonitorError(f"엑셀 템플릿에서 {cell_ref} 셀을 찾지 못했습니다.")
+    return updated_xml.encode("utf-8")
+
+
+def _replace_formula_cell_value(
+    sheet_xml: bytes,
+    cell_ref: str,
+    formula: str,
+    value: int | float | None,
+) -> bytes:
+    xml_text = sheet_xml.decode("utf-8")
+    pattern = re.compile(
+        rf'(<c\b(?=[^>]*\br="{re.escape(cell_ref)}")[^>]*>)(.*?)(</c>)',
+        flags=re.DOTALL,
+    )
+    formula_text = escape(formula[1:] if formula.startswith("=") else formula, quote=False)
+
+    def replace_cell(match: re.Match[str]) -> str:
+        opening_tag = re.sub(r'\s+t="[^"]*"', "", match.group(1))
+        body = match.group(2)
+        body = re.sub(r"<is\b[^>]*>.*?</is>", "", body, flags=re.DOTALL)
+        if re.search(r"<f\b[^>]*>.*?</f>", body, flags=re.DOTALL):
+            body = re.sub(r"<f\b[^>]*>.*?</f>", f"<f>{formula_text}</f>", body, count=1, flags=re.DOTALL)
+        else:
+            body = f"<f>{formula_text}</f>{body}"
+
+        body = _CELL_VALUE_RE.sub("", body)
+        if value is not None:
+            value_text = _excel_number(value)
+            body = f"{body}<v>{value_text}</v>"
+        return f"{opening_tag}{body}{match.group(3)}"
+
+    updated_xml, changed_count = pattern.subn(replace_cell, xml_text, count=1)
+    if changed_count != 1:
+        raise SupplierMonitorError(f"기준 엑셀 템플릿에서 {cell_ref} 셀을 찾지 못했습니다.")
     return updated_xml.encode("utf-8")
 
 
@@ -850,22 +1005,68 @@ def _force_excel_recalculation(workbook_xml: bytes) -> bytes:
     ).encode("utf-8")
 
 
-def _patch_workbook_values(config: SupplierMonitorConfig, updates: list[tuple[str, str, int]]) -> bytes:
-    sheet_paths = _worksheet_xml_paths(config.template_path)
-    updates_by_path: dict[str, list[tuple[str, int]]] = {}
+def _remove_calc_chain_relationships(rels_xml: bytes) -> bytes:
+    xml_text = rels_xml.decode("utf-8")
+    return re.sub(
+        r'<Relationship\b(?=[^>]*\bType="http://schemas\.openxmlformats\.org/officeDocument/2006/relationships/calcChain")[^>]*/>',
+        "",
+        xml_text,
+    ).encode("utf-8")
+
+
+def _remove_calc_chain_content_type(content_types_xml: bytes) -> bytes:
+    xml_text = content_types_xml.decode("utf-8")
+    return re.sub(
+        r'<Override\b(?=[^>]*\bPartName="/xl/calcChain\.xml")[^>]*/>',
+        "",
+        xml_text,
+    ).encode("utf-8")
+
+
+def _patch_workbook_values(
+    config: SupplierMonitorConfig,
+    updates: list[tuple[str, str, int]],
+    formula_updates: list[tuple[str, str, str, int | float | None]] | None = None,
+) -> bytes:
+    workbook = load_workbook(filename=str(config.template_path))
     for sheet_name, cell_ref, value in updates:
-        sheet_path = sheet_paths.get(sheet_name)
-        if not sheet_path:
+        if sheet_name not in workbook.sheetnames:
             raise SupplierMonitorError(f"엑셀 템플릿에서 시트를 찾지 못했습니다: {sheet_name}")
-        updates_by_path.setdefault(sheet_path, []).append((cell_ref, value))
+        workbook[sheet_name][cell_ref].value = value
+
+    for sheet_name, cell_ref, formula, _ in formula_updates or []:
+        if sheet_name not in workbook.sheetnames:
+            raise SupplierMonitorError(f"엑셀 템플릿에서 시트를 찾지 못했습니다: {sheet_name}")
+        workbook[sheet_name][cell_ref].value = formula if formula.startswith("=") else f"={formula}"
+
+    if hasattr(workbook, "calculation"):
+        workbook.calculation.calcMode = "auto"
+        workbook.calculation.fullCalcOnLoad = True
+        workbook.calculation.forceFullCalc = True
+
+    clean_buffer = BytesIO()
+    workbook.save(clean_buffer)
+    clean_bytes = clean_buffer.getvalue()
+
+    formula_updates_by_path: dict[str, list[tuple[str, str, int | float | None]]] = {}
+    with ZipFile(BytesIO(clean_bytes), "r") as clean_zip:
+        sheet_paths = _worksheet_xml_paths_from_zip(clean_zip)
+    for sheet_name, cell_ref, formula, value in formula_updates or []:
+        formula_updates_by_path.setdefault(sheet_paths[sheet_name], []).append((cell_ref, formula, value))
 
     output_buffer = BytesIO()
-    with ZipFile(config.template_path, "r") as source_zip, ZipFile(output_buffer, "w") as target_zip:
+    with ZipFile(BytesIO(clean_bytes), "r") as source_zip, ZipFile(output_buffer, "w") as target_zip:
         for item in source_zip.infolist():
+            if item.filename == "xl/calcChain.xml":
+                continue
             item_data = source_zip.read(item.filename)
-            if item.filename in updates_by_path:
-                for cell_ref, value in updates_by_path[item.filename]:
-                    item_data = _replace_numeric_cell_value(item_data, cell_ref, value)
+            if item.filename in formula_updates_by_path:
+                for cell_ref, formula, value in formula_updates_by_path[item.filename]:
+                    item_data = _replace_formula_cell_value(item_data, cell_ref, formula, value)
+            elif item.filename == "xl/_rels/workbook.xml.rels":
+                item_data = _remove_calc_chain_relationships(item_data)
+            elif item.filename == "[Content_Types].xml":
+                item_data = _remove_calc_chain_content_type(item_data)
             elif item.filename == "xl/workbook.xml":
                 item_data = _force_excel_recalculation(item_data)
             target_zip.writestr(item, item_data)
@@ -952,6 +1153,7 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
 
     rows: list[dict] = []
     workbook_updates: list[tuple[str, str, int]] = []
+    formula_updates: list[tuple[str, str, str, int | float | None]] = []
     for option in config.options:
         editable_ws = _select_sheet(editable_wb, option.sheet_name)
         data_ws = _select_sheet(data_wb, option.sheet_name)
@@ -994,6 +1196,16 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
         signal = _price_signal(previous_supplier_price, supplier_price)
         style = PRICE_SIGNAL_STYLE[signal]
         workbook_updates.append((editable_ws.title, cell_ref, supplier_price))
+        formula_updates.extend(
+            (editable_ws.title, formula_cell, formula, cached_value)
+            for formula_cell, formula, cached_value in _formula_cache_updates(
+                editable_ws,
+                option.row,
+                supplier_price,
+            )
+        )
+
+        margin = _compute_margin(editable_ws, option.row, supplier_price)
 
         rows.append(
             {
@@ -1010,11 +1222,13 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
                 "diff": supplier_price - previous_supplier_price,
                 "signal": signal,
                 "signal_label": style["label"],
+                "margin": margin,
+                "margin_negative": margin is not None and margin < 0,
             }
         )
 
     output_filename = config.output_filename(now)
-    output_bytes = _patch_workbook_values(config, workbook_updates)
+    output_bytes = _patch_workbook_values(config, workbook_updates, formula_updates)
     _persist_output(output_filename, output_bytes)
 
     summary = {
@@ -1029,6 +1243,7 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
         "blue_count": sum(1 for row in rows if row["signal"] == "blue"),
         "red_count": sum(1 for row in rows if row["signal"] == "red"),
         "same_count": sum(1 for row in rows if row["signal"] == "same"),
+        "negative_margin_count": sum(1 for row in rows if row.get("margin_negative")),
         "rows": rows,
     }
     await database.save_supplier_price_snapshot(summary)

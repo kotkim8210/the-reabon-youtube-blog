@@ -1012,6 +1012,8 @@ export interface SupplierPriceMonitorRow {
   diff: number;
   signal: 'blue' | 'red' | 'same';
   signal_label: string;
+  margin?: number | null;
+  margin_negative?: boolean;
 }
 
 export interface SupplierPriceMonitorData {
@@ -1026,6 +1028,7 @@ export interface SupplierPriceMonitorData {
   blue_count: number;
   red_count: number;
   same_count: number;
+  negative_margin_count?: number;
   rows: SupplierPriceMonitorRow[];
 }
 
@@ -1041,6 +1044,7 @@ export interface SupplierPriceAlertRun {
   blue_count: number;
   red_count: number;
   same_count: number;
+  negative_margin_count?: number;
   output_filename: string;
   error_message: string;
   checked_at: string;

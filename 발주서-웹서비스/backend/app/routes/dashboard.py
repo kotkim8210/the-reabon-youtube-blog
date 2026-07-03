@@ -160,7 +160,11 @@ async def get_supplier_price_alerts(_token: dict = Depends(require_admin)):
     rows = [row for row in rows if not is_supplier_monitor_paused(str(row.get("monitor_key") or ""))]
     active = [
         row for row in rows
-        if row.get("status") != "ok" or int(row.get("changed_items") or 0) > 0
+        if (
+            row.get("status") != "ok"
+            or int(row.get("changed_items") or 0) > 0
+            or int(row.get("negative_margin_count") or 0) > 0
+        )
     ]
     return {
         "alerts": rows,
