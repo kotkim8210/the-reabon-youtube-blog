@@ -74,7 +74,7 @@ def _blackmango_label(product_name: object, option_text: object) -> str:
 # 등급은 옵션 괄호 안 표기(소/중/대/특/특대/왕특). 쿠팡 표기 '특대'는 쥬얼리 시트 '특'에 매핑.
 # 긴 등급(왕특/특대)을 먼저 검사해야 '특대'가 '대'로 오인되지 않는다.
 _POTATO_GRADES = ("왕특", "특대", "특", "대", "중", "소")
-_POTATO_GRADE_MAP = {"특대": "특"}  # 쿠팡 고객표기 → 쥬얼리 소싱시트 등급
+_POTATO_GRADE_MAP = {"특대": "특", "대": "특"}  # 쿠팡 고객표기 → 쥬얼리 소싱시트 등급
 
 
 def is_jewelry_potato_order(product_name: object, option_text: object) -> bool:

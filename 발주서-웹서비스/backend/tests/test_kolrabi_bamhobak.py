@@ -49,6 +49,11 @@ def test_jewelry_bamhobak_via_convert_option():
     )
 
 
+def test_jewelry_potato_large_ships_as_special():
+    assert M._jewelry_potato_option("햇 홍감자", "3kg(대)") == "햇 홍감자 특 3kg"
+    assert M._jewelry_potato_option("햇 홍감자", "5kg(대)") == "햇 홍감자 특 5kg"
+
+
 def test_bamhobak_excludes_other_products():
     assert M.is_jewelry_bamhobak_order("콜라비", "3kg 1박스") is False
     assert K.convert_bamhobak_option("초당옥수수", "중품 10개") is None
@@ -63,6 +68,7 @@ if __name__ == "__main__":
     test_jeju_bamhobak_only_1kg()
     test_jewelry_bamhobak_3_5_10kg()
     test_jewelry_bamhobak_via_convert_option()
+    test_jewelry_potato_large_ships_as_special()
     test_bamhobak_excludes_other_products()
     test_bamhobak_tracking_semantic_key()
     print("ALL TESTS PASSED")
