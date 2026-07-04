@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, status
@@ -18,6 +18,7 @@ from app.auth import router as auth_router, verify_token, require_pro
 from pydantic import BaseModel
 
 from app import config
+from app import email_service
 from app.coupang.client import CoupangApiError
 from app.toss.client import TossApiError
 from app.processors import (
@@ -880,26 +881,65 @@ class GogumaAutoRequest(BaseModel):
     include_toss: bool = False
 
 
+def _filename_from_proxy_response(response: httpx.Response, default: str) -> str:
+    content_disposition = response.headers.get("content-disposition", "")
+    match = re.search(r"filename\*?=(?:UTF-8'')?\"?([^\";]+)", content_disposition)
+    return unquote(match.group(1)) if match else default
+
+
 @app.post("/api/process/goguma-auto")
 async def process_goguma_auto(
-    req: GogumaAutoRequest,
+    from_date: str = Form(...),
+    to_date: str = Form(...),
+    include_toss: str = Form("false"),
+    send_email: str = Form("false"),
+    temu_file: UploadFile = File(None),
     user: dict = Depends(verify_token),
 ):
+    """쿠팡(+토스) 자동 수집 발주서에 테무 주문서(선택)를 합치고, 옵션으로 발주 이메일 자동 발송."""
     try:
+        include_toss_flag = include_toss.strip().lower() in ("true", "1", "on")
+        send_email_flag = send_email.strip().lower() in ("true", "1", "on")
+        temu_bytes = None
+        if temu_file is not None:
+            temu_bytes = await temu_file.read()
+            if len(temu_bytes) == 0:
+                temu_bytes = None
+
         if _goguma_proxy_enabled():
             proxy_response = await _post_proxy_json(
                 "goguma-auto",
-                {"from_date": req.from_date, "to_date": req.to_date, "include_toss": req.include_toss},
+                {"from_date": from_date, "to_date": to_date, "include_toss": include_toss_flag},
             )
             await _record_proxy_sales(user["user_id"], proxy_response)
-            return _proxy_excel_response(proxy_response)
+            output_bytes = proxy_response.content
+            filename = _filename_from_proxy_response(proxy_response, "goguma-auto.xlsx")
+            try:
+                stats = json.loads(proxy_response.headers.get("x-stats") or "{}")
+            except ValueError:
+                stats = {}
+        else:
+            output_bytes, filename, stats = await goguma_auto.process_from_api(
+                from_date, to_date, include_toss=include_toss_flag
+            )
+            await record_sales_from_process_stats(
+                user["user_id"], stats, ymd=from_date if from_date == to_date else None
+            )
 
-        output_bytes, filename, stats = await goguma_auto.process_from_api(
-            req.from_date, req.to_date, include_toss=req.include_toss
-        )
-        await record_sales_from_process_stats(
-            user["user_id"], stats, ymd=req.from_date if req.from_date == req.to_date else None
-        )
+        # 테무 주문서(order_export)가 오면 고구마 주문만 해달 발주서에 합친다
+        if temu_bytes:
+            temu_entries = temu_order.extract_goguma_entries(temu_bytes, temu_file.filename or "")
+            output_bytes = goguma_order.append_entries_to_haedal(output_bytes, temu_entries)
+            stats["temu"] = len(temu_entries)
+            try:
+                stats["total"] = int(stats.get("total") or 0) + len(temu_entries)
+            except (TypeError, ValueError):
+                pass
+
+        # 발주 이메일 자동 발송 (shach457@gmail.com -> farmers2022@naver.com)
+        if send_email_flag:
+            stats["email"] = email_service.send_haedal_order_email(output_bytes, filename)
+
         logger.info(f"고구마 자동 발주 처리 완료: {stats}")
         return make_excel_response(output_bytes, filename, stats)
     except CoupangApiError as e:

@@ -531,12 +531,21 @@ export async function mergeBatchTrackingResults(
 export async function processGogumaAuto(
   fromDate: string,
   toDate: string,
-  includeToss = false
+  includeToss = false,
+  opts?: { temuFile?: File | null; sendEmail?: boolean },
 ): Promise<ProcessResult> {
+  const formData = new FormData();
+  formData.append('from_date', fromDate);
+  formData.append('to_date', toDate);
+  formData.append('include_toss', includeToss ? 'true' : 'false');
+  formData.append('send_email', opts?.sendEmail ? 'true' : 'false');
+  if (opts?.temuFile) {
+    formData.append('temu_file', opts.temuFile);
+  }
   const res = await fetch(`${BASE_URL}/process/goguma-auto`, {
     method: 'POST',
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from_date: fromDate, to_date: toDate, include_toss: includeToss }),
+    headers: authHeaders(),
+    body: formData,
   });
 
   if (!res.ok) {

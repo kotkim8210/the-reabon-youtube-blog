@@ -308,6 +308,55 @@ async def collect_toss_orders(from_date: str, to_date: str) -> list[dict]:
     return entries
 
 
+def append_entries_to_haedal(xlsx_bytes: bytes, entries: list[dict]) -> bytes:
+    """완성된 해달 발주서(한진양식)에 추가 플랫폼(테무 등) entries를 행으로 덧붙인다.
+
+    entry 필드는 process()의 toss_entries와 동일(name/phone/zipcode/address/qty/product/memo).
+    goguma-auto 결과(프록시 포함)에 테무 주문을 합칠 때 사용.
+    """
+    if not entries:
+        return xlsx_bytes
+    wb = load_workbook(filename=BytesIO(xlsx_bytes))
+    ws = wb[wb.sheetnames[0]]
+    font11 = Font(size=11)
+
+    row_idx = 2
+    for r in range(2, ws.max_row + 2):
+        if ws.cell(row=r, column=1).value is None:
+            row_idx = r
+            break
+
+    for entry in entries:
+        zipcode = normalize(entry.get("zipcode") or "")
+        if zipcode:
+            try:
+                zipcode = str(int(float(zipcode))).zfill(5)
+            except (ValueError, TypeError):
+                zipcode = zipcode.zfill(5)
+        mapping = {
+            1: entry.get("name", ""),
+            2: entry.get("phone", ""),
+            5: zipcode,
+            6: entry.get("address", ""),
+            7: "식품애착",
+            8: "010-5700-7756",
+            12: "전라남도 해남군 산이면 새상골길 ",
+            13: entry.get("qty", ""),
+            14: entry.get("product", ""),
+            16: "선불",
+            19: entry.get("memo", ""),
+        }
+        for col, value in mapping.items():
+            cell = ws.cell(row=row_idx, column=col, value=value)
+            cell.font = font11
+        row_idx += 1
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.read()
+
+
 def process(
     delivery_file_bytes: bytes,
     template_file_bytes: bytes = None,

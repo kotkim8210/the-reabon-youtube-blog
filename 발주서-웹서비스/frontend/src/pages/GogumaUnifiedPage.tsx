@@ -57,6 +57,7 @@ function formatProcessStats(stats: Record<string, unknown>): string[] {
     total: '수집된 주문',
     coupang: '쿠팡',
     toss: '토스',
+    temu: '테무',
     period: '선택 기간',
     product: '상품',
   };
@@ -169,6 +170,10 @@ function OrderCollectionTab() {
   const [tossQueryLoading, setTossQueryLoading] = useState(false);
   const [tossTotal, setTossTotal] = useState(0);
 
+  // 테무 주문서(선택) + 발주 이메일 자동 발송 (shach457@gmail.com → farmers2022@naver.com)
+  const [temuFile, setTemuFile] = useState<File | null>(null);
+  const [sendEmail, setSendEmail] = useState(true);
+
   const setDateRange = useCallback((days: number) => {
     const range = getGogumaDateRangeForDays(days);
     setFromDate(range.fromDate);
@@ -204,7 +209,7 @@ function OrderCollectionTab() {
     setTossResult(null);
     setMergedAll(true);
     try {
-      const res = await processGogumaAuto(fromDate, toDate, true);
+      const res = await processGogumaAuto(fromDate, toDate, true, { temuFile, sendEmail });
       setCoupangResult(res);
     } catch (err) {
       setCoupangError(err instanceof Error ? err.message : '전체 수집 중 오류');
@@ -219,7 +224,7 @@ function OrderCollectionTab() {
     setCoupangResult(null);
     setMergedAll(false);
     try {
-      const res = await processGogumaAuto(fromDate, toDate, false);
+      const res = await processGogumaAuto(fromDate, toDate, false, { temuFile, sendEmail });
       setCoupangResult(res);
     } catch (err) {
       setCoupangError(err instanceof Error ? err.message : '쿠팡 처리 중 오류');
@@ -316,6 +321,35 @@ function OrderCollectionTab() {
           </p>
         </div>
 
+        {/* 테무 주문서(선택) + 발주 이메일 자동 발송 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+          <div>
+            <FileUpload
+              label="테무 주문서 (선택 — 있으면 발주서에 합침)"
+              accept=".xlsx,.xls,.csv"
+              acceptLabel="테무 order_export (.xlsx, .csv)"
+              file={temuFile}
+              onFileSelect={setTemuFile}
+            />
+            {temuFile && (
+              <button onClick={() => setTemuFile(null)}
+                className="mt-1 text-xs text-gray-400 hover:text-gray-600 underline">
+                테무 파일 제거
+              </button>
+            )}
+          </div>
+          <label className="flex items-start gap-2.5 p-4 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors">
+            <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-orange-500" />
+            <span className="text-sm text-gray-700">
+              <span className="font-semibold">📧 발주 이메일 자동 발송</span>
+              <span className="block text-xs text-gray-500 mt-0.5">
+                shach457@gmail.com → farmers2022@naver.com (해달 발주서 첨부)
+              </span>
+            </span>
+          </label>
+        </div>
+
         {/* Collect buttons */}
         <div className="flex items-center gap-3">
           <button onClick={handleCollectAll} disabled={anyLoading}
@@ -371,6 +405,21 @@ function OrderCollectionTab() {
                   ))}
                 </div>
               )}
+              {(() => {
+                const email = coupangResult.stats?.email as
+                  | { sent?: boolean; to?: string; error?: string | null }
+                  | undefined;
+                if (!email) return null;
+                return email.sent ? (
+                  <p className="text-sm font-bold text-green-800 mb-3">
+                    📧 발주 이메일 발송 완료 → {email.to}
+                  </p>
+                ) : (
+                  <p className="text-sm font-bold text-red-600 mb-3">
+                    📧 이메일 발송 실패: {email.error}
+                  </p>
+                );
+              })()}
               <button onClick={() => downloadBlob(coupangResult.blob, coupangResult.filename)}
                 className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-green-700 transition-all shadow-sm">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

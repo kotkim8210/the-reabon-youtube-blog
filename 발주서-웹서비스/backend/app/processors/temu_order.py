@@ -698,3 +698,22 @@ def process_file(file_bytes: bytes, filename: str = "") -> list[tuple[bytes, str
         return process_excel(file_bytes)
     except BadZipFile:
         return _build_outputs(_parse_temu_order_csv(file_bytes))
+
+
+def extract_goguma_entries(file_bytes: bytes, filename: str = "") -> list[dict]:
+    """테무 order_export에서 고구마(해달 발주) entries만 추출. 고구마 주문이 없으면 빈 리스트.
+
+    goguma-auto(쿠팡+토스 통합 발주)에 테무 주문을 합칠 때 사용 —
+    entry 필드(name/phone/zipcode/address/qty/product/memo/order_id)는 해달 양식 행 쓰기와 호환.
+    """
+    try:
+        if filename.lower().endswith(".csv"):
+            entries = _parse_temu_order_csv(file_bytes)
+        else:
+            try:
+                entries = _parse_temu_order_excel(file_bytes)
+            except BadZipFile:
+                entries = _parse_temu_order_csv(file_bytes)
+    except ValueError:
+        return []
+    return [e for e in entries if e.get("kind") == "goguma"]
