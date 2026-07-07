@@ -308,6 +308,46 @@ async def collect_toss_orders(from_date: str, to_date: str) -> list[dict]:
     return entries
 
 
+def parse_alwayz_entries(alwayz_file_bytes: bytes) -> list[dict]:
+    """올웨이즈 주문내역 엑셀 → 해달 발주 entries (name/phone/zipcode/address/qty/product/memo/order_id)."""
+    entries: list[dict] = []
+    az_wb = load_workbook(filename=BytesIO(alwayz_file_bytes), data_only=True)
+    az_ws = az_wb.active
+    for az_row in az_ws.iter_rows(min_row=2):
+        name = normalize(az_row[18].value) if len(az_row) > 18 else ""  # S(19)=idx18
+        if not name:
+            continue
+        phone = normalize(az_row[19].value) if len(az_row) > 19 else ""  # T(20)=idx19
+        zipcode = normalize(az_row[15].value) if len(az_row) > 15 else ""  # P(16)=idx15
+        address = normalize(az_row[14].value) if len(az_row) > 14 else ""  # O(15)=idx14
+        qty = normalize(az_row[6].value) if len(az_row) > 6 else ""  # G(7)=idx6
+        option = normalize(az_row[5].value) if len(az_row) > 5 else ""  # F(6)=idx5
+        door_pw = normalize(az_row[16].value) if len(az_row) > 16 else ""  # Q(17)=idx16
+        recv_method = normalize(az_row[17].value) if len(az_row) > 17 else ""  # R(18)=idx17
+        order_id = normalize(az_row[0].value) if len(az_row) > 0 else ""
+
+        product = transform_alwayz_option(option)
+        memo = build_alwayz_memo(recv_method, door_pw)
+
+        if zipcode:
+            try:
+                zipcode = str(int(float(zipcode))).zfill(5)
+            except (ValueError, TypeError):
+                zipcode = zipcode.zfill(5)
+
+        entries.append({
+            "name": name,
+            "phone": phone,
+            "zipcode": zipcode,
+            "address": address,
+            "qty": qty,
+            "product": product,
+            "memo": memo,
+            "order_id": order_id or stable_order_id("alwayz", name, phone, address, product, qty),
+        })
+    return entries
+
+
 def append_entries_to_haedal(xlsx_bytes: bytes, entries: list[dict]) -> bytes:
     """완성된 해달 발주서(한진양식)에 추가 플랫폼(테무 등) entries를 행으로 덧붙인다.
 
@@ -397,42 +437,7 @@ def process(
             filtered_rows.append(row)
 
     # Parse 올웨이즈 orders if provided
-    alwayz_entries = []
-    if alwayz_file_bytes:
-        az_wb = load_workbook(filename=BytesIO(alwayz_file_bytes), data_only=True)
-        az_ws = az_wb.active
-        for az_row in az_ws.iter_rows(min_row=2):
-            name = normalize(az_row[18].value) if len(az_row) > 18 else ""  # S(19)=idx18
-            if not name:
-                continue
-            phone = normalize(az_row[19].value) if len(az_row) > 19 else ""  # T(20)=idx19
-            zipcode = normalize(az_row[15].value) if len(az_row) > 15 else ""  # P(16)=idx15
-            address = normalize(az_row[14].value) if len(az_row) > 14 else ""  # O(15)=idx14
-            qty = normalize(az_row[6].value) if len(az_row) > 6 else ""  # G(7)=idx6
-            option = normalize(az_row[5].value) if len(az_row) > 5 else ""  # F(6)=idx5
-            door_pw = normalize(az_row[16].value) if len(az_row) > 16 else ""  # Q(17)=idx16
-            recv_method = normalize(az_row[17].value) if len(az_row) > 17 else ""  # R(18)=idx17
-            order_id = normalize(az_row[0].value) if len(az_row) > 0 else ""
-
-            product = transform_alwayz_option(option)
-            memo = build_alwayz_memo(recv_method, door_pw)
-
-            if zipcode:
-                try:
-                    zipcode = str(int(float(zipcode))).zfill(5)
-                except (ValueError, TypeError):
-                    zipcode = zipcode.zfill(5)
-
-            alwayz_entries.append({
-                "name": name,
-                "phone": phone,
-                "zipcode": zipcode,
-                "address": address,
-                "qty": qty,
-                "product": product,
-                "memo": memo,
-                "order_id": order_id or stable_order_id("alwayz", name, phone, address, product, qty),
-            })
+    alwayz_entries = parse_alwayz_entries(alwayz_file_bytes) if alwayz_file_bytes else []
 
     # Load template
     if template_file_bytes is not None:

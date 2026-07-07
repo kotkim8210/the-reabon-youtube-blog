@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   processGogumaAuto, processGogumaTrackingApi,
   processTossOrder, processTossTrackingApi,
-  processFile,
+  processFile, sendOrderEmailFiles,
   downloadBlob, ProcessResult, TrackingApiResult,
   fetchTossOrders, fetchTossClaims, testTossConnection,
   approveTossCancel, rejectTossCancel,
@@ -58,6 +58,7 @@ function formatProcessStats(stats: Record<string, unknown>): string[] {
     coupang: '쿠팡',
     toss: '토스',
     temu: '테무',
+    duplicate_skipped: '이전 발주분 제외',
     period: '선택 기간',
     product: '상품',
   };
@@ -170,9 +171,31 @@ function OrderCollectionTab() {
   const [tossQueryLoading, setTossQueryLoading] = useState(false);
   const [tossTotal, setTossTotal] = useState(0);
 
-  // 테무 주문서(선택) + 발주 이메일 자동 발송 (shach457@gmail.com → farmers2022@naver.com)
+  // 테무·올웨이즈 주문서(선택) — 있으면 발주서에 합침
   const [temuFile, setTemuFile] = useState<File | null>(null);
-  const [sendEmail, setSendEmail] = useState(true);
+  const [alwayzFile, setAlwayzFile] = useState<File | null>(null);
+  const [excludeIssued, setExcludeIssued] = useState(true);  // 이전 발주분 자동 제외 (중복발주 방지)
+
+  // 발주서 이메일 발송(수동 버튼): 최종 발주파일 업로드 → 클릭 시 발송
+  const [emailFile, setEmailFile] = useState<File | null>(null);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailResult, setEmailResult] = useState('');
+  const [emailError, setEmailError] = useState('');
+
+  const handleSendOrderEmail = async () => {
+    if (!emailFile) return;
+    setEmailSending(true);
+    setEmailResult('');
+    setEmailError('');
+    try {
+      const res = await sendOrderEmailFiles([emailFile]);
+      setEmailResult(`발송 완료 → ${res.to || 'farmers2022@naver.com'} · 제목 "${res.subject || ''}"`);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : '이메일 발송에 실패했습니다.');
+    } finally {
+      setEmailSending(false);
+    }
+  };
 
   const setDateRange = useCallback((days: number) => {
     const range = getGogumaDateRangeForDays(days);
@@ -209,7 +232,7 @@ function OrderCollectionTab() {
     setTossResult(null);
     setMergedAll(true);
     try {
-      const res = await processGogumaAuto(fromDate, toDate, true, { temuFile, sendEmail });
+      const res = await processGogumaAuto(fromDate, toDate, true, { temuFile, alwayzFile, excludeIssued });
       setCoupangResult(res);
     } catch (err) {
       setCoupangError(err instanceof Error ? err.message : '전체 수집 중 오류');
@@ -224,7 +247,7 @@ function OrderCollectionTab() {
     setCoupangResult(null);
     setMergedAll(false);
     try {
-      const res = await processGogumaAuto(fromDate, toDate, false, { temuFile, sendEmail });
+      const res = await processGogumaAuto(fromDate, toDate, false, { temuFile, alwayzFile, excludeIssued });
       setCoupangResult(res);
     } catch (err) {
       setCoupangError(err instanceof Error ? err.message : '쿠팡 처리 중 오류');
@@ -321,7 +344,7 @@ function OrderCollectionTab() {
           </p>
         </div>
 
-        {/* 테무 주문서(선택) + 발주 이메일 자동 발송 */}
+        {/* 테무·올웨이즈 주문서(선택) — 있으면 발주서에 합침 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
           <div>
             <FileUpload
@@ -338,17 +361,31 @@ function OrderCollectionTab() {
               </button>
             )}
           </div>
-          <label className="flex items-start gap-2.5 p-4 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors">
-            <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)}
-              className="mt-0.5 w-4 h-4 accent-orange-500" />
-            <span className="text-sm text-gray-700">
-              <span className="font-semibold">📧 발주 이메일 자동 발송</span>
-              <span className="block text-xs text-gray-500 mt-0.5">
-                shach457@gmail.com → farmers2022@naver.com (해달 발주서 첨부)
-              </span>
-            </span>
-          </label>
+          <div>
+            <FileUpload
+              label="올웨이즈 주문내역 (선택 — 있으면 발주서에 합침)"
+              file={alwayzFile}
+              onFileSelect={setAlwayzFile}
+            />
+            {alwayzFile && (
+              <button onClick={() => setAlwayzFile(null)}
+                className="mt-1 text-xs text-gray-400 hover:text-gray-600 underline">
+                올웨이즈 파일 제거
+              </button>
+            )}
+          </div>
         </div>
+
+        <label className="flex items-start gap-2.5 p-4 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors mb-5">
+          <input type="checkbox" checked={excludeIssued} onChange={(e) => setExcludeIssued(e.target.checked)}
+            className="mt-0.5 w-4 h-4 accent-orange-500" />
+          <span className="text-sm text-gray-700">
+            <span className="font-semibold">🚫 이전 발주분 자동 제외</span>
+            <span className="block text-xs text-gray-500 mt-0.5">
+              직전 영업일까지 발주서에 넣은 주문은 건너뜀 — 상품준비중 잔존 과거 주문 중복발주 방지
+            </span>
+          </span>
+        </label>
 
         {/* Collect buttons */}
         <div className="flex items-center gap-3">
@@ -385,6 +422,37 @@ function OrderCollectionTab() {
         </div>
       </div>
 
+      {/* 발주서 이메일 발송 (수동 버튼) */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-xl">📧</div>
+          <div>
+            <h3 className="text-base font-bold text-gray-900">발주서 이메일 발송</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              최종 고구마 발주파일을 올리고(드래그 가능) 버튼을 누르면
+              shach457@gmail.com → farmers2022@naver.com로 첨부 발송합니다.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 md:items-end">
+          <FileUpload
+            label="최종 고구마 발주파일"
+            file={emailFile}
+            onFileSelect={(f) => { setEmailFile(f); setEmailResult(''); setEmailError(''); }}
+          />
+          <button
+            onClick={handleSendOrderEmail}
+            disabled={!emailFile || emailSending}
+            className="bg-orange-500 text-white px-6 py-3 rounded-xl font-semibold text-sm hover:bg-orange-600
+                       disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-orange-200"
+          >
+            {emailSending ? '발송 중...' : '📧 이메일 발송'}
+          </button>
+        </div>
+        {emailResult && <p className="mt-3 text-sm font-bold text-green-700">{emailResult}</p>}
+        {emailError && <p className="mt-3 text-sm font-bold text-red-600">{emailError}</p>}
+      </div>
+
       {/* Results - Two columns */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Coupang Result */}
@@ -405,21 +473,6 @@ function OrderCollectionTab() {
                   ))}
                 </div>
               )}
-              {(() => {
-                const email = coupangResult.stats?.email as
-                  | { sent?: boolean; to?: string; error?: string | null }
-                  | undefined;
-                if (!email) return null;
-                return email.sent ? (
-                  <p className="text-sm font-bold text-green-800 mb-3">
-                    📧 발주 이메일 발송 완료 → {email.to}
-                  </p>
-                ) : (
-                  <p className="text-sm font-bold text-red-600 mb-3">
-                    📧 이메일 발송 실패: {email.error}
-                  </p>
-                );
-              })()}
               <button onClick={() => downloadBlob(coupangResult.blob, coupangResult.filename)}
                 className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-green-700 transition-all shadow-sm">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

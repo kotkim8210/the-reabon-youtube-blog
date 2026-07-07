@@ -149,6 +149,7 @@ async def process_from_api(
     from_date: str,
     to_date: str,
     include_toss: bool = False,
+    exclude_order_ids: set[str] | None = None,
 ) -> tuple[bytes, str, dict]:
     """Collect 고구마 orders from Coupang API and generate 해달 발주서.
 
@@ -168,7 +169,18 @@ async def process_from_api(
         except Exception as e:
             logger.warning(f"토스 주문 수집 실패 (계속 진행): {e}")
 
+    # 이전 영업일 발주분 자동 제외 (중복발주 방지)
+    duplicate_skipped = 0
+    if exclude_order_ids:
+        from app.processors.issued_orders import normalize_order_id
+        before_count = len(orders) + len(toss_entries)
+        orders = [o for o in orders if normalize_order_id(o.get("order_id")) not in exclude_order_ids]
+        toss_entries = [e for e in toss_entries if normalize_order_id(e.get("order_id")) not in exclude_order_ids]
+        duplicate_skipped = before_count - len(orders) - len(toss_entries)
+
     if not orders and not toss_entries:
+        if duplicate_skipped:
+            raise ValueError(f"신규 고구마 주문이 없습니다 (이전 발주분 {duplicate_skipped}건 자동 제외).")
         raise ValueError("해당 기간에 고구마 주문이 없습니다.")
 
     # Load template
@@ -294,6 +306,7 @@ async def process_from_api(
         "total": total,
         "coupang": len(orders),
         "toss": len(toss_entries),
+        "duplicate_skipped": duplicate_skipped,
         "period": f"{from_date} ~ {to_date}",
         "product": "고구마",
         "options": list(option_totals.values()),

@@ -5,6 +5,7 @@ import FileUpload from '../components/FileUpload';
 import { processFile, downloadBlob, ProcessResult, processTossWatermelonTracking, processDaangnOrder } from '../api';
 import { useUser } from '../App';
 import { loadToolPrefs, setSectionTitle } from '../lib/toolCatalog';
+import { getDefaultGogumaDateRange } from '../lib/gogumaDateRange';
 
 // ── 인라인 편집 가능한 제목 ───────────────────────────────────────
 function EditableTitle({
@@ -213,8 +214,9 @@ const productConfigs: Record<string, ProductConfig> = {
 
 // ── 통계 포맷 ─────────────────────────────────────────────────────
 function formatStats(stats: Record<string, unknown>): string[] {
+  const labels: Record<string, string> = { duplicate_skipped: '이전 발주분 제외' };
   return Object.entries(stats).map(([key, value]) =>
-    typeof value === 'number' ? `${key}: ${value}건` : `${key}: ${value}`
+    typeof value === 'number' ? `${labels[key] || key}: ${value}건` : `${labels[key] || key}: ${value}`
   );
 }
 
@@ -237,8 +239,14 @@ function ProcessSection({
 }) {
   const [files, setFiles] = useState<Record<string, File | null>>({});
   const [extraValues, setExtraValues] = useState<Record<string, string>>(() => {
-    if (!section.tossDateRange) return {} as Record<string, string>;
-    return { toss_from_date: localDateString(-(section.tossDefaultDays ?? 0)), toss_to_date: localDateString() };
+    // 발주 섹션은 '이전 발주분 자동 제외(중복발주 방지)' 기본 ON
+    const init: Record<string, string> = section.apiToolId.endsWith('-order') ? { exclude_issued: 'true' } : {};
+    if (!section.tossDateRange) return init;
+    // 요일 자동 선택(고구마와 동일): 월요일=4일(금~월), 공휴일 다음날=3일.
+    // 섹션 기본값(tossDefaultDays)보다 길 때만 요일 규칙을 우선 — 월요일 실수 방지.
+    const auto = getDefaultGogumaDateRange();
+    const days = Math.max(auto.days, (section.tossDefaultDays ?? 0) + 1);
+    return { ...init, toss_from_date: localDateString(-(days - 1)), toss_to_date: localDateString() };
   });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ProcessResult | null>(null);
@@ -318,7 +326,12 @@ function ProcessSection({
                 { label: '3일', days: 2 },
                 { label: '4일', days: 3 },
                 { label: '수집안함', days: -1 },
-              ].map((preset) => (
+              ].map((preset) => {
+                const isActive = preset.days >= 0
+                  ? extraValues.toss_from_date === localDateString(-preset.days)
+                    && extraValues.toss_to_date === localDateString()
+                  : !extraValues.toss_from_date && !extraValues.toss_to_date;
+                return (
                 <button
                   key={preset.label}
                   type="button"
@@ -333,13 +346,21 @@ function ProcessSection({
                       toss_to_date: localDateString(),
                     }));
                   }}
-                  className="rounded-lg border border-orange-300 px-2 py-1 text-xs font-semibold text-orange-700 transition hover:bg-orange-100"
+                  className={`rounded-lg border px-2 py-1 text-xs font-semibold transition ${
+                    isActive
+                      ? 'border-orange-500 bg-orange-500 text-white shadow-sm'
+                      : 'border-orange-300 text-orange-700 hover:bg-orange-100'
+                  }`}
                 >
                   {preset.label}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
+          <p className="mb-2 text-[11px] font-medium text-orange-600">
+            ⏰ 월요일엔 자동으로 4일(금~월), 공휴일 다음날엔 3일로 시작합니다. 다르게 수집하려면 위 버튼으로 바꾸세요.
+          </p>
           <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-gray-500">시작일</span>
@@ -403,6 +424,25 @@ function ProcessSection({
           </button>
         )}
       </div>
+
+      {section.apiToolId.endsWith('-order') && (
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={extraValues.exclude_issued !== 'false'}
+            onChange={(e) =>
+              setExtraValues((prev) => ({ ...prev, exclude_issued: e.target.checked ? 'true' : 'false' }))
+            }
+            className="w-4 h-4 accent-indigo-600"
+          />
+          <span>
+            <span className="font-semibold">이전 발주분 자동 제외</span>
+            <span className="ml-1 text-xs text-gray-400">
+              직전 영업일까지 발주서에 넣은 주문은 건너뜀 (같은 날 재생성은 그대로)
+            </span>
+          </span>
+        </label>
+      )}
 
       {/* 에러 */}
       {error && (

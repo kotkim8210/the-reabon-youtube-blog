@@ -37,6 +37,7 @@ from app.processors import (
     kolrabi_order,
     myeongi_order,
     myeongi_tracking,
+    issued_orders,
     temu_order,
     temu_tracking,
     tomato_order,
@@ -199,6 +200,36 @@ def make_zip_response(
 PROXY_TIMEOUT = httpx.Timeout(180.0, connect=20.0)
 
 
+def _today_kst() -> str:
+    return datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+
+
+def _exclude_issued_enabled(flag: str) -> bool:
+    return (flag or "").strip().lower() not in ("false", "0", "off", "no")
+
+
+async def _issued_exclusions(section: str, flag: str) -> set[str]:
+    """전일 이전 발주서에 포함됐던 주문번호(중복발주 방지). 같은 날 재생성은 막지 않는다."""
+    if not _exclude_issued_enabled(flag):
+        return set()
+    try:
+        return await database.issued_order_ids_before(section, _today_kst())
+    except Exception:
+        logger.exception("발주 이력 조회 실패(제외 없이 계속)")
+        return set()
+
+
+async def _record_issued(section: str, filename: str, *stats_list: dict, extra_ids: list[str] | None = None) -> None:
+    """발주서에 실제 기록된 주문번호(stats options[].orders[])를 이력으로 저장."""
+    try:
+        ids = issued_orders.order_ids_from_stats(*stats_list)
+        if extra_ids:
+            ids = sorted(set(ids) | {i for i in extra_ids if i})
+        await database.record_issued_orders(section, ids, filename, _today_kst())
+    except Exception:
+        logger.exception("발주 이력 기록 실패(발주서는 정상 생성)")
+
+
 def _goguma_proxy_enabled() -> bool:
     return bool(config.GOGUMA_API_PROXY_BASE_URL and config.INTERNAL_API_KEY)
 
@@ -337,10 +368,13 @@ async def process_kolrabi_order(
     toss_from_date: str = Form(""),
     toss_to_date: str = Form(""),
     include_toss: str = Form(""),
+    exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
+        issued_excluded = await _issued_exclusions("kolrabi", exclude_issued)
+        delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(delivery_bytes, issued_excluded)
         # 토스 제주다팜 주문(콜라비 + 미니밤호박 1kg)을 토스 API로 수집해 각 발주서에 합친다.
         toss_colrabi_entries = []
         toss_bamhobak_entries = []
@@ -356,6 +390,9 @@ async def process_kolrabi_order(
                 toss_jeju = await tomato_order.collect_toss_jejudapam_orders(*collect_dates)
                 toss_colrabi_entries = toss_jeju.get("colrabi", [])
                 toss_bamhobak_entries = toss_jeju.get("bamhobak", [])
+                toss_colrabi_entries, _dup_c = issued_orders.filter_entries_by_issued(toss_colrabi_entries, issued_excluded)
+                toss_bamhobak_entries, _dup_b = issued_orders.filter_entries_by_issued(toss_bamhobak_entries, issued_excluded)
+                dup_skipped += _dup_c + _dup_b
             except Exception as toss_exc:
                 toss_error = str(toss_exc)
                 logger.warning(f"토스 제주다팜(콜라비·미니밤호박) 수집 실패(발주는 계속): {toss_exc}")
@@ -366,17 +403,21 @@ async def process_kolrabi_order(
             toss_bamhobak_entries=toss_bamhobak_entries,
         )
         if not results:
+            dup_note = f" (이전 발주분 {dup_skipped}건 자동 제외됨)" if dup_skipped else ""
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="제주다팜 발주로 출력할 콜라비·미니밤호박 주문을 찾지 못했습니다.",
+                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박 주문을 찾지 못했습니다.{dup_note}",
             )
 
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
         for _, _, item_stats in results:
             await record_sales_from_process_stats(user["user_id"], item_stats, ymd=sales_ymd)
+        await _record_issued("kolrabi", results[0][1], *[item_stats for _, _, item_stats in results])
 
         if len(results) == 1:
             output_bytes, filename, stats = results[0]
+            if dup_skipped:
+                stats = {**(stats or {}), "duplicate_skipped": dup_skipped}
             if toss_error:
                 stats = {**(stats or {}), "toss_error": toss_error}
             response = make_excel_response(output_bytes, filename, stats)
@@ -387,6 +428,8 @@ async def process_kolrabi_order(
                 "files": len(results),
                 "total": sum(int((item_stats or {}).get("total", 0)) for _, _, item_stats in results),
             }
+            if dup_skipped:
+                stats["duplicate_skipped"] = dup_skipped
             if toss_error:
                 stats["toss_error"] = toss_error
             response = make_zip_response(
@@ -411,11 +454,17 @@ async def process_kolrabi_order(
 @app.post("/api/process/chamdureup-order")
 async def process_chamdureup_order(
     delivery_file: UploadFile = File(...),
+    exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
+        issued_excluded = await _issued_exclusions("chamdureup", exclude_issued)
+        delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(delivery_bytes, issued_excluded)
         output_bytes, filename, stats = chamdureup_order.process(delivery_bytes)
+        await _record_issued("chamdureup", filename, stats)
+        if dup_skipped:
+            stats = {**(stats or {}), "duplicate_skipped": dup_skipped}
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
         )
@@ -488,10 +537,13 @@ async def process_myeongi_order(
     toss_from_date: str = Form(""),
     toss_to_date: str = Form(""),
     include_toss: str = Form(""),
+    exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
+        issued_excluded = await _issued_exclusions("myeongi", exclude_issued)
+        delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(delivery_bytes, issued_excluded)
         # 토스 쥬얼리 주문(수박·성주참외·신비복숭아·망고수박)을 토스 API로 수집해 함께 발주.
         # 토스 신비복숭아 수집은 이 페이지(명이)로 일원화됨.
         toss_entries = []
@@ -505,6 +557,8 @@ async def process_myeongi_order(
         if collect_dates:
             try:
                 toss_entries = await tomato_order.collect_toss_jewelry_orders(*collect_dates)
+                toss_entries, _dup_t = issued_orders.filter_entries_by_issued(toss_entries, issued_excluded)
+                dup_skipped += _dup_t
             except Exception as toss_exc:
                 toss_error = str(toss_exc)
                 logger.warning(f"토스 쥬얼리 수집 실패(발주는 계속): {toss_exc}")
@@ -512,6 +566,9 @@ async def process_myeongi_order(
         output_bytes, filename, stats = myeongi_order.process(
             delivery_bytes, toss_entries=toss_entries
         )
+        await _record_issued("myeongi", filename, stats)
+        if dup_skipped:
+            stats = {**(stats or {}), "duplicate_skipped": dup_skipped}
         if toss_error:
             stats = {**(stats or {}), "toss_error": toss_error}
         await record_sales_from_process_stats(
@@ -556,10 +613,13 @@ async def process_tomato_order(
     toss_from_date: str = Form(""),
     toss_to_date: str = Form(""),
     include_toss: str = Form(""),
+    exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
+        issued_excluded = await _issued_exclusions("tomato", exclude_issued)
+        delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(delivery_bytes, issued_excluded)
         # 신비복숭아 3·4kg은 쿠팡(DeliveryList) + 토스(API)에서 모두 제이비티 발주로 합친다.
         # (1·2kg은 명이/쥬얼리 메뉴, 수박·성주참외 등 다른 토스 품목은 명이로 일원화)
         toss_peach_entries = []
@@ -575,6 +635,8 @@ async def process_tomato_order(
                 toss_peach_entries = await tomato_order.collect_toss_peach_orders(
                     *collect_dates, kgs=tomato_order.JBT_PEACH_KGS
                 )
+                toss_peach_entries, _dup_p = issued_orders.filter_entries_by_issued(toss_peach_entries, issued_excluded)
+                dup_skipped += _dup_p
             except Exception as toss_exc:
                 toss_peach_error = str(toss_exc)
                 logger.warning(f"토스 신비복숭아 3·4kg 수집 실패(발주는 계속): {toss_exc}")
@@ -588,8 +650,11 @@ async def process_tomato_order(
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
         for _, _, item_stats in results:
             await record_sales_from_process_stats(user["user_id"], item_stats, ymd=sales_ymd)
+        await _record_issued("tomato", results[0][1], *[item_stats for _, _, item_stats in results])
 
         toss_peach_info = {}
+        if dup_skipped:
+            toss_peach_info["duplicate_skipped"] = dup_skipped
         if toss_peach_entries:
             toss_peach_info["toss_peach_orders"] = len(toss_peach_entries)
         if toss_peach_error:
@@ -769,10 +834,14 @@ async def process_goguma_order(
     toss_from_date: str = "",
     toss_to_date: str = "",
     include_toss: str = "",
+    exclude_issued: str = Form("true"),
+    temu_file: UploadFile = File(None),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
+        issued_excluded = await _issued_exclusions("goguma", exclude_issued)
+        delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(delivery_bytes, issued_excluded)
         template_bytes = None
         if template_file is not None:
             template_bytes = await template_file.read()
@@ -790,6 +859,12 @@ async def process_goguma_order(
             toss_file_bytes = await toss_file.read()
             if len(toss_file_bytes) == 0:
                 toss_file_bytes = None
+
+        temu_bytes = None
+        if temu_file is not None:
+            temu_bytes = await temu_file.read()
+            if len(temu_bytes) == 0:
+                temu_bytes = None
 
         if _goguma_proxy_enabled():
             proxy_files: list[tuple[str, tuple[str, bytes, str]]] = [
@@ -854,9 +929,28 @@ async def process_goguma_order(
             today = datetime.now(KST).strftime("%Y-%m-%d")
             toss_entries = await goguma_order.collect_toss_orders(today, today)
 
+        toss_entries, _dup_t = issued_orders.filter_entries_by_issued(toss_entries, issued_excluded)
+        dup_skipped += _dup_t
+
         output_bytes, filename, stats = goguma_order.process(
             delivery_bytes, template_bytes, alwayz_bytes, toss_entries, toss_file_bytes
         )
+        # 테무 주문서(선택)의 고구마 주문을 같은 해달 발주서에 합친다
+        temu_issued_ids: list[str] = []
+        if temu_bytes:
+            temu_entries = temu_order.extract_goguma_entries(temu_bytes, temu_file.filename or "")
+            temu_entries, _dup_temu = issued_orders.filter_entries_by_issued(temu_entries, issued_excluded)
+            dup_skipped += _dup_temu
+            output_bytes = goguma_order.append_entries_to_haedal(output_bytes, temu_entries)
+            stats["temu"] = len(temu_entries)
+            temu_issued_ids = [issued_orders.normalize_order_id(e.get("order_id")) for e in temu_entries]
+            try:
+                stats["total"] = int(stats.get("total") or 0) + len(temu_entries)
+            except (TypeError, ValueError):
+                pass
+        await _record_issued("goguma", filename, stats, extra_ids=temu_issued_ids)
+        if dup_skipped:
+            stats = {**(stats or {}), "duplicate_skipped": dup_skipped}
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
         )
@@ -875,10 +969,37 @@ async def process_goguma_order(
         )
 
 
+@app.post("/api/process/send-order-email")
+async def send_order_email(
+    files: list[UploadFile] = File(...),
+    _token: dict = Depends(verify_token),
+):
+    """업로드한 발주서 파일(1개 이상)을 farmers2022@naver.com로 첨부 발송.
+
+    테무 해달 발주서를 따로 뽑았거나 발주서를 수정해서 재발송할 때 사용.
+    """
+    attachments: list[tuple[bytes, str]] = []
+    for upload in files:
+        data = await upload.read()
+        if data:
+            attachments.append((data, upload.filename or "발주서.xlsx"))
+    if not attachments:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="첨부할 발주서 파일이 없습니다.")
+    result = email_service.send_order_files_email(attachments)
+    if not result.get("sent"):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"이메일 발송 실패: {result.get('error')}",
+        )
+    logger.info(f"발주서 수동 이메일 발송: {[name for _, name in attachments]}")
+    return {"status": "ok", **result, "files": [name for _, name in attachments]}
+
+
 class GogumaAutoRequest(BaseModel):
     from_date: str
     to_date: str
     include_toss: bool = False
+    exclude_order_ids: list[str] = []
 
 
 def _filename_from_proxy_response(response: httpx.Response, default: str) -> str:
@@ -893,23 +1014,36 @@ async def process_goguma_auto(
     to_date: str = Form(...),
     include_toss: str = Form("false"),
     send_email: str = Form("false"),
+    exclude_issued: str = Form("true"),
+    alwayz_file: UploadFile = File(None),
     temu_file: UploadFile = File(None),
     user: dict = Depends(verify_token),
 ):
-    """쿠팡(+토스) 자동 수집 발주서에 테무 주문서(선택)를 합치고, 옵션으로 발주 이메일 자동 발송."""
+    """쿠팡(+토스) 자동 수집 발주서에 올웨이즈·테무 주문서(선택)를 합치고, 옵션으로 발주 이메일 자동 발송."""
     try:
         include_toss_flag = include_toss.strip().lower() in ("true", "1", "on")
         send_email_flag = send_email.strip().lower() in ("true", "1", "on")
+        issued_excluded = await _issued_exclusions("goguma", exclude_issued)
         temu_bytes = None
         if temu_file is not None:
             temu_bytes = await temu_file.read()
             if len(temu_bytes) == 0:
                 temu_bytes = None
+        alwayz_bytes = None
+        if alwayz_file is not None:
+            alwayz_bytes = await alwayz_file.read()
+            if len(alwayz_bytes) == 0:
+                alwayz_bytes = None
 
         if _goguma_proxy_enabled():
             proxy_response = await _post_proxy_json(
                 "goguma-auto",
-                {"from_date": from_date, "to_date": to_date, "include_toss": include_toss_flag},
+                {
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "include_toss": include_toss_flag,
+                    "exclude_order_ids": sorted(issued_excluded),
+                },
             )
             await _record_proxy_sales(user["user_id"], proxy_response)
             output_bytes = proxy_response.content
@@ -920,21 +1054,44 @@ async def process_goguma_auto(
                 stats = {}
         else:
             output_bytes, filename, stats = await goguma_auto.process_from_api(
-                from_date, to_date, include_toss=include_toss_flag
+                from_date, to_date, include_toss=include_toss_flag,
+                exclude_order_ids=issued_excluded or None,
             )
             await record_sales_from_process_stats(
                 user["user_id"], stats, ymd=from_date if from_date == to_date else None
             )
 
-        # 테무 주문서(order_export)가 오면 고구마 주문만 해달 발주서에 합친다
-        if temu_bytes:
-            temu_entries = temu_order.extract_goguma_entries(temu_bytes, temu_file.filename or "")
-            output_bytes = goguma_order.append_entries_to_haedal(output_bytes, temu_entries)
-            stats["temu"] = len(temu_entries)
+        # 올웨이즈·테무 주문서(선택)를 같은 해달 발주서에 합친다
+        extra_issued_ids: list[str] = []
+
+        def _bump_stats(kind: str, count: int, dup: int) -> None:
+            stats[kind] = count
+            if dup:
+                try:
+                    stats["duplicate_skipped"] = int(stats.get("duplicate_skipped") or 0) + dup
+                except (TypeError, ValueError):
+                    stats["duplicate_skipped"] = dup
             try:
-                stats["total"] = int(stats.get("total") or 0) + len(temu_entries)
+                stats["total"] = int(stats.get("total") or 0) + count
             except (TypeError, ValueError):
                 pass
+
+        if alwayz_bytes:
+            alwayz_entries = goguma_order.parse_alwayz_entries(alwayz_bytes)
+            alwayz_entries, _dup_alz = issued_orders.filter_entries_by_issued(alwayz_entries, issued_excluded)
+            output_bytes = goguma_order.append_entries_to_haedal(output_bytes, alwayz_entries)
+            _bump_stats("alwayz", len(alwayz_entries), _dup_alz)
+            extra_issued_ids += [issued_orders.normalize_order_id(e.get("order_id")) for e in alwayz_entries]
+
+        if temu_bytes:
+            temu_entries = temu_order.extract_goguma_entries(temu_bytes, temu_file.filename or "")
+            temu_entries, _dup_temu = issued_orders.filter_entries_by_issued(temu_entries, issued_excluded)
+            output_bytes = goguma_order.append_entries_to_haedal(output_bytes, temu_entries)
+            _bump_stats("temu", len(temu_entries), _dup_temu)
+            extra_issued_ids += [issued_orders.normalize_order_id(e.get("order_id")) for e in temu_entries]
+
+        # 발주 이력 기록 (다음 영업일 중복발주 방지)
+        await _record_issued("goguma", filename, stats, extra_ids=extra_issued_ids)
 
         # 발주 이메일 자동 발송 (shach457@gmail.com -> farmers2022@naver.com)
         if send_email_flag:
@@ -1294,7 +1451,8 @@ async def internal_process_goguma_auto(
     del _guard
     try:
         output_bytes, filename, stats = await goguma_auto.process_from_api(
-            req.from_date, req.to_date, include_toss=req.include_toss
+            req.from_date, req.to_date, include_toss=req.include_toss,
+            exclude_order_ids=set(req.exclude_order_ids) or None,
         )
         return make_excel_response(output_bytes, filename, stats)
     except CoupangApiError as e:

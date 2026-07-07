@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import FileUpload from '../components/FileUpload';
-import { processFile, processTossWatermelonTracking, downloadBlob, ProcessResult } from '../api';
+import { processFile, processTossWatermelonTracking, sendOrderEmailFiles, downloadBlob, ProcessResult } from '../api';
 
 interface FileConfig {
   key: string;
@@ -187,12 +187,13 @@ const toolConfigs: Record<string, ToolConfig> = {
   'goguma-order': {
     title: '고구마 발주서 생성',
     description:
-      'DeliveryList에서 고구마 주문을 추출하여 해달 발주서를 생성합니다. 올웨이즈·토스 주문도 함께 처리 가능합니다.',
+      'DeliveryList에서 고구마 주문을 추출하여 해달 발주서를 생성합니다. 올웨이즈·토스·테무 주문도 한 파일로 합칠 수 있습니다.',
     icon: '🍠',
     files: [
       { key: 'delivery', label: 'DeliveryList 파일' },
       { key: 'alwayz', label: '올웨이즈 주문내역 (선택)', optional: true },
       { key: 'toss', label: '토스 주문내역 (선택)', optional: true },
+      { key: 'temu', label: '테무 주문서 (선택 — 있으면 같은 발주서에 합침)', optional: true, accept: '.xlsx,.xls,.csv', acceptLabel: '.xlsx, .csv (order_export)' },
     ],
     color: 'orange',
     colorClasses: {
@@ -343,6 +344,25 @@ function ProcessPage() {
   const [alwayzTrackingLoading, setAlwayzTrackingLoading] = useState(false);
   const [alwayzTrackingResult, setAlwayzTrackingResult] = useState<ProcessResult | null>(null);
   const [alwayzTrackingError, setAlwayzTrackingError] = useState('');
+  const [emailFiles, setEmailFiles] = useState<File[]>([]);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailResult, setEmailResult] = useState('');
+  const [emailError, setEmailError] = useState('');
+
+  const handleSendOrderEmail = async () => {
+    if (emailFiles.length === 0) return;
+    setEmailSending(true);
+    setEmailResult('');
+    setEmailError('');
+    try {
+      const res = await sendOrderEmailFiles(emailFiles);
+      setEmailResult(`발송 완료 → ${res.to || 'farmers2022@naver.com'} · 제목 "${res.subject || ''}" · 첨부 ${res.files?.length ?? emailFiles.length}개`);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : '이메일 발송에 실패했습니다.');
+    } finally {
+      setEmailSending(false);
+    }
+  };
 
   const allFilesUploaded = useMemo(() => {
     if (!config) return false;
@@ -943,6 +963,44 @@ function ProcessPage() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {toolId === 'goguma-order' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6 animate-slide-up">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-xl">📧</div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">발주서 이메일 발송</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                발주서 파일(여러 개 가능)을 올리고 클릭하면 shach457@gmail.com → farmers2022@naver.com로 첨부 발송합니다.
+                따로 뽑은 테무 해달 발주서나 수정본 재발송에 사용하세요.
+              </p>
+            </div>
+          </div>
+          <input
+            type="file"
+            multiple
+            accept=".xlsx,.xls"
+            onChange={(e) => {
+              setEmailFiles(Array.from(e.target.files || []));
+              setEmailResult('');
+              setEmailError('');
+            }}
+            className="block w-full text-sm text-gray-600 mb-3 file:mr-3 file:rounded-lg file:border-0 file:bg-orange-100 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-orange-700 hover:file:bg-orange-200"
+          />
+          {emailFiles.length > 0 && (
+            <p className="text-xs text-gray-500 mb-3">첨부 {emailFiles.length}개: {emailFiles.map((f) => f.name).join(', ')}</p>
+          )}
+          <button
+            onClick={handleSendOrderEmail}
+            disabled={emailFiles.length === 0 || emailSending}
+            className="bg-orange-500 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            {emailSending ? '발송 중...' : '📧 이메일 발송'}
+          </button>
+          {emailResult && <p className="mt-3 text-sm font-bold text-green-700">{emailResult}</p>}
+          {emailError && <p className="mt-3 text-sm font-bold text-red-600">{emailError}</p>}
         </div>
       )}
 

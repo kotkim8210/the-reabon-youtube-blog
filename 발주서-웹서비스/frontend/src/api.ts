@@ -398,6 +398,7 @@ export async function processFile(
     template: 'template_file',
     alwayz: 'alwayz_file',
     toss: 'toss_file',
+    temu: 'temu_file',
     toss_export: 'toss_export_file',
     winners: 'winners_file',
     tracking: 'tracking_file',
@@ -532,15 +533,19 @@ export async function processGogumaAuto(
   fromDate: string,
   toDate: string,
   includeToss = false,
-  opts?: { temuFile?: File | null; sendEmail?: boolean },
+  opts?: { temuFile?: File | null; alwayzFile?: File | null; sendEmail?: boolean; excludeIssued?: boolean },
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append('from_date', fromDate);
   formData.append('to_date', toDate);
   formData.append('include_toss', includeToss ? 'true' : 'false');
   formData.append('send_email', opts?.sendEmail ? 'true' : 'false');
+  formData.append('exclude_issued', opts?.excludeIssued === false ? 'false' : 'true');
   if (opts?.temuFile) {
     formData.append('temu_file', opts.temuFile);
+  }
+  if (opts?.alwayzFile) {
+    formData.append('alwayz_file', opts.alwayzFile);
   }
   const res = await fetch(`${BASE_URL}/process/goguma-auto`, {
     method: 'POST',
@@ -578,6 +583,30 @@ export async function processGogumaAuto(
   }
 
   return { blob, filename, stats };
+}
+
+export async function sendOrderEmailFiles(
+  files: File[],
+): Promise<{ status: string; to?: string; subject?: string; files?: string[] }> {
+  const formData = new FormData();
+  for (const f of files) {
+    formData.append('files', f);
+  }
+  const res = await fetch(`${BASE_URL}/process/send-order-email`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
+    }
+    throw new Error(apiErrorMessage((data as { detail?: unknown }).detail, '이메일 발송에 실패했습니다.'));
+  }
+  return data as { status: string; to?: string; subject?: string; files?: string[] };
 }
 
 export async function processDanharuOrder(

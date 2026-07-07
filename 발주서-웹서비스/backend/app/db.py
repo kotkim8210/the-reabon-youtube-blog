@@ -265,6 +265,18 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS idx_supplier_price_monitor_runs_key
             ON supplier_price_monitor_runs(monitor_key, checked_at DESC);
 
+        CREATE TABLE IF NOT EXISTS issued_order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            section TEXT NOT NULL,
+            order_key TEXT NOT NULL,
+            issued_on TEXT NOT NULL,
+            filename TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE(section, order_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_issued_order_items_section_date
+            ON issued_order_items(section, issued_on);
+
         CREATE TABLE IF NOT EXISTS daily_settlement_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -1456,6 +1468,37 @@ async def latest_supplier_price_snapshots_before_run_date(
         seen.add(key)
         latest.append(row)
     return latest
+
+
+async def issued_order_ids_before(section: str, today_ymd: str) -> set[str]:
+    """오늘(today_ymd) 이전 날짜에 발주서에 포함됐던 주문번호 집합 (중복발주 방지용)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT order_key FROM issued_order_items WHERE section = ? AND issued_on < ?",
+        (section, today_ymd),
+    )
+    rows = await cursor.fetchall()
+    return {str(row["order_key"]) for row in rows}
+
+
+async def record_issued_orders(section: str, order_ids: list[str], filename: str, today_ymd: str) -> None:
+    """발주서에 포함된 주문번호를 기록. 재발주 시 issued_on을 최신 날짜로 갱신."""
+    if not order_ids:
+        return
+    db = await get_db()
+    await db.executemany(
+        """INSERT INTO issued_order_items (section, order_key, issued_on, filename, created_at)
+           VALUES (?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(section, order_key)
+           DO UPDATE SET issued_on = excluded.issued_on, filename = excluded.filename""",
+        [(section, order_id, today_ymd, filename or "") for order_id in order_ids],
+    )
+    # 45일 지난 이력은 정리 (쿠팡 상품준비중 잔존 기간 대비 충분)
+    await db.execute(
+        "DELETE FROM issued_order_items WHERE issued_on < date(?, '-45 day')",
+        (today_ymd,),
+    )
+    await db.commit()
 
 
 async def save_supplier_price_monitor_run(
