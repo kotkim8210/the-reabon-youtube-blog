@@ -359,7 +359,30 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("망고수박 가정용 6kg", "수박 가정용 5~6kg내외(6kg)", 11, sheet_name="제이비티"),
         ),
     ),
-    # ── 신비복숭아 한시 모니터 (2026-06-15 ~ 2026-06-29, 2주) ──
+    # 백도 딱딱이복숭아 (2026-07~). pbfcompany adminplus에서 '카라' 검색 → 상세 popup 옵션 공급가(vip).
+    # 옵션명(supplier_option_name)은 소싱현황 시트(E열) 기준. 실제 adminplus popup 옵션명과 다르면
+    # skip_missing_options=True 로 누락 표기되며, popup 옵션명 확인 후 1줄만 맞추면 됨.
+    "baekdo-jewelry": SupplierMonitorConfig(
+        key="baekdo-jewelry",
+        source_type="adminplus",
+        base_url="https://pbfcompany.adminplus.co.kr",
+        supplier_name="쥬얼리프룻",
+        product_name="백도 딱딱이복숭아",
+        search_value="카라",
+        template_path=TEMPLATE_DIR / "백도복숭아_쥬얼리프룻_소싱현황_원본.xlsx",
+        output_prefix="백도복숭아_쥬얼리프룻_V1",
+        output_name_pattern="백도복숭아 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
+        skip_missing_options=True,
+        options=(
+            SupplierOptionConfig("백도 딱딱이복숭아 중과 1kg", "중과 1kg (5-6과 내외)", 8, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("백도 딱딱이복숭아 중과 2kg", "중과 2kg (11-14과 내외)", 9, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("백도 딱딱이복숭아 중과 4kg", "중과 4kg (20-26과 내외)", 10, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("백도 딱딱이복숭아 대과 1kg", "대과 1kg (3-4과 내외)", 11, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("백도 딱딱이복숭아 대과 2kg", "대과 2kg (6-8과 내외)", 12, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig("백도 딱딱이복숭아 대과 4kg", "대과 4kg (12-17과 내외)", 13, sheet_name="쥬얼리프룻"),
+        ),
+    ),
+    # ── 신비복숭아 한시 모니터 (2026-06-15 ~ 2026-06-29, 2주) — 2026-07 품절로 마진방어 UI에서 제외 ──
     "peach-jewelry": SupplierMonitorConfig(
         key="peach-jewelry",
         source_type="google_sheet",

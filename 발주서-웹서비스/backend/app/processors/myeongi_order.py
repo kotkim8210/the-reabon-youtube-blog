@@ -243,9 +243,49 @@ def _jewelry_daegeukcheon_option(product_name: object, option_text: object) -> s
     return f"{base} {kg}kg" if kg else base
 
 
-# '복숭아'가 들어가지만 신비복숭아가 아닌 별도 발주 품목(거반도·대극천 등) — 신비 오분류 방지
+# 백도 딱딱이복숭아 → 쥬얼리프룻 발주. 쿠팡 '햇 백도 딱딱이복숭아 …' 옵션 '1박스 중과 1kg'
+# → '백도 딱딱이 복숭아 중과 1kg (5-6과 내외)'. '복숭아' 포함이라 신비복숭아보다 먼저 분기하고
+# peach에서 제외. 전 kg(1·2·4)·전 등급(중과/대과) 모두 쥬얼리(신비처럼 3·4kg 제이비티 분리 없음).
+def _is_baekdo(product_name: object, option_text: object) -> bool:
+    return "백도" in _combined_text(product_name, option_text).replace(" ", "")
+
+
+def is_jewelry_baekdo_order(product_name: object, option_text: object) -> bool:
+    return _is_baekdo(product_name, option_text)
+
+
+# 쿠팡 백도 (등급, kg) → 발주 품목 과수 표기 (마진 소싱현황 기준 2026-07)
+_BAEKDO_COUNTS = {
+    ("중과", "1"): "5-6과 내외",
+    ("중과", "2"): "11-14과 내외",
+    ("중과", "4"): "20-26과 내외",
+    ("대과", "1"): "3-4과 내외",
+    ("대과", "2"): "6-8과 내외",
+    ("대과", "4"): "12-17과 내외",
+}
+
+
+def _jewelry_baekdo_option(product_name: object, option_text: object) -> str | None:
+    if not _is_baekdo(product_name, option_text):
+        return None
+    text = _combined_text(product_name, option_text)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
+    kg = _fmt_kg(m.group(1)) if m else ""
+    grade = "대과" if "대과" in text else "중과"  # 기본 중과
+    count = _BAEKDO_COUNTS.get((grade, kg), "")
+    base = "백도 딱딱이 복숭아"
+    if kg and count:
+        return f"{base} {grade} {kg}kg ({count})"
+    return f"{base} {grade} {kg}kg" if kg else base
+
+
+# '복숭아'가 들어가지만 신비복숭아가 아닌 별도 발주 품목(거반도·대극천·백도 등) — 신비 오분류 방지
 def _non_shinbi_peach(product_name: object, option_text: object) -> bool:
-    return _is_geobando(product_name, option_text) or is_jewelry_daegeukcheon_order(product_name, option_text)
+    return (
+        _is_geobando(product_name, option_text)
+        or is_jewelry_daegeukcheon_order(product_name, option_text)
+        or _is_baekdo(product_name, option_text)
+    )
 
 
 # 신비복숭아 1·2kg → 쥬얼리프룻 발주 (3·4kg은 제이비티, 800g은 제외)
@@ -360,6 +400,10 @@ def jewelry_passthrough_product(
     if daegeukcheon:
         return daegeukcheon
 
+    baekdo = _jewelry_baekdo_option(product_name, option_text)
+    if baekdo:
+        return baekdo
+
     if "복숭아" in text:
         # 신비복숭아: '신비복숭아 {kg}kg {등급(소과/중소과/대과...)}'
         return _peach_label(product_name, option_text)
@@ -448,6 +492,10 @@ def convert_option(option_text: str, product_name: str = "") -> str | None:
     if daegeukcheon:
         return daegeukcheon
 
+    baekdo = _jewelry_baekdo_option(product_name, option_text)
+    if baekdo:
+        return baekdo
+
     peach = _jewelry_peach_option(product_name, option_text)
     if peach:
         return peach
@@ -503,6 +551,7 @@ def process(
     has_peach = False
     has_geobando = False
     has_daegeukcheon = False
+    has_baekdo = False
     has_potato = False
     has_bamhobak = False
     for row in dl_ws.iter_rows(min_row=2):
@@ -537,6 +586,10 @@ def process(
             # 대극천 복숭아 → 쥬얼리프룻 (신비복숭아 아님)
             filtered_rows.append(row)
             has_daegeukcheon = True
+        elif is_jewelry_baekdo_order(k_val, option):
+            # 백도 딱딱이복숭아 → 쥬얼리프룻 (신비복숭아 아님, 중과/대과 1·2·4kg)
+            filtered_rows.append(row)
+            has_baekdo = True
         elif is_jewelry_peach_order(k_val, option):
             # 신비복숭아 1·2kg → 쥬얼리프룻 (3·4kg은 제이비티)
             filtered_rows.append(row)
@@ -658,6 +711,8 @@ def process(
             has_geobando = True
         elif "대극천" in product:
             has_daegeukcheon = True
+        elif "백도" in product:
+            has_baekdo = True
         elif "복숭아" in product:
             has_peach = True
         elif "망고수박" in product:
@@ -703,6 +758,8 @@ def process(
         product_parts.append("거반도복숭아")
     if has_daegeukcheon:
         product_parts.append("대극천복숭아")
+    if has_baekdo:
+        product_parts.append("백도딱딱이복숭아")
     if has_potato:
         product_parts.append("홍감자")
     if has_bamhobak:
@@ -830,13 +887,16 @@ def _build_jewelry_order_workbook(entries: list[dict]) -> tuple[bytes, str, dict
 
     products = [e["product"] for e in entries]
     has_watermelon = any("수박" in p for p in products)
-    has_peach = any("복숭아" in p for p in products)
+    has_baekdo = any("백도" in p for p in products)
+    has_peach = any("복숭아" in p and "백도" not in p for p in products)
     has_chamoe = any("과" in p and "수박" not in p and "복숭아" not in p for p in products)
     label_parts = []
     if has_watermelon:
         label_parts.append("수박")
     if has_chamoe:
         label_parts.append("성주참외")
+    if has_baekdo:
+        label_parts.append("백도딱딱이복숭아")
     if has_peach:
         label_parts.append("신비복숭아")
     label = "_".join(label_parts) if label_parts else "발주"

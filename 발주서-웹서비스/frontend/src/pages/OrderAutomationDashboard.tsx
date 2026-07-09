@@ -52,15 +52,12 @@ const SUPPLIER_MONITOR_KEYS = [
   { key: 'potato-jewelry', accent: 'emerald' },
   { key: 'bamhobak-jewelry', accent: 'emerald' },
   { key: 'bamhobak-jeju', accent: 'sky' },
-  { key: 'peach-jewelry', accent: 'emerald' },
-  { key: 'peach-jbt', accent: 'sky' },
+  { key: 'baekdo-jewelry', accent: 'emerald' },
 ] as const;
 
 // 한시 모니터: 해당 날짜(YYYY-MM-DD)가 지나면 화면에서 자동 숨김
-const SUPPLIER_MONITOR_EXPIRY: Partial<Record<string, string>> = {
-  'peach-jewelry': '2026-06-29',
-  'peach-jbt': '2026-06-29',
-};
+// (신비복숭아 peach-jewelry·peach-jbt는 2026-07 품절로 제거)
+const SUPPLIER_MONITOR_EXPIRY: Partial<Record<string, string>> = {};
 
 type SupplierMonitorKey = (typeof SUPPLIER_MONITOR_KEYS)[number]['key'];
 type AccentTone = (typeof SUPPLIER_MONITOR_KEYS)[number]['accent'];
@@ -78,8 +75,7 @@ const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   'potato-jewelry': '홍감자',
   'bamhobak-jewelry': '미니밤호박 3·5·10kg(쥬얼리)',
   'bamhobak-jeju': '미니밤호박 1kg(제주다팜)',
-  'peach-jewelry': '신비복숭아 1·2kg(쥬얼리)',
-  'peach-jbt': '신비복숭아 3·4kg(제이비티)',
+  'baekdo-jewelry': '백도 딱딱이복숭아(쥬얼리)',
 };
 
 /** 한시 모니터 만료 필터: 오늘이 expiresOn(YYYY-MM-DD)을 지나면 제외 */
