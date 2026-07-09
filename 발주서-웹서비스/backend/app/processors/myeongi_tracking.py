@@ -12,6 +12,7 @@ from app.processors.myeongi_order import (
     is_jewelry_bamhobak_order,
     is_jewelry_chamoe_order,
     is_jewelry_corn_order,
+    is_jewelry_baekdo_order,
     is_jewelry_daegeukcheon_order,
     is_jewelry_geobando_order,
     is_jewelry_peach_order,
@@ -47,6 +48,7 @@ def is_jewelryfruit_tracking_target(product_name: str, option_text: str) -> bool
         or is_jewelry_chamoe_order(product_name, option_text)    # 성주참외 로얄/중소 (2026-06 쥬얼리 전환)
         or is_jewelry_geobando_order(product_name, option_text)  # 거반도 납작복숭아 500g·1·2kg
         or is_jewelry_daegeukcheon_order(product_name, option_text)  # 대극천 복숭아 (신비복숭아 아님)
+        or is_jewelry_baekdo_order(product_name, option_text)    # 백도 딱딱이복숭아 (신비복숭아 아님)
         or is_jewelry_peach_order(product_name, option_text)     # 신비복숭아 1·2kg (3·4kg은 제이비티)
         or is_jewelry_potato_order(product_name, option_text)    # 햇 홍감자 (2026 여름 쥬얼리 발주)
         or is_jewelry_bamhobak_order(product_name, option_text)  # 미니밤호박 3·5·10kg (1kg은 제주다팜)
@@ -129,6 +131,7 @@ def process(
     has_peach = False
     has_geobando = False
     has_daegeukcheon = False
+    has_baekdo = False
     has_bamhobak = False
     delivery_name_counts = name_counts(
         normalize(dl_ws.cell(row=row_idx, column=27).value)
@@ -233,6 +236,8 @@ def process(
                 has_geobando = True
             if is_jewelry_daegeukcheon_order(dl_product, dl_option):
                 has_daegeukcheon = True
+            if is_jewelry_baekdo_order(dl_product, dl_option):
+                has_baekdo = True
             if is_jewelry_peach_order(dl_product, dl_option):
                 has_peach = True
             if is_jewelry_bamhobak_order(dl_product, dl_option):
@@ -264,6 +269,8 @@ def process(
         product_parts.append("거반도복숭아")
     if has_daegeukcheon:
         product_parts.append("대극천복숭아")
+    if has_baekdo:
+        product_parts.append("백도딱딱이복숭아")
     if has_bamhobak:
         product_parts.append("미니밤호박")
     product_label = "_".join(product_parts) if product_parts else "쥬얼리프룻"
