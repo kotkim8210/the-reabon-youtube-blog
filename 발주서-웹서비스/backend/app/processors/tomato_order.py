@@ -64,6 +64,16 @@ def peach_kg(product_name: str = "", option_text: str = "") -> float | int | Non
     return int(kg) if kg.is_integer() else kg
 
 
+def is_jbt_shinbi_peach(product_name: str = "", option_text: str = "") -> bool:
+    """제이비티 발주 대상 '신비복숭아 3·4kg'인지. 백도딱딱이·거반도·대극천 등
+    '복숭아'가 들어간 비신비 상품(쥬얼리 발주)은 kg 무관 제외 — 백도 4kg이
+    신비복숭아로 둔갑하는 오분류 방지."""
+    from app.processors.myeongi_order import _non_shinbi_peach
+    if _non_shinbi_peach(product_name, option_text):
+        return False
+    return peach_kg(product_name, option_text) in JBT_PEACH_KGS
+
+
 def is_jbt_corn_order(product_name: str = "", option_text: str = "") -> bool:
     text = normalize(f"{product_name} {option_text}")
     return "옥수수" in text and ("중품" in text or "특품" in text)
@@ -256,6 +266,10 @@ async def collect_toss_peach_orders(
             continue
 
         option = _toss_peach_option(item)
+        # 백도딱딱이·거반도·대극천 등 비신비 복숭아는 쥬얼리 수집 대상 → 제이비티 토스 수집에서 제외
+        from app.processors.myeongi_order import _non_shinbi_peach
+        if _non_shinbi_peach(_toss_item_text(item), option):
+            continue
         kg = peach_kg(_toss_item_text(item), option)
         if kgs is not None and kg not in kgs:
             continue
@@ -518,7 +532,7 @@ def parse_alwayz_jbt_rows(alwayz_bytes: bytes) -> tuple[list, dict]:
         elif "땅두릅" in product_name:
             ptype = "땅두릅"; flags["ddureup"] = True
         # ※ 수박은 쥬얼리팜, 초당옥수수는 제주다팜(kolrabi) 발주로 전환 — 제이비티 올웨이즈 파싱에서 제외
-        elif peach_kg(product_name, option) in JBT_PEACH_KGS:
+        elif is_jbt_shinbi_peach(product_name, option):
             ptype = "복숭아"; flags["peach"] = True
         if ptype is None:
             continue
@@ -858,8 +872,9 @@ def process_outputs(
             has_ddureup = True
             filtered_rows.append((row, "땅두릅"))
         # ※ 수박(6/7/8kg)은 쥬얼리팜(myeongi), 초당옥수수는 제주다팜(kolrabi_order)으로 발주 이관 — 제이비티 제외
-        elif peach_kg(product_name, option) in JBT_PEACH_KGS:
+        elif is_jbt_shinbi_peach(product_name, option):
             # 신비복숭아 3·4kg만 제이비티(중소과). 1·2kg은 쥬얼리프룻, 800g은 제외.
+            # 백도딱딱이·거반도·대극천은 kg 무관 쥬얼리 → 여기서 걸리면 안 됨.
             has_peach = True
             filtered_rows.append((row, "복숭아"))
 
