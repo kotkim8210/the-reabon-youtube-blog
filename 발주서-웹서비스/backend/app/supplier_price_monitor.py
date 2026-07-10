@@ -281,6 +281,10 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
         template_path=TEMPLATE_DIR / "초당옥수수_소싱현황_원본.xlsx",
         output_prefix="초당옥수수_쥬얼리프룻_V1",
         output_name_pattern="초당옥수수 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
+        # 2026-07 중품 4종은 공급 중단(시트 공급가 공란), 특품 4종은 출고중.
+        # 옵션 일부가 빠져도 오류 대신 건너뛰고 남은 옵션만 계산. 전 옵션이 빠지면(완전 품절)
+        # 조용히 빈 결과 → 오류 알림/재시도 부하 없음. (다른 모니터도 전부 True)
+        skip_missing_options=True,
         options=(
             SupplierOptionConfig("초당옥수수 중품 5개", "중품 5개입", 8, sheet_name="쥬얼리프룻"),
             SupplierOptionConfig("초당옥수수 중품 10개", "중품 10개입", 9, sheet_name="쥬얼리프룻"),
