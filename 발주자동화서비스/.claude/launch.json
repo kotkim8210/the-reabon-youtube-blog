@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "brand-resell-os",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "brand-resell-os", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}

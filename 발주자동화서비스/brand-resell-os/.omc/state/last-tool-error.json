@@ -1,0 +1,7 @@
+{
+  "tool_name": "mcp__Claude_Preview__preview_start",
+  "tool_input_preview": "{\"name\":\"brand-resell-os\"}",
+  "error": "Failed to start server: No .claude/launch.json found. Create C:\\Users\\USER\\발주자동화서비스/.claude/launch.json with this format:\n{\n  \"version\": \"0.0.1\",\n  \"configurations\": [\n    {\n      \"name\": \"<unique-name>\",\n      \"runtimeExecutable\": \"<command>\",\n      \"runtimeArgs\": [\"<args>\"],\n      \"port\": <port>\n    }\n  ]\n}\nSet \"runtimeExecutable\" to the command (e.g. \"npm\"), \"runtimeArgs\" to the arguments (e.g. [\"run\", \"dev\"]), and \"port\" to the server port. Only include servers you actually need to preview. ...",
+  "timestamp": "2026-07-07T08:50:58.797Z",
+  "retry_count": 1
+}

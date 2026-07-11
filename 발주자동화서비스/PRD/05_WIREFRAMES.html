@@ -1,0 +1,347 @@
+<title>브랜드리셀OS — 와이어프레임</title>
+<style>
+  :root{--line:#c9ccd4;--ink:#2b2f38;--dim:#8a8f9c;--fill:#eef0f4;--accent:#3b6ef6;--warn:#e05c5c;--ok:#2fa36b;}
+  *{box-sizing:border-box}
+  body{font-family:'Segoe UI','Malgun Gothic',sans-serif;color:var(--ink);background:#f7f8fa;margin:0;padding:24px;line-height:1.5}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:20px}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:28px}
+  .toc a{font-size:12px;text-decoration:none;color:var(--accent);border:1px solid var(--line);background:#fff;border-radius:20px;padding:6px 12px}
+  section{margin-bottom:48px}
+  h2{font-size:16px;border-left:4px solid var(--accent);padding-left:10px;margin-bottom:4px}
+  .desc{font-size:13px;color:var(--dim);margin:0 0 12px 14px;max-width:900px}
+  .frame{background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.05);max-width:1080px;overflow:hidden}
+  .chrome{display:flex;align-items:center;gap:6px;background:var(--fill);border-bottom:1px solid var(--line);padding:8px 12px;font-size:11px;color:var(--dim)}
+  .dot{width:9px;height:9px;border-radius:50%;background:#d4d7de}
+  .url{background:#fff;border:1px solid var(--line);border-radius:12px;padding:2px 14px;margin-left:8px}
+  .app{display:flex;min-height:430px}
+  .side{width:170px;background:#fafbfc;border-right:1px solid var(--line);padding:12px;font-size:12px;flex-shrink:0}
+  .logo{font-weight:700;font-size:13px;margin-bottom:14px}
+  .navgrp{color:var(--dim);font-size:10px;margin:12px 0 4px;letter-spacing:.05em}
+  .navi{padding:7px 9px;border-radius:6px;margin-bottom:2px;cursor:default}
+  .navi.on{background:#e8eefe;color:var(--accent);font-weight:600}
+  .main{flex:1;padding:16px;font-size:12px;min-width:0}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);border-radius:16px;padding:4px 12px;background:#fff;font-size:11px}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .search{flex:1;min-width:160px;border:1px solid var(--line);border-radius:6px;padding:7px 10px;color:var(--dim);background:#fff}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:11.5px;background:#fff}
+  th{background:var(--fill);text-align:left;padding:7px 8px;border:1px solid var(--line);font-weight:600;white-space:nowrap}
+  td{padding:7px 8px;border:1px solid var(--line);white-space:nowrap}
+  .thumb{width:26px;height:26px;background:var(--fill);border:1px solid var(--line);border-radius:4px;display:inline-block;vertical-align:middle}
+  .btn{display:inline-block;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:4px 10px;font-size:11px;background:#fff}
+  .btn.pri{background:var(--accent);color:#fff}
+  .btn.big{padding:9px 18px;font-size:12.5px}
+  .pos{color:var(--ok);font-weight:700}.neg{color:var(--warn);font-weight:700}
+  .callouts{font-size:12.5px;max-width:1080px;background:#fffbe8;border:1px solid #eadfa0;border-radius:8px;padding:12px 16px;margin-top:10px}
+  .callouts b{color:#8a6d00}
+  .num{display:inline-flex;width:17px;height:17px;border-radius:50%;background:var(--warn);color:#fff;font-size:10.5px;align-items:center;justify-content:center;font-weight:700;vertical-align:1px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .panel{border:1px solid var(--line);border-radius:8px;padding:12px;background:#fff}
+  .panel h4{margin:0 0 8px;font-size:12px}
+  .graph{height:110px;background:var(--fill);border:1px dashed var(--line);border-radius:6px;position:relative;overflow:hidden}
+  .graph svg{position:absolute;inset:0;width:100%;height:100%}
+  .glabel{position:absolute;font-size:10px;color:var(--dim)}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+  .kpi{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff}
+  .kpi .v{font-size:15px;font-weight:700}
+  .kpi .k{font-size:10px;color:var(--dim)}
+  .paste{border:2px dashed var(--line);border-radius:10px;background:#fafbfc;height:130px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--dim);gap:6px}
+  .pipe{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+  .stage{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff;text-align:center}
+  .stage .n{font-size:19px;font-weight:700}
+  .stage.hl{border-color:var(--accent);background:#f2f6ff}
+  .phones{display:flex;gap:20px;flex-wrap:wrap}
+  .phone{width:250px;border:2px solid var(--ink);border-radius:22px;padding:10px;background:#fff}
+  .notch{width:70px;height:5px;background:var(--ink);border-radius:3px;margin:2px auto 8px}
+  .ptab{display:flex;gap:4px;margin-bottom:8px}
+  .ptab div{flex:1;text-align:center;font-size:10.5px;padding:6px 2px;border:1px solid var(--line);border-radius:6px}
+  .ptab .on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .cam{height:130px;background:repeating-linear-gradient(45deg,#e8eaef 0 8px,#f2f3f6 8px 16px);border:1px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:11px;position:relative}
+  .scanline{position:absolute;left:12%;right:12%;top:48%;height:2px;background:var(--warn)}
+  .prow{font-size:11px;border:1px solid var(--line);border-radius:6px;padding:7px;margin-top:6px;background:#fafbfc}
+  .tag{font-size:9.5px;border-radius:4px;padding:1.5px 6px;color:#fff;display:inline-block}
+  .t-blue{background:var(--accent)}.t-green{background:var(--ok)}.t-red{background:var(--warn)}.t-gray{background:#9aa0ad}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;font-size:10.5px;margin-top:6px}
+  .seg div{flex:1;text-align:center;padding:5px}
+  .seg .on{background:var(--ok);color:#fff}
+  .flow{font-size:12px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px 16px;max-width:1080px}
+  .flow code{background:var(--fill);border-radius:4px;padding:1px 6px}
+  .arrow{color:var(--dim);padding:0 6px}
+</style>
+
+<h1>브랜드리셀OS — 와이어프레임 v0.1</h1>
+<div class="sub">유튜브 "연매출 33억 플레이어가 만든 무료 프로그램"(모두의 도매 × 홍노) 분석 기반 · 2026-07-04 · PRD/01_PRD.md와 함께 볼 것</div>
+
+<div class="toc">
+  <a href="#s1">1. 시세 비교(소싱)</a>
+  <a href="#s2">2. 시세 상세·마진 시나리오</a>
+  <a href="#s3">3. 도매 리스트 AI 분석</a>
+  <a href="#s4">4. 구매내역 관리</a>
+  <a href="#s5">5. 입고 관리(PC)</a>
+  <a href="#s6">6. 모바일 송장 스캔</a>
+  <a href="#s7">7. 발송 관리</a>
+  <a href="#s8">8. 정보 구조(IA)</a>
+</div>
+
+<!-- ══════════ 1. 시세 비교 ══════════ -->
+<section id="s1">
+  <h2>1. 시세 비교 — 소싱 대시보드 (메인 화면)</h2>
+  <p class="desc">영상 02:15. 무신사 등에서 "뭐가 돈이 되지?"를 하나하나 검색하던 작업을 표 하나로 대체. 큐레이션된 브랜드/상품 리스트에 매입가·크림 시세·마진·판매량·총매물이 미리 계산되어 뜬다.</p>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">app.○○○.kr / sourcing</span></div>
+    <div class="app">
+      <div class="side">
+        <div class="logo">□ 브랜드리셀OS</div>
+        <div class="navgrp">소싱</div>
+        <div class="navi on">시세 비교</div>
+        <div class="navi">도매 분석 (AI)</div>
+        <div class="navgrp">장부</div>
+        <div class="navi">구매내역</div>
+        <div class="navi">입고 관리</div>
+        <div class="navi">발송 관리</div>
+        <div class="navgrp">설정</div>
+        <div class="navi">계정 연동</div>
+        <div class="navi">멤버/권한</div>
+      </div>
+      <div class="main">
+        <div class="row">
+          <span class="chip on">전체</span><span class="chip">나이키</span><span class="chip">아디다스</span><span class="chip">폴로</span><span class="chip">스투시</span><span class="chip">+ 브랜드</span>
+          <div class="search">🔍 상품명 · 품번 검색 (예: IE0906, 에어포스)</div>
+          <span class="btn">필터: 마진율 ≥ 5%</span>
+        </div>
+        <table>
+          <tr><th></th><th>상품 / 품번</th><th>매입처·매입가 <span class="num">1</span></th><th>크림 즉시판매가</th><th>마진율 <span class="num">2</span></th><th>월판매 KR</th><th>월판매 CN</th><th>총매물 <span class="num">3</span></th><th></th></tr>
+          <tr><td><span class="thumb"></span></td><td>아디다스 삼바 OG<br><span style="color:var(--dim)">B75806</span></td><td>무신사 37,300원<br><span style="color:var(--dim)">쿠폰·카드할인 적용가</span></td><td>48,000원</td><td class="pos">+17.2%</td><td>3,000</td><td>9,000</td><td>770</td><td><span class="btn pri">시세 상세</span></td></tr>
+          <tr><td><span class="thumb"></span></td><td>나이키 에어포스1 로우<br><span style="color:var(--dim)">CW2288-111</span></td><td>공급사 106,000원</td><td>119,000원</td><td class="pos">+7.4%</td><td>3,000</td><td>9,000</td><td>1,240</td><td><span class="btn">시세 상세</span></td></tr>
+          <tr><td><span class="thumb"></span></td><td>아디다스 저지 (라지)<br><span style="color:var(--dim)">IW3427</span></td><td>무신사 37,300원</td><td>모달 확인</td><td class="pos">+21.4%</td><td>100</td><td>300</td><td>3,000</td><td><span class="btn">시세 상세</span></td></tr>
+          <tr><td><span class="thumb"></span></td><td>살로몬 XT-6<br><span style="color:var(--dim)">L41086</span></td><td>29CM 152,000원</td><td>145,000원</td><td class="neg">-8.1%</td><td>420</td><td>1,100</td><td>5,800</td><td><span class="btn">시세 상세</span></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="callouts">
+    <b>핵심 포인트</b><br>
+    <span class="num">1</span> 매입가는 "최대 할인 적용가" 기준 — 쿠폰/카드사 할인을 계정 조건에 따라 사용자가 보정 입력할 수 있어야 함 (영상: "결제 수단 할인이랑 아이디에 따라 할인이 달라질 수 있으니까").<br>
+    <span class="num">2</span> 마진율 = (크림 정산가 − 매입가) / 매입가. 크림 수수료 이벤트 자동 판독이 이 화면의 신뢰도를 결정.<br>
+    <span class="num">3</span> <b>총매물(뒷물량)이 이 제품의 최대 차별점.</b> "3,000개 매물 ÷ 월판매 330개 = 소진까지 10개월" 같은 판단을 표에서 즉시 하게 만든다.
+  </div>
+</section>
+
+<!-- ══════════ 2. 시세 상세 ══════════ -->
+<section id="s2">
+  <h2>2. 시세 상세 — 가격 그래프 · 4가지 마진 시나리오 · 입찰 대기열</h2>
+  <p class="desc">행에서 [시세 상세]를 누르면 열리는 패널(모달 또는 우측 슬라이드). 소싱 의사결정에 필요한 모든 숫자가 한 화면에.</p>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">시세 상세 — 아디다스 삼바 OG (B75806) · 사이즈 265</span></div>
+    <div style="padding:16px;font-size:12px">
+      <div class="kpis">
+        <div class="kpi"><div class="v">48,000원</div><div class="k">크림 즉시판매가</div></div>
+        <div class="kpi"><div class="v">3,000개</div><div class="k">크림 총매물 (전 사이즈)</div></div>
+        <div class="kpi"><div class="v">100 / 300</div><div class="k">월판매 KR / CN</div></div>
+        <div class="kpi"><div class="v">42,000원</div><div class="k">역대 최저 체결가 <span class="num">4</span></div></div>
+      </div>
+      <div class="grid2">
+        <div class="panel">
+          <h4>체결가 그래프 (1M / 3M / 6M / 1Y) <span class="num">5</span></h4>
+          <div class="graph">
+            <svg viewBox="0 0 300 100" preserveAspectRatio="none"><polyline points="0,55 30,50 60,62 90,44 120,48 150,38 180,52 210,42 240,35 270,40 300,30" fill="none" stroke="#3b6ef6" stroke-width="2"/><line x1="0" y1="78" x2="300" y2="78" stroke="#e05c5c" stroke-dasharray="4 3"/></svg>
+            <span class="glabel" style="left:8px;bottom:6px">— 최저가 42,000 (본전 방어선)</span>
+          </div>
+          <h4 style="margin-top:12px">사이즈별 시세/매물</h4>
+          <table>
+            <tr><th>사이즈</th><th>즉시판매가</th><th>매물</th><th>월판매</th></tr>
+            <tr><td>260</td><td>47,000</td><td>210</td><td>18</td></tr>
+            <tr><td>265</td><td>48,000</td><td>180</td><td>22</td></tr>
+            <tr><td>270</td><td>49,000</td><td>150</td><td>31</td></tr>
+          </table>
+        </div>
+        <div class="panel">
+          <h4>마진 계산기 <span class="num">6</span></h4>
+          <div class="row" style="margin-bottom:8px">내 매입가 <span class="search" style="flex:0 0 110px;min-width:0">37,300</span> 원 <span class="btn pri">계산</span></div>
+          <table>
+            <tr><th>시나리오</th><th>정산가</th><th>마진</th><th>마진율</th></tr>
+            <tr><td>크림 일반판매 <span style="color:var(--dim)">(수수료 이벤트 자동판독)</span></td><td>45,300</td><td class="pos">+8,000</td><td class="pos">21.4%</td></tr>
+            <tr><td>+ 부가세 환급 반영</td><td>—</td><td class="pos">+11,690</td><td class="pos">31.3%</td></tr>
+            <tr><td>포이즌(중국) 판매</td><td>52,100</td><td class="pos">+14,800</td><td class="pos">39.7%</td></tr>
+            <tr><td>보세창고 → 중국 직판</td><td>—</td><td class="pos">+28%</td><td class="pos">28%</td></tr>
+          </table>
+          <h4 style="margin-top:12px">입찰 대기열 조회 <span class="num">7</span></h4>
+          <div class="row">내 희망 판매가 <span class="search" style="flex:0 0 110px;min-width:0">55,000</span> 원 → <b>내 앞에 걸린 판매입찰 12건</b> <span style="color:var(--dim)">(51,000~55,000원 구간)</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="callouts">
+    <b>핵심 포인트</b><br>
+    <span class="num">4</span> 역대 최저가 = "여기 밑으로만 안 사면 본전" 방어선. 그래프에 빨간 점선으로 상시 표시.<br>
+    <span class="num">5</span> 시세가 바닥 구간인지/고점인지 보여서 "물리는 매입"을 방지 — 영상에서 강조한 안 잃는 소싱의 핵심.<br>
+    <span class="num">6</span> 시나리오 4종(일반/부가세환급/포이즌/보세)을 항상 병렬 표시. 수수료 이벤트(예: 에어포스 수수료 인하) 자동 감지.<br>
+    <span class="num">7</span> 보관판매 순번 추정: "내 가격 앞에 몇 명이 대기 중인가"를 노출 — 사용자들이 가장 궁금해하던 기능.
+  </div>
+</section>
+
+<!-- ══════════ 3. 도매 분석 ══════════ -->
+<section id="s3">
+  <h2>3. 도매 리스트 AI 분석</h2>
+  <p class="desc">영상 08:40. 도매업자가 카톡으로 뿌리는 오퍼 리스트를 <b>캡처 → Ctrl+V → 분석하기</b>. AI(비전 모델)가 품번·가격·사이즈별 수량을 추출하고, 각 행을 시세 DB와 자동 매칭해 "이 리스트에서 뭘 사야 하는지"를 바로 보여준다.</p>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">app.○○○.kr / sourcing / wholesale</span></div>
+    <div style="padding:16px;font-size:12px">
+      <div class="paste">📋 도매 리스트 스크린샷을 여기에 붙여넣기 (Ctrl+V)<br><span style="font-size:10.5px">이미지 여러 장 가능 · 카톡 캡처 그대로 OK</span><div><span class="btn pri big">분석하기</span> <span style="font-size:10.5px;color:var(--dim)">오늘 남은 무료 분석 4/5회 <span class="num">8</span></span></div></div>
+      <table>
+        <tr><th>품번 <span class="num">9</span></th><th>상품명 (자동 매칭)</th><th>도매가</th><th>수량 (사이즈별)</th><th>크림 시세</th><th>마진율</th><th>월판매</th><th>예상 소진 <span class="num">10</span></th></tr>
+        <tr><td>IE0906</td><td>삼바 OG 클라우드화이트</td><td>68,000</td><td>770 (250~280 고른 분포)</td><td>82,000</td><td class="pos">+9.8%</td><td>3,000</td><td class="pos">≤ 1개월</td></tr>
+        <tr><td>CW2288</td><td>에어포스1 로우</td><td>106,000</td><td>500</td><td>119,000</td><td class="pos">+7.1%</td><td>3,000</td><td class="pos">≤ 2주</td></tr>
+        <tr><td>HQ8708</td><td>가젤 볼드 핑크</td><td>91,000</td><td>320</td><td>89,000</td><td class="neg">-6.2%</td><td>240</td><td class="neg">14개월 ⚠</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="callouts">
+    <b>핵심 포인트</b><br>
+    <span class="num">8</span> AI 비용이 드는 유일한 기능 → 무료 티어에 횟수 제한(영상 기준 5~10회). 과금 설계의 앵커.<br>
+    <span class="num">9</span> 추출 실패/오인식 대비: 셀 클릭으로 수동 수정 가능해야 함.<br>
+    <span class="num">10</span> 예상 소진 = 수량 ÷ 월판매량. "3,000개 팔리는데 770개면 한 달 안에 소진" 판단을 자동화.
+  </div>
+</section>
+
+<!-- ══════════ 4. 구매내역 ══════════ -->
+<section id="s4">
+  <h2>4. 구매내역 관리 — 멀티계정 장부 자동화</h2>
+  <p class="desc">영상 11:01. 무신사·29CM·이랜드·롯데온·SSF 등 구매처와 크림·포이즌·솔드아웃 판매처 계정을 <b>무제한 연동</b>. 수기 장부(엑셀)를 대체하고, 구매 건을 골라 입고 관리로 넘긴다.</p>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">app.○○○.kr / ledger / purchases</span></div>
+    <div style="padding:16px;font-size:12px">
+      <div class="row" style="margin-bottom:10px">
+        <span class="chip on">전체 계정</span><span class="chip">무신사 ×12 <span class="num">11</span></span><span class="chip">29CM ×3</span><span class="chip">롯데온 ×2</span><span class="chip">SSF ×1</span><span class="btn">+ 계정 연동</span>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="v">musinsa_a01</div><div class="k">플래티넘 · 다이아까지 60만원 <span class="num">12</span> · 마일리지 34,200</div></div>
+        <div class="kpi"><div class="v">musinsa_a02</div><div class="k">골드 · 플래티넘까지 128만원 · 마일리지 8,100</div></div>
+        <div class="kpi"><div class="v">29cm_main</div><div class="k">VIP · 마일리지 12,500</div></div>
+        <div class="kpi"><div class="v">+ 15개 계정</div><div class="k">전체 보기</div></div>
+      </div>
+      <table>
+        <tr><th>☑</th><th>주문일</th><th>구매처 / 계정</th><th>상품</th><th>옵션·수량</th><th>결제금액</th><th>배송지 <span class="num">13</span></th><th>상태</th></tr>
+        <tr><td>☑</td><td>07-02</td><td>무신사 / a01</td><td>아디다스 저지 IW3427</td><td>L × 2</td><td>74,600</td><td>본사 창고</td><td><span class="tag t-blue">배송중</span></td></tr>
+        <tr><td>☑</td><td>07-02</td><td>무신사 / a03</td><td>폴로 랄프로렌 셔츠</td><td>M × 1</td><td>89,000</td><td>3PL 창고</td><td><span class="tag t-blue">배송중</span></td></tr>
+        <tr><td>☐</td><td>07-01</td><td>29CM / main</td><td>스투시 로고 티</td><td>XL × 1</td><td>52,000</td><td>자택 (개인용)</td><td><span class="tag t-green">배송완료</span></td></tr>
+      </table>
+      <div style="margin-top:10px"><span class="btn pri">선택 2건 → 입고 관리에 추가 <span class="num">14</span></span></div>
+    </div>
+  </div>
+  <div class="callouts">
+    <b>핵심 포인트</b><br>
+    <span class="num">11</span> 계정 수 무제한이 스펙 — 셀러들은 쿠폰/등급 분산을 위해 플랫폼당 10~20개 계정 운영.<br>
+    <span class="num">12</span> 계정 등급·마일리지·다음 등급까지 남은 금액을 보여줘 "어느 계정으로 살지" 결정 지원 (다마고치처럼 계정 키우기).<br>
+    <span class="num">13</span> 배송지 표시 필수 — 창고 2곳/자택/지인 집 등이 섞이며, 개인용 구매는 장부에서 제외 가능해야 함.<br>
+    <span class="num">14</span> 구매내역 → 입고관리로 넘기는 이 버튼이 두 모듈을 잇는 다리.
+  </div>
+</section>
+
+<!-- ══════════ 5. 입고 관리 PC ══════════ -->
+<section id="s5">
+  <h2>5. 입고 관리 (PC) — 도착예정부터 검수완료까지</h2>
+  <p class="desc">영상 12:53. "1,000개 사면 몇 개는 안 오고, 몇 주 뒤에야 안다"를 해결. 상태 파이프라인으로 누락(빵꾸)·도난·오배송을 즉시 탐지. 대표·직원·3PL 창고관리자가 단계를 나눠 작업.</p>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">app.○○○.kr / ledger / inbound</span></div>
+    <div style="padding:16px;font-size:12px">
+      <div class="pipe">
+        <div class="stage hl"><div class="n">64</div>도착 예정 <span class="num">15</span></div>
+        <div class="stage"><div class="n">12</div>도착 처리됨</div>
+        <div class="stage"><div class="n">8</div>검수 대기</div>
+        <div class="stage"><div class="n">231</div>입고 완료</div>
+        <div class="stage" style="border-color:var(--warn)"><div class="n" style="color:var(--warn)">2</div>이슈 (누락·오배송) <span class="num">16</span></div>
+      </div>
+      <table>
+        <tr><th>운송장번호</th><th>택배사</th><th>구매처/계정</th><th>내용물 (주문 매핑)</th><th>예정일</th><th>상태</th><th>처리자 <span class="num">17</span></th></tr>
+        <tr><td>6889-4512-3301</td><td>CJ</td><td>무신사/a01</td><td>저지 IW3427 L×2</td><td>07-04</td><td><span class="tag t-gray">도착예정</span></td><td>—</td></tr>
+        <tr><td>6889-4512-3302</td><td>CJ</td><td>무신사/a03</td><td>폴로 셔츠 M×1</td><td>07-04</td><td><span class="tag t-blue">도착</span></td><td>김직원 09:12</td></tr>
+        <tr><td>5210-8890-1145</td><td>한진</td><td>29CM/main</td><td>스투시 티 XL×1</td><td>07-03</td><td><span class="tag t-green">검수완료</span></td><td>김직원 09:31</td></tr>
+        <tr><td>5210-8890-0921</td><td>한진</td><td>무신사/a05</td><td>삼바 265×1</td><td>07-01</td><td><span class="tag t-red">오배송 (타상품 도착)</span></td><td>박알바 08:55</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="callouts">
+    <b>핵심 포인트</b><br>
+    <span class="num">15</span> 구매내역에서 넘어온 건이 자동으로 "도착 예정" 큐에 쌓임. 예정일 지나도 미도착이면 경고.<br>
+    <span class="num">16</span> 이슈 큐가 돈을 지킨다 — 크림 페널티·보관료 0원 운영의 근거 기능.<br>
+    <span class="num">17</span> 누가 언제 스캔/검수했는지 기록 → 직원과 함께 쓰는 기업형 운영의 필수 감사로그.
+  </div>
+</section>
+
+<!-- ══════════ 6. 모바일 ══════════ -->
+<section id="s6">
+  <h2>6. 모바일 — 송장 바코드 스캔 (도착 처리 → 검수)</h2>
+  <p class="desc">같은 웹앱의 모바일 뷰. 문 앞에서 <b>①송장 스캔=도착 처리</b>, 사무실에서 <b>②재스캔=주문 매핑 표시 → 내용물 검수</b>. 2단계 분리가 직원 위임의 핵심.</p>
+  <div class="phones">
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="ptab"><div class="on">장부</div><div>소싱</div><div>매크로</div></div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:6px">📦 송장 스캔 — 도착 처리</div>
+      <div class="cam">카메라 프리뷰<div class="scanline"></div></div>
+      <div class="prow">✅ 6889-4512-3302 (CJ) → <b>도착 처리 완료</b><br><span style="color:var(--dim)">무신사/a03 · 폴로 셔츠 M×1</span></div>
+      <div class="prow">✅ 6889-4512-3305 (CJ) → <b>도착 처리 완료</b></div>
+      <div style="text-align:center;margin-top:8px"><span class="btn big pri">연속 스캔 모드 <span class="num">18</span></span></div>
+    </div>
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="ptab"><div class="on">장부</div><div>소싱</div><div>매크로</div></div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:6px">🔍 검수 — 송장에 매핑된 주문 <span class="num">19</span></div>
+      <div class="prow" style="background:#fff">
+        <b>6889-4512-3302</b> · 무신사/a03<br>
+        폴로 랄프로렌 옥스포드 셔츠 · <b>M × 1</b>
+        <div class="seg"><div class="on">정상</div><div>수량 부족</div><div>오배송</div><div>불량</div></div>
+      </div>
+      <div class="prow" style="background:#fff">
+        아디다스 저지 IW3427 · <b>L × 2</b>
+        <div class="seg"><div>정상</div><div>수량 부족</div><div class="on" style="background:var(--warn)">오배송</div><div>불량</div></div>
+      </div>
+      <div style="text-align:center;margin-top:8px"><span class="btn big pri">저장 → 입고 완료</span></div>
+    </div>
+  </div>
+  <div class="callouts" style="margin-top:14px">
+    <b>핵심 포인트</b><br>
+    <span class="num">18</span> 택배 더미 앞에서 연속 스캔 → 진동/사운드 피드백. 오프라인 대비 스캔 큐 로컬 저장 후 동기화.<br>
+    <span class="num">19</span> 같은 송장을 다시 스캔하면 "이 박스에 뭐가 들어있어야 하는지"가 떠서, 뜯으면서 사이즈·컬러·수량 대조. 결과는 PC 파이프라인에 실시간 반영.
+  </div>
+</section>
+
+<!-- ══════════ 7. 발송 관리 ══════════ -->
+<section id="s7">
+  <h2>7. 발송 관리 — 크림/솔드아웃 주문 일괄 발송</h2>
+  <p class="desc">영상 후반 "추가 기능". 여러 계정(개인·입점사업자·솔드아웃)의 판매 주문을 한 번에 당겨와 같은 상품끼리 묶고, 송장번호를 일괄 등록. 모바일에선 편의점 택배 송장을 스캔으로 입력 → 수기 오타 페널티 제거.</p>
+  <div class="frame">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">app.○○○.kr / ledger / outbound</span></div>
+    <div style="padding:16px;font-size:12px">
+      <div class="row" style="margin-bottom:8px"><span class="chip on">크림 개인 ×2</span><span class="chip on">크림 입점 ×1</span><span class="chip on">솔드아웃 ×1</span><span class="btn pri">주문 조회 <span class="num">20</span></span></div>
+      <table>
+        <tr><th>☑</th><th>플랫폼/계정</th><th>상품 (동일상품 그룹핑) <span class="num">21</span></th><th>사이즈</th><th>판매가</th><th>발송기한</th><th>송장번호</th></tr>
+        <tr><td>☑</td><td>크림/kr_a01</td><td rowspan="2" style="background:#f2f6ff">삼바 OG B75806 ×2건</td><td>265</td><td>82,000</td><td>07-05 ⚠</td><td rowspan="2"><span class="btn">스캔/입력</span></td></tr>
+        <tr><td>☑</td><td>크림/kr_a02</td><td>270</td><td>83,000</td><td>07-06</td></tr>
+        <tr><td>☐</td><td>솔드아웃/so_01</td><td>에어포스1 CW2288</td><td>260</td><td>118,000</td><td>07-07</td><td><span class="btn">스캔/입력</span></td></tr>
+      </table>
+      <div style="margin-top:10px"><span class="btn pri big">선택 2건 일괄 발송 처리 <span class="num">22</span></span></div>
+    </div>
+  </div>
+  <div class="callouts">
+    <b>핵심 포인트</b><br>
+    <span class="num">20</span> 다계정 주문을 한 테이블로 통합 — "계정별로 로그인해서 확인"하는 반복 제거.<br>
+    <span class="num">21</span> 같은 상품끼리 묶어 픽킹/포장 동선 최적화.<br>
+    <span class="num">22</span> 송장번호 등록을 각 플랫폼 판매자센터에 반영. 수기 입력은 "20개 중 1개 무조건 오타" → 스캔 입력이 페널티를 없앤다.
+  </div>
+</section>
+
+<!-- ══════════ 8. IA ══════════ -->
+<section id="s8">
+  <h2>8. 정보 구조 (IA) & 핵심 사용자 흐름</h2>
+  <div class="flow">
+    <b>메뉴 트리</b><br><br>
+    <code>소싱</code> ── 시세 비교 (메인) · 도매 분석(AI)<br>
+    <code>장부</code> ── 구매내역 · 입고 관리 · 발송 관리<br>
+    <code>설정</code> ── 계정 연동(구매처/판매처) · 멤버/권한(대표·직원·창고) · 요금제<br><br>
+    <b>핵심 흐름 A — 소싱:</b> 시세 비교/도매 분석 <span class="arrow">→</span> 마진·물량 확인 <span class="arrow">→</span> (외부에서 구매) <span class="arrow">→</span> 구매내역 자동 수집<br>
+    <b>핵심 흐름 B — 입고:</b> 구매내역 <span class="arrow">→</span> 입고관리 추가 <span class="arrow">→</span> 📱도착 스캔 <span class="arrow">→</span> 📱검수 <span class="arrow">→</span> 입고 완료 / 이슈<br>
+    <b>핵심 흐름 C — 판매:</b> 판매주문 통합 조회 <span class="arrow">→</span> 동일상품 그룹핑 <span class="arrow">→</span> 송장 스캔 <span class="arrow">→</span> 일괄 발송
+  </div>
+</section>
