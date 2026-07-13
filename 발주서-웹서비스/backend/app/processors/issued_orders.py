@@ -22,8 +22,16 @@ def normalize_order_id(value) -> str:
     return str(value).strip()
 
 
-def filter_delivery_by_issued(delivery_bytes: bytes, exclude_order_ids: set[str]) -> tuple[bytes, int]:
-    """DeliveryList에서 이미 발주된 주문번호(C열) 행을 제거한 bytes와 제거 건수를 반환."""
+def filter_delivery_by_issued(
+    delivery_bytes: bytes,
+    exclude_order_ids: set[str],
+    skipped_names: list[str] | None = None,
+) -> tuple[bytes, int]:
+    """DeliveryList에서 이미 발주된 주문번호(C열) 행을 제거한 bytes와 제거 건수를 반환.
+
+    skipped_names를 넘기면 제거된 행의 수취인 이름(AA열)을 담아준다 —
+    무엇이 왜 빠졌는지 사용자에게 보여 침묵 제외를 방지.
+    """
     if not exclude_order_ids:
         return delivery_bytes, 0
     wb = load_workbook(filename=BytesIO(delivery_bytes))
@@ -33,6 +41,9 @@ def filter_delivery_by_issued(delivery_bytes: bytes, exclude_order_ids: set[str]
         order_id = normalize_order_id(ws.cell(row=row_idx, column=3).value)  # C열 = 주문번호
         if order_id and order_id in exclude_order_ids:
             to_delete.append(row_idx)
+            if skipped_names is not None:
+                name = str(ws.cell(row=row_idx, column=27).value or "").strip()  # AA열 = 수취인이름
+                skipped_names.append(name or order_id)
     if not to_delete:
         return delivery_bytes, 0
     for row_idx in reversed(to_delete):
@@ -43,14 +54,21 @@ def filter_delivery_by_issued(delivery_bytes: bytes, exclude_order_ids: set[str]
     return output.read(), len(to_delete)
 
 
-def filter_entries_by_issued(entries: list[dict], exclude_order_ids: set[str]) -> tuple[list[dict], int]:
+def filter_entries_by_issued(
+    entries: list[dict],
+    exclude_order_ids: set[str],
+    skipped_names: list[str] | None = None,
+) -> tuple[list[dict], int]:
     """토스/올웨이즈/테무 entry 목록에서 이미 발주된 order_id를 제거."""
     if not exclude_order_ids or not entries:
         return entries, 0
-    kept = [
-        entry for entry in entries
-        if normalize_order_id(entry.get("order_id")) not in exclude_order_ids
-    ]
+    kept = []
+    for entry in entries:
+        if normalize_order_id(entry.get("order_id")) in exclude_order_ids:
+            if skipped_names is not None:
+                skipped_names.append(str(entry.get("name") or entry.get("order_id") or "").strip())
+            continue
+        kept.append(entry)
     return kept, len(entries) - len(kept)
 
 

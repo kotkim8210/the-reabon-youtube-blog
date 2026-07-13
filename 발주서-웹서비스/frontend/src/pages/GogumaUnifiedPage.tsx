@@ -59,6 +59,7 @@ function formatProcessStats(stats: Record<string, unknown>): string[] {
     toss: '토스',
     temu: '테무',
     duplicate_skipped: '이전 발주분 제외',
+    duplicate_skipped_names: '제외된 주문(받는분)',
     period: '선택 기간',
     product: '상품',
   };
