@@ -59,6 +59,14 @@ def _semantic_option_keys(*values: object) -> set[str]:
         keys.update(f"corn:{grade}:{count}개" for count in counts)
     if "밤호박" in text:
         keys.update(f"bamhobak:{weight}kg" for weight in weights)
+    if "홍감자" in text:
+        # 홍감자는 발주 매핑(중1→중2, 대3→특3, 대5→특5)으로 orderlist(발주명)와
+        # DeliveryList(쿠팡 원본 옵션)의 등급·kg가 달라진다 → 양쪽 모두 발주명으로
+        # 정규화한 키를 쓰면 중량 업 케이스까지 정확히 묶인다.
+        from app.processors.kolrabi_order import convert_potato_option
+        converted = convert_potato_option(text, "")
+        if converted:
+            keys.add("potato:" + converted.replace(" ", ""))
     return keys
 
 

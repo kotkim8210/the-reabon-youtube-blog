@@ -452,8 +452,9 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
 # 일시중지(숨김) 모니터. 여기 추가하면 스냅샷/알림에서 'paused'로 빠져 오류 안 뜸.
 #  - watermelon-jbt·chamoe-jbt: 발주처 제이비티→쥬얼리 이전으로 무용
 #  - apple-corn-jewelryfruit: 2026-07 애플초당옥수수 품절(구글시트에서 VIP 공급가 빠짐). 시즌 재개 시 제거.
+#  - potato-jewelry: 2026-07-13 쥬얼리 홍감자 품절 → 발주 제주다팜 이관(마진 시트는 쥬얼리 기준이라 무용).
 # ※ 품절/시즌아웃 상품은 여기 추가 + 프론트 SUPPLIER_MONITOR_KEYS에서 제거로 마진방어에서 자동 숨김.
-PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt", "apple-corn-jewelryfruit"}
+PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt", "apple-corn-jewelryfruit", "potato-jewelry"}
 
 MONITOR_CONFIGS["dureup-jbt"] = replace(
     MONITOR_CONFIGS["dureup-jbt"],

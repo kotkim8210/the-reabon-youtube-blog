@@ -70,41 +70,7 @@ def _blackmango_label(product_name: object, option_text: object) -> str:
     return f"블랙망고수박 {kg}kg"
 
 
-# 햇 홍감자(카스테라 감자) — 2026 여름 쥬얼리프룻 발주.
-# 등급은 옵션 괄호 안 표기(소/중/대/특/특대/왕특). 쿠팡 표기 '특대'는 쥬얼리 시트 '특'에 매핑.
-# 긴 등급(왕특/특대)을 먼저 검사해야 '특대'가 '대'로 오인되지 않는다.
-_POTATO_GRADES = ("왕특", "특대", "특", "대", "중", "소")
-_POTATO_GRADE_MAP = {"특대": "특", "대": "특"}  # 쿠팡 고객표기 → 쥬얼리 소싱시트 등급
-
-
-def is_jewelry_potato_order(product_name: object, option_text: object) -> bool:
-    text = _combined_text(product_name, option_text).replace(" ", "")
-    return "홍감자" in text
-
-
-def _jewelry_potato_option(product_name: object, option_text: object) -> str | None:
-    """햇 홍감자 → '햇 홍감자 {등급} {kg}kg' (쥬얼리프룻 발주명).
-
-    등급은 옵션(L) 괄호 표기에서 우선 추출, kg는 상품명(K)+옵션 종합으로 추출.
-    """
-    if not is_jewelry_potato_order(product_name, option_text):
-        return None
-    # 등급: 옵션을 우선으로(괄호 안 '(대)', '(특대: ...)'), 없으면 상품명까지 본다.
-    grade = ""
-    for source in (normalize(option_text), _combined_text(product_name, option_text)):
-        for g in _POTATO_GRADES:
-            if g in source:
-                grade = _POTATO_GRADE_MAP.get(g, g)
-                break
-        if grade:
-            break
-    kg = _extract_kg(option_text) or _extract_kg(product_name)
-    parts = ["햇 홍감자"]
-    if grade:
-        parts.append(grade)
-    if kg:
-        parts.append(f"{kg}kg")
-    return " ".join(parts)
+# (홍감자는 2026-07 쥬얼리프룻 품절 → 제주다팜(kolrabi_order) 발주로 이관 — 관련 함수 제거)
 
 
 # 제주 미니밤호박(보우짱) — 2026-06부터 3·5·10kg은 제주다팜→쥬얼리프룻 발주 전환(공급가 인하).
@@ -413,9 +379,6 @@ def jewelry_passthrough_product(
         # 옵션(L)이 '수박 가정용 N~Nkg'로 잘못 적혀도 일반수박으로 둔갑하지 않는다.
         return _blackmango_label(product_name, option_text)
 
-    if "홍감자" in text.replace(" ", ""):
-        # 햇 홍감자 → '햇 홍감자 {등급} {kg}kg'
-        return _jewelry_potato_option(product_name, option_text)
 
     return jewelry_external_product(product_name, option_text, watermelon_kgs)
 
@@ -500,10 +463,6 @@ def convert_option(option_text: str, product_name: str = "") -> str | None:
     if peach:
         return peach
 
-    potato = _jewelry_potato_option(product_name, option_text)
-    if potato:
-        return potato
-
     bamhobak = _jewelry_bamhobak_option(product_name, option_text)
     if bamhobak:
         return bamhobak
@@ -552,7 +511,6 @@ def process(
     has_geobando = False
     has_daegeukcheon = False
     has_baekdo = False
-    has_potato = False
     has_bamhobak = False
     for row in dl_ws.iter_rows(min_row=2):
         k_val = normalize(row[10].value) if len(row) > 10 else ""
@@ -594,10 +552,6 @@ def process(
             # 신비복숭아 1·2kg → 쥬얼리프룻 (3·4kg은 제이비티)
             filtered_rows.append(row)
             has_peach = True
-        elif is_jewelry_potato_order(k_val, option):
-            # 햇 홍감자 → 쥬얼리프룻 발주
-            filtered_rows.append(row)
-            has_potato = True
         elif is_jewelry_bamhobak_order(k_val, option):
             # 미니밤호박 3·5·10kg → 쥬얼리프룻 발주 (1kg은 제주다팜)
             filtered_rows.append(row)
@@ -760,8 +714,6 @@ def process(
         product_parts.append("대극천복숭아")
     if has_baekdo:
         product_parts.append("백도딱딱이복숭아")
-    if has_potato:
-        product_parts.append("홍감자")
     if has_bamhobak:
         product_parts.append("미니밤호박")
     product_label = "_".join(product_parts)

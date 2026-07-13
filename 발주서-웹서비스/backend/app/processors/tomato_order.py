@@ -318,8 +318,9 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
     entries: list[dict] = []
     for item in orders:
         text = _toss_item_text(item)
-        # 수박(망고수박 포함)·성주참외·신비복숭아·홍감자 토스 주문
-        if not any(k in text for k in ("수박", "참외", "복숭아", "감자")):
+        # 수박(망고수박 포함)·성주참외·신비복숭아 토스 주문
+        # (홍감자는 2026-07 쥬얼리 품절 → 제주다팜 수집 collect_toss_jejudapam_orders로 이관)
+        if not any(k in text for k in ("수박", "참외", "복숭아")):
             continue
         order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
         if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
@@ -343,7 +344,7 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
         # (블랙망고수박이 '수박'만 잡혀 일반수박으로 둔갑하는 실수 차단 — 무게는 그대로 추출됨)
         _compact_all = text.replace(" ", "")
         _compact_name = product_name.replace(" ", "")
-        for _kw in ("블랙망고수박", "망고수박", "홍감자", "대극천", "거반도", "납작복숭아"):
+        for _kw in ("블랙망고수박", "망고수박", "대극천", "거반도", "납작복숭아"):
             if _kw in _compact_all and _kw not in _compact_name:
                 product_name = f"{_kw} {product_name}"
                 break
@@ -440,23 +441,30 @@ async def collect_toss_bamhobak_orders(from_date: str, to_date: str) -> list[dic
 
 
 async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
-    """토스 API에서 제주다팜 발주 대상(콜라비 + 미니밤호박 1kg) 주문을 수집.
+    """토스 API에서 제주다팜 발주 대상(콜라비 + 미니밤호박 1kg + 홍감자) 주문을 수집.
 
-    반환: {"colrabi": [...], "bamhobak": [...]} — 각 entry에 'product'(제주다팜 발주 품목명) 포함.
-    콜라비는 3/5/10kg('콜라비 정품 {kg}kg'), 미니밤호박은 1kg만(3·5·10kg은 쥬얼리).
+    반환: {"colrabi": [...], "bamhobak": [...], "potato": [...]} — 각 entry에
+    'product'(제주다팜 발주 품목명) 포함.
+    콜라비는 3/5/10kg('콜라비 정품 {kg}kg'), 미니밤호박은 1kg만(3·5·10kg은 쥬얼리),
+    홍감자는 2026-07 쥬얼리 품절로 제주다팜 이관(중1→중2, 대3→특3, 대5→특5).
     배송중·송장입력 건은 자동 제외.
     """
     from app.toss.client import toss_client
-    from app.processors.kolrabi_order import convert_quantity, convert_bamhobak_option
+    from app.processors.kolrabi_order import (
+        convert_bamhobak_option,
+        convert_potato_option,
+        convert_quantity,
+    )
 
     orders = await toss_client.get_orders(start_date=from_date, end_date=to_date, status=None)
 
     colrabi: list[dict] = []
     bamhobak: list[dict] = []
+    potato: list[dict] = []
     for item in orders:
         text = _toss_item_text(item)
         compact = text.replace(" ", "")
-        if "콜라비" not in compact and "밤호박" not in compact:
+        if "콜라비" not in compact and "밤호박" not in compact and "홍감자" not in compact:
             continue
         order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
         if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
@@ -498,8 +506,12 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
             product = convert_bamhobak_option(product_name, option)  # 1kg만
             if product:
                 bamhobak.append(_entry(product, "toss-bamhobak"))
+        elif "홍감자" in compact:
+            product = convert_potato_option(product_name, option)  # 중1→중2, 대3→특3, 대5→특5
+            if product:
+                potato.append(_entry(product, "toss-potato"))
 
-    return {"colrabi": colrabi, "bamhobak": bamhobak}
+    return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato}
 
 
 def parse_alwayz_jbt_rows(alwayz_bytes: bytes) -> tuple[list, dict]:

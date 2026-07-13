@@ -86,6 +86,45 @@ def convert_bamhobak_option(product_name: object, option_text: object) -> str | 
     return f"제주 미니밤호박 보우짱 로얄과 {match.group(1)}kg"
 
 
+# 햇 홍감자 — 2026-07 쥬얼리프룻 품절로 제주다팜 발주 이관.
+# 쿠팡 옵션 '1박스 {kg}kg({등급})' → 제주다팜 발주명 '홍감자 {등급} {kg}kg'.
+# 사용자 확정 매칭(2026-07-13): 중 1kg→중 2kg(중량 업), 대 3kg→특 3kg, 대 5kg→특 5kg.
+# 매핑에 없는 조합(중 3kg 등)은 등급·kg 그대로 출력.
+_POTATO_GRADES = ("왕특", "특대", "특", "대", "중", "소")  # 긴 등급 먼저('특대'가 '대' 오인 방지)
+_POTATO_JEJU_MAP = {
+    ("중", "1"): ("중", "2"),
+    ("대", "3"): ("특", "3"),
+    ("대", "5"): ("특", "5"),
+}
+
+
+def is_jeju_potato_order(product_name: object, option_text: object) -> bool:
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    return "홍감자" in text
+
+
+def convert_potato_option(product_name: object, option_text: object) -> str | None:
+    """홍감자 DeliveryList → 제주다팜 발주 품목 '홍감자 {등급} {kg}kg'."""
+    if not is_jeju_potato_order(product_name, option_text):
+        return None
+    text = _combined_text(product_name, option_text)
+    option = normalize(option_text)
+    grade = ""
+    for source in (option, text):
+        for g in _POTATO_GRADES:
+            if g in source:
+                grade = g
+                break
+        if grade:
+            break
+    kg_match = re.search(r"(\d+)\s*kg", option, re.IGNORECASE) or re.search(r"(\d+)\s*kg", text, re.IGNORECASE)
+    kg = kg_match.group(1) if kg_match else ""
+    if not grade or not kg:
+        return None
+    grade, kg = _POTATO_JEJU_MAP.get((grade, kg), (grade, kg))
+    return f"홍감자 {grade} {kg}kg"
+
+
 def clear_stray_header_numbers(ws) -> None:
     for col in range(14, ws.max_column + 1):
         cell = ws.cell(row=1, column=col)
@@ -534,19 +573,182 @@ def process_bamhobak(
     return output.read(), filename, stats
 
 
+def process_potato(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """Process DeliveryList rows for 제주다팜 홍감자 발주 (2026-07 쥬얼리 품절로 이관).
+
+    쿠팡 옵션 매칭: 중 1kg→중 2kg, 대 3kg→특 3kg, 대 5kg→특 5kg (그 외 등급·kg 그대로).
+    toss_entries: 토스 API에서 수집한 홍감자 주문(선택) — product 확정 상태로 행 추가.
+    """
+    dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes), data_only=True)
+    dl_ws = dl_wb.active
+
+    filtered_rows: list[tuple] = []
+    for row in dl_ws.iter_rows(min_row=2):
+        product_name = normalize(row[10].value) if len(row) > 10 else ""
+        option = normalize(row[11].value) if len(row) > 11 else ""
+        converted = convert_potato_option(product_name, option)
+        if converted:
+            filtered_rows.append((row, converted))
+
+    if not filtered_rows and not toss_entries:
+        return None
+
+    template_path = TEMPLATE_DIR / "콜라비_제주다팜_원본.xlsx"
+    if not template_path.exists():
+        raise FileNotFoundError(
+            f"Template not found: {template_path}. "
+            f"Please place the template file in the templates directory."
+        )
+
+    tmpl_wb = load_workbook(filename=str(template_path))
+    first_sheet_name = tmpl_wb.sheetnames[0]
+    for name in tmpl_wb.sheetnames[1:]:
+        del tmpl_wb[name]
+    ws = tmpl_wb[first_sheet_name]
+    clear_stray_header_numbers(ws)
+
+    font11 = Font(size=11)
+    start_row = 2
+    for r in range(2, ws.max_row + 2):
+        if ws.cell(row=r, column=2).value is None:
+            start_row = r
+            break
+
+    option_totals: dict[str, dict] = {}
+    for i, (row, product) in enumerate(filtered_rows):
+        out_row = start_row + i
+
+        name = normalize(row[26].value) if len(row) > 26 else ""
+        phone = normalize(row[27].value) if len(row) > 27 else ""
+        zipcode = normalize(row[28].value) if len(row) > 28 else ""
+        address = normalize(row[29].value) if len(row) > 29 else ""
+        memo = normalize(row[30].value) if len(row) > 30 else ""
+        option = normalize(row[11].value) if len(row) > 11 else ""
+        qty_val = row[22].value if len(row) > 22 else ""
+        qty = normalize(qty_val)
+        order_no = normalize(row[2].value) if len(row) > 2 else ""
+
+        try:
+            qty_int = int(float(qty_val)) if qty_val not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+
+        if zipcode:
+            try:
+                zipcode = str(int(float(zipcode))).zfill(5)
+            except (ValueError, TypeError):
+                zipcode = zipcode.zfill(5)
+
+        mapping = {
+            2: name,
+            3: phone,
+            5: zipcode,
+            6: address,
+            8: product,
+            9: qty,
+            10: "식품애착",
+            11: "010-5700-7756",
+            13: memo,
+        }
+
+        for col, value in mapping.items():
+            cell = ws.cell(row=out_row, column=col, value=value)
+            cell.font = font11
+
+        bucket = option_totals.setdefault(
+            option or product,
+            {
+                "coupang_option_keyword": option or product,
+                "vendor_option_name": product,
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order_no:
+            bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
+    # 토스 홍감자 entry는 발주 품목명(product)이 확정돼 있어 DeliveryList 행 뒤에 추가.
+    base_row = start_row + len(filtered_rows)
+    for j, entry in enumerate(toss_entries or []):
+        out_row = base_row + j
+        name = normalize(entry.get("name"))
+        phone = normalize(entry.get("phone"))
+        zipcode = normalize(entry.get("zipcode"))
+        address = normalize(entry.get("address"))
+        memo = normalize(entry.get("memo"))
+        product = entry.get("product") or ""
+        try:
+            qty_int = int(float(entry.get("qty"))) if entry.get("qty") not in (None, "") else 1
+        except (ValueError, TypeError):
+            qty_int = 1
+        order_no = entry.get("order_id") or ""
+        if zipcode:
+            try:
+                zipcode = str(int(float(zipcode))).zfill(5)
+            except (ValueError, TypeError):
+                zipcode = zipcode.zfill(5)
+        mapping = {
+            2: name,
+            3: phone,
+            5: zipcode,
+            6: address,
+            8: product,
+            9: str(qty_int),
+            10: "식품애착",
+            11: "010-5700-7756",
+            13: memo,
+        }
+        for col, value in mapping.items():
+            cell = ws.cell(row=out_row, column=col, value=value)
+            cell.font = font11
+
+        bucket = option_totals.setdefault(
+            entry.get("option") or product,
+            {
+                "coupang_option_keyword": entry.get("option") or product,
+                "vendor_option_name": product,
+                "quantity": 0,
+                "orders": [],
+            },
+        )
+        bucket["quantity"] += qty_int
+        if order_no:
+            bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
+
+    output = BytesIO()
+    tmpl_wb.save(output)
+    output.seek(0)
+
+    now = datetime.now(KST)
+    filename = f"제주다팜_아이티소프트_홍감자발주({now.strftime('%Y%m%d')}).xlsx"
+    stats = {
+        "total": len(filtered_rows) + len(toss_entries or []),
+        "product": "홍감자(제주다팜)",
+        "options": list(option_totals.values()),
+    }
+    return output.read(), filename, stats
+
+
 def process_outputs(
     delivery_file_bytes: bytes,
     toss_colrabi_entries: list[dict] | None = None,
     toss_bamhobak_entries: list[dict] | None = None,
+    toss_potato_entries: list[dict] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
-    """제주다팜 발주서 목록 반환 — 콜라비 + 초당옥수수 + 미니밤호박.
+    """제주다팜 발주서 목록 반환 — 콜라비 + 미니밤호박 + 홍감자.
 
     toss_bamhobak_entries: 토스 미니밤호박 1kg 주문(선택) → 미니밤호박 발주서에 합침.
+    toss_potato_entries: 토스 홍감자 주문(선택) → 홍감자 발주서에 합침.
 
     ※ 성주참외 알뜰과(쥬얼리팜)는 2026-06부터 쥬얼리팜(myeongi) 발주로 이관 —
       DeliveryList의 알뜰과는 명이나물(쥬얼리프룻) 메뉴에서 함께 출력된다.
     ※ 초당옥수수는 2026-06부터 제이비티가 아닌 제주다팜 발주로 이관(공급가 인하).
       애플초당옥수수는 계속 쥬얼리프룻(myeongi) 발주.
+    ※ 홍감자는 2026-07 쥬얼리프룻 품절로 제주다팜 발주 이관.
     """
     results: list[tuple[bytes, str, dict]] = []
 
@@ -560,5 +762,9 @@ def process_outputs(
     bamhobak_result = process_bamhobak(delivery_file_bytes, toss_entries=toss_bamhobak_entries)
     if bamhobak_result and int((bamhobak_result[2] or {}).get("total") or 0) > 0:
         results.append(bamhobak_result)
+
+    potato_result = process_potato(delivery_file_bytes, toss_entries=toss_potato_entries)
+    if potato_result and int((potato_result[2] or {}).get("total") or 0) > 0:
+        results.append(potato_result)
 
     return results

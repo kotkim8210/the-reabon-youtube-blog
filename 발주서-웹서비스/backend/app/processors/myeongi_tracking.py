@@ -16,7 +16,6 @@ from app.processors.myeongi_order import (
     is_jewelry_daegeukcheon_order,
     is_jewelry_geobando_order,
     is_jewelry_peach_order,
-    is_jewelry_potato_order,
     is_mango_watermelon_order,
 )
 from app.processors.tracking_match import (
@@ -50,7 +49,6 @@ def is_jewelryfruit_tracking_target(product_name: str, option_text: str) -> bool
         or is_jewelry_daegeukcheon_order(product_name, option_text)  # 대극천 복숭아 (신비복숭아 아님)
         or is_jewelry_baekdo_order(product_name, option_text)    # 백도 딱딱이복숭아 (신비복숭아 아님)
         or is_jewelry_peach_order(product_name, option_text)     # 신비복숭아 1·2kg (3·4kg은 제이비티)
-        or is_jewelry_potato_order(product_name, option_text)    # 햇 홍감자 (2026 여름 쥬얼리 발주)
         or is_jewelry_bamhobak_order(product_name, option_text)  # 미니밤호박 3·5·10kg (1kg은 제주다팜)
         or is_jewelry_corn_order(product_name, option_text)      # 초당옥수수 (2026-06 제주다팜→쥬얼리 전환)
     )
