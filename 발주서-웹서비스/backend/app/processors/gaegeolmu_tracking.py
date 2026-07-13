@@ -171,7 +171,8 @@ def process(
             e_cell = dl_ws.cell(row=target_row, column=5)
             if e_cell.value is None or normalize(e_cell.value) == "":
                 dl_ws.cell(row=target_row, column=4).value = "롯데택배"
-                e_cell.value = tracking_entry["tracking"]
+                # 운송장번호는 반드시 공백·하이픈 없이 기록 (입력 경로 무관 최종 강제)
+                e_cell.value = re.sub(r"[\s\-]", "", str(tracking_entry["tracking"]))
                 used_rows.add(target_row)
                 filled += 1
             else:
