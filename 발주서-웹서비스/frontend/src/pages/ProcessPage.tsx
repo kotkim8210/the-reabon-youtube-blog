@@ -285,12 +285,18 @@ const toolConfigs: Record<string, ToolConfig> = {
   'gaegeolmu-tracking': {
     title: '게걸무씨앗기름 운송장번호 입력',
     description:
-      '게걸무 택배발송 파일(B열=운송장, C열=이름)의 운송장번호를 DeliveryList(AA열=이름, E열=운송장)에 자동 매핑합니다. 동명이인 자동 감지.',
+      '게걸무 택배발송 파일(B열=운송장, C열=이름) 또는 이름/운송장 복붙 텍스트로 DeliveryList(AA열=이름, E열=운송장)에 자동 매핑합니다. 동명이인 자동 감지.',
     icon: '🌾📦',
     files: [
-      { key: 'tracking', label: '게걸무 택배발송 파일 (B=운송장, C=이름)' },
+      { key: 'tracking', label: '게걸무 택배발송 파일 (B=운송장, C=이름) — 아래 텍스트 붙여넣기로 대체 가능', optional: true },
       { key: 'delivery', label: 'DeliveryList 파일' },
     ],
+    textArea: {
+      key: 'tracking_text',
+      label: '이름/운송장 텍스트 붙여넣기 (파일 대신 사용 가능)',
+      placeholder: '박순임\n2552 6488 3681\n김현규\n2552 6488 3692\n김덕남\n2552 6488 3703',
+      helperText: '한 줄에 이름, 다음 줄에 운송장번호(숫자 사이 공백 있어도 됨). "박순임 2552 6488 3681"처럼 한 줄로 붙여도 인식합니다.',
+    },
     color: 'amber',
     colorClasses: {
       bg: 'bg-amber-50',
@@ -368,6 +374,13 @@ function ProcessPage() {
     if (!config) return false;
     if (toolId === 'temu-order') {
       return Boolean(files.order_file);
+    }
+    if (toolId === 'gaegeolmu-tracking') {
+      // 택배발송 파일 또는 복붙 텍스트 중 하나 + DeliveryList 필수
+      return (
+        Boolean(files.delivery)
+        && (Boolean(files.tracking) || Boolean((extraValues['tracking_text'] || '').trim()))
+      );
     }
     const requiredFilesUploaded = config.files
       .filter((f) => !f.optional)

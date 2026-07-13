@@ -1672,18 +1672,26 @@ async def process_gaegeolmu_order(
 
 @app.post("/api/process/gaegeolmu-tracking")
 async def process_gaegeolmu_tracking(
-    tracking_file: UploadFile = File(...),
+    tracking_file: UploadFile = File(None),
     delivery_file: UploadFile = File(...),
+    tracking_text: str = Form(""),
     _token: dict = Depends(verify_token),
 ):
+    """게걸무 운송장 입력. 택배발송 파일 또는 이름/운송장 복붙 텍스트(둘 다 가능)."""
     try:
-        tracking_bytes = await tracking_file.read()
+        tracking_bytes = None
+        if tracking_file is not None:
+            tracking_bytes = await tracking_file.read()
+            if not tracking_bytes:
+                tracking_bytes = None
         delivery_bytes = await delivery_file.read()
         output_bytes, filename, stats = gaegeolmu_tracking.process(
-            tracking_bytes, delivery_bytes
+            tracking_bytes, delivery_bytes, tracking_text=tracking_text
         )
         logger.info(f"게걸무 운송장 입력 완료: {stats}")
         return make_excel_response(output_bytes, filename, stats)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.exception("게걸무 운송장 입력 중 오류")
         raise HTTPException(
