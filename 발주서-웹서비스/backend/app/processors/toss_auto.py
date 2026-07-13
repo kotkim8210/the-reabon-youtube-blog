@@ -34,14 +34,19 @@ TOSS_DELIVERY_COMPANY = "한진택배"
 TRACKABLE_TOSS_STATUSES = {"PAID", "PREPARING_PRODUCT", "DELIVERING"}
 
 
-def normalize_toss_courier(name: object) -> str:
+def normalize_toss_courier(name: object, default: str | None = None) -> str:
     """택배사명을 토스가 인식하는 정식명으로 정규화. (해달 파일이 '한진'처럼 약식으로 적어도)
 
     토스 deliveryCompany는 정식 택배사명을 요구한다. '한진' → '한진택배' 처럼 맞춰야 등록된다.
+    default: 값이 비었을 때 쓸 택배사. 미지정 시 고구마(해달) 기본인 한진택배.
+    발주처별 실제 발송 택배사가 다르므로 호출부가 명시해야 한다
+    (쥬얼리프룻·제주다팜=롯데택배 — 한진 기본값 탓에 수박 건이 토스에서
+    배송추적 안 되던 2026-06-15 사고 재발 방지).
     """
+    fallback = default or TOSS_DELIVERY_COMPANY
     compact = re.sub(r"\s+", "", str(name or "")).lower()
     if not compact:
-        return TOSS_DELIVERY_COMPANY
+        return fallback
     if "대한통운" in compact or compact.startswith("cj"):
         return "CJ대한통운"
     if "한진" in compact:
@@ -52,7 +57,7 @@ def normalize_toss_courier(name: object) -> str:
         return "우체국택배"
     if "로젠" in compact or "logen" in compact:
         return "로젠택배"
-    return str(name).strip() or TOSS_DELIVERY_COMPANY
+    return str(name).strip() or fallback
 
 
 def normalize(value) -> str:

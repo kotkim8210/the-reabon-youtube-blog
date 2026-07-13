@@ -26,7 +26,8 @@ from app.toss.client import toss_client
 
 logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
-TOSS_DELIVERY_COMPANY = "한진택배"
+# (구)TOSS_DELIVERY_COMPANY="한진택배" 상수는 제거 — 쥬얼리·제주다팜 품목은 롯데 발송이라
+# 토스 등록 기본값은 normalize_toss_courier(courier, default="롯데택배")로 지정한다.
 TRACKABLE_TOSS_STATUSES = {"PAID", "PREPARING_PRODUCT", "DELIVERING"}
 
 
@@ -349,12 +350,22 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
 
     success_count = 0
     fail_count = 0
+    courier_counts: dict[str, int] = {}
+    courier_warnings: list[str] = []
 
     from app.processors.toss_auto import normalize_toss_courier
 
     for order, tracking, courier in matched_pairs:
-        # 회신 택배사명을 토스 정식명으로 정규화('한진'→'한진택배' 등). 없으면 기본값.
-        delivery_company = normalize_toss_courier(courier)
+        # 회신 택배사명을 토스 정식명으로 정규화('한진'→'한진택배' 등).
+        # 이 함수의 대상(쥬얼리프룻·제주다팜 발주 품목)은 전부 롯데택배 발송이므로
+        # 회신에 택배사가 비면 기본값은 롯데택배. (과거 제이비티 시절 한진 기본값 탓에
+        # 수박 건이 한진으로 등록돼 배송완료가 추적 안 되던 2026-06-15 사고 재발 방지)
+        delivery_company = normalize_toss_courier(courier, default="롯데택배")
+        if delivery_company != "롯데택배":
+            # 쥬얼리·제주다팜 품목이 롯데가 아닌 택배사로 등록되는 건 이상 신호 → 눈에 보이게
+            courier_warnings.append(
+                f"{order.get('name_display') or order.get('name')} → {delivery_company} {tracking} (회신 택배사 '{courier}')"
+            )
         try:
             await toss_client.register_tracking(
                 order_product_id=order["order_product_id"],
@@ -362,6 +373,7 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
                 tracking_number=tracking,
             )
             success_count += 1
+            courier_counts[delivery_company] = courier_counts.get(delivery_company, 0) + 1
         except Exception as exc:
             fail_count += 1
             logger.error(
@@ -372,12 +384,17 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
                 exc,
             )
 
-    return {
+    stats = {
         "toss_orders": len(toss_orders) + skip_count,
         "toss_success": success_count,
         "toss_fail": fail_count,
         "toss_skip": skip_count,
     }
+    if courier_counts:
+        stats["toss_couriers"] = ", ".join(f"{k} {v}건" for k, v in sorted(courier_counts.items()))
+    if courier_warnings:
+        stats["toss_courier_warnings"] = " / ".join(courier_warnings)
+    return stats
 
 
 
