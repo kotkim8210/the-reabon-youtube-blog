@@ -34,10 +34,11 @@ def test_xlsx_item_id_header_variant_still_works():
 
 
 def test_carrier_name_mapping():
-    assert T._temu_carrier_name("한진") == "한진택배"
-    assert T._temu_carrier_name("Hanjin") == "한진택배"
+    # 테무 드롭다운은 한진/CJ를 영문으로만 인식 → CARRIER_HANJIN/CARRIER_CJ 상수 기준
+    assert T._temu_carrier_name("한진") == T.CARRIER_HANJIN
+    assert T._temu_carrier_name("Hanjin") == T.CARRIER_HANJIN
     assert T._temu_carrier_name("롯데택배") == "롯데택배"
-    assert T._temu_carrier_name("CJ대한통운") == "CJ 대한통운"
+    assert T._temu_carrier_name("CJ대한통운") == T.CARRIER_CJ
 
 
 def test_shipping_template_headers_match_temu():

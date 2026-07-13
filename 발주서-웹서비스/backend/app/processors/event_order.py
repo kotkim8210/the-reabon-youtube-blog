@@ -45,14 +45,27 @@ def _prize_kg(prize: str) -> str:
 def event_product_name(prize: str) -> str:
     """경품명 → 쥬얼리 발주 품목명.
 
-    - 신비복숭아 → 거래처 SKU명 (예: '신비복숭아 1kg 중소과' → '신비 복숭아 1kg (15과 내외)').
-      쿠팡/토스 신비복숭아와 동일 매핑(_PEACH_COUPANG_SKU) 재사용 — 1·2kg은 SKU, 그 외는 라벨.
+    - 복숭아: 거반도·대극천·백도딱딱이는 각 전용 품목명(신비 아님!), 신비복숭아만
+      거래처 SKU명(_PEACH_COUPANG_SKU, 1·2kg) 또는 '신비복숭아 {kg}kg' 라벨.
+      ※ 전용 분기 없이 _peach_label로 폴백하면 백도/대극천 당첨자가 신비로 둔갑함.
     - 그 외(성주참외) → '성주참외 가성비 랜덤과 {kg}kg (R)' (등급 무관)
     """
     text = str(prize or "")
     if "복숭아" in text:
-        from app.processors.myeongi_order import _jewelry_peach_option, _peach_label
-        return _jewelry_peach_option(text, "") or _peach_label(text, "")
+        from app.processors.myeongi_order import (
+            _jewelry_baekdo_option,
+            _jewelry_daegeukcheon_option,
+            _jewelry_geobando_option,
+            _jewelry_peach_option,
+            _peach_label,
+        )
+        return (
+            _jewelry_geobando_option(text, "")
+            or _jewelry_daegeukcheon_option(text, "")
+            or _jewelry_baekdo_option(text, "")
+            or _jewelry_peach_option(text, "")
+            or _peach_label(text, "")
+        )
     kg = _prize_kg(text)
     if not kg:
         return "성주참외 가성비 랜덤과 (R)"
@@ -121,9 +134,12 @@ def parse_winners(csv_bytes: bytes) -> list[dict]:
             "qty": "1",
             "memo": "문 앞",
             "order_id": _norm(cell(row, c_order)),
-            "_skipped_refund": skipped_refund,
         })
 
+    # 환불 제외 수는 루프 종료 후 최종값으로 기록 (append 시점 스냅샷이면
+    # 환불 행이 명단 끝에 있을 때 집계 누락)
+    if entries:
+        entries[-1]["_skipped_refund"] = skipped_refund
     return entries
 
 
@@ -144,7 +160,13 @@ def process(csv_bytes: bytes) -> tuple[bytes, str, dict]:
     labels = []
     if any("참외" in p for p in products):
         labels.append("참외")
-    if any("복숭아" in p for p in products):
+    if any("거반도" in p for p in products):
+        labels.append("거반도복숭아")
+    if any("대극천" in p for p in products):
+        labels.append("대극천복숭아")
+    if any("백도" in p for p in products):
+        labels.append("백도딱딱이복숭아")
+    if any("신비" in p for p in products):
         labels.append("신비복숭아")
     label = "_".join(labels) if labels else "발주"
     today = datetime.now(KST).strftime("%Y%m%d")
