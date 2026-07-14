@@ -30,6 +30,11 @@ def normalize_courier(value) -> str:
     return normalize_courier_name(value)
 
 
+def _phone_digits(value: object) -> str:
+    """전화번호를 숫자만으로 정규화 — '010-1234-5678'과 '01012345678'을 동일 취급."""
+    return re.sub(r"\D", "", str(value or ""))
+
+
 def _source_option_keys(row) -> set[str]:
     # 거래처 회신 파일마다 옵션 열이 조금씩 달라서, 이름/전화/주소/송장 열을 제외한
     # 자주 쓰는 상품/옵션 후보 열만 모아 동명이인 보호용으로 비교한다.
@@ -124,6 +129,7 @@ def process(
 
     filled = 0
     skipped = 0
+    skip_details: list[str] = []  # 미입력 건의 이름·사유 — 조용한 skip 금지
 
     # Build index of order entries by name for faster lookup
     from collections import defaultdict
@@ -172,6 +178,7 @@ def process(
 
         if not candidates:
             skipped += 1
+            skip_details.append(f"{dl_name}(회신에 없음)")
             continue
 
         # Filter out already used entries
@@ -181,42 +188,46 @@ def process(
         ]
         if not available:
             skipped += 1
+            skip_details.append(f"{dl_name}(회신 운송장 수 부족)")
             continue
-
-        if requires_option_guard(dl_name, delivery_name_counts, len(candidates)):
-            available = [
-                (i, c) for i, c in available
-                if options_match(c.get("option_keys"), dl_option_keys)
-            ]
-            if not available:
-                skipped += 1
-                continue
 
         matched = None
 
-        # Try phone + address match first
-        for idx, c in available:
-            if c["phone"] == dl_phone and c["address"] == dl_address:
-                matched = c
-                break
+        # 1) 전화번호(숫자만 비교) 일치가 가장 강한 신호 — 옵션 가드보다 먼저.
+        #    같은 사람이 같은 상품을 여러 건 주문한 경우(전화 동일) 미사용 건을
+        #    순차 배정해 N건 전부 채워진다. 회신에 옵션 정보가 없어도 매칭됨.
+        #    (2026-07-14 제주다팜: 동일인 다건이 옵션 가드에 걸려 전부 skip되던 사고 수정)
+        dl_phone_d = _phone_digits(dl_phone)
+        if dl_phone_d:
+            phone_hits = [(i, c) for i, c in available if _phone_digits(c.get("phone")) == dl_phone_d]
+            if phone_hits:
+                matched = next(
+                    (c for _, c in phone_hits if c["address"] == dl_address), None
+                ) or next(
+                    (c for _, c in phone_hits if options_match(c.get("option_keys"), dl_option_keys)), None
+                ) or phone_hits[0][1]
 
-        # Try phone only match
+        # 2) 전화로 못 가른 경우에만 동명이인 옵션 가드 적용 (기존 보호 유지)
         if matched is None:
-            for idx, c in available:
-                if c["phone"] == dl_phone:
-                    matched = c
-                    break
-
-        # Try address only match
-        if matched is None:
-            for idx, c in available:
-                if c["address"] == dl_address:
-                    matched = c
-                    break
-
-        # Fall back to first available with same name
-        if matched is None:
-            matched = available[0][1]
+            guarded = available
+            if requires_option_guard(dl_name, delivery_name_counts, len(candidates)):
+                guarded = [
+                    (i, c) for i, c in available
+                    if options_match(c.get("option_keys"), dl_option_keys)
+                ]
+                if not guarded:
+                    # 옵션으로도 못 가름 → 주소 일치만 허용, 아니면 오배정 위험이라 미입력+표시
+                    addr_hits = [c for _, c in available if dl_address and c["address"] == dl_address]
+                    if addr_hits:
+                        matched = addr_hits[0]
+                    else:
+                        skipped += 1
+                        skip_details.append(f"{dl_name}(동명이인 구분 불가 — 수동 확인)")
+                        continue
+            if matched is None:
+                matched = next(
+                    (c for _, c in guarded if c["address"] == dl_address), None
+                ) or (guarded[0][1] if guarded else None)
 
         if matched:
             e_cell.value = matched["tracking"]
@@ -227,6 +238,7 @@ def process(
             filled += 1
         else:
             skipped += 1
+            skip_details.append(f"{dl_name}(매칭 실패)")
 
     # Save to bytes
     output = BytesIO()
@@ -236,5 +248,7 @@ def process(
     now = datetime.now(KST)
     filename = f"DeliveryList_제주다팜_운송장입력완료_{now.strftime('%Y%m%d')}.xlsx"
     stats = {"filled": filled, "skipped": skipped}
+    if skip_details:
+        stats["skipped_names"] = ", ".join(skip_details)
 
     return output.read(), filename, stats
