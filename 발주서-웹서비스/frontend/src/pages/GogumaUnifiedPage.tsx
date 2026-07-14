@@ -423,37 +423,6 @@ function OrderCollectionTab() {
         </div>
       </div>
 
-      {/* 발주서 이메일 발송 (수동 버튼) */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-xl">📧</div>
-          <div>
-            <h3 className="text-base font-bold text-gray-900">발주서 이메일 발송</h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              최종 고구마 발주파일을 올리고(드래그 가능) 버튼을 누르면
-              shach457@gmail.com → farmers2022@naver.com로 첨부 발송합니다.
-            </p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 md:items-end">
-          <FileUpload
-            label="최종 고구마 발주파일"
-            file={emailFile}
-            onFileSelect={(f) => { setEmailFile(f); setEmailResult(''); setEmailError(''); }}
-          />
-          <button
-            onClick={handleSendOrderEmail}
-            disabled={!emailFile || emailSending}
-            className="bg-orange-500 text-white px-6 py-3 rounded-xl font-semibold text-sm hover:bg-orange-600
-                       disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-orange-200"
-          >
-            {emailSending ? '발송 중...' : '📧 이메일 발송'}
-          </button>
-        </div>
-        {emailResult && <p className="mt-3 text-sm font-bold text-green-700">{emailResult}</p>}
-        {emailError && <p className="mt-3 text-sm font-bold text-red-600">{emailError}</p>}
-      </div>
-
       {/* Results - Two columns */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Coupang Result */}
@@ -520,6 +489,37 @@ function OrderCollectionTab() {
             <p className="text-sm text-gray-400 text-center py-8">기간을 선택하고 수집 버튼을 클릭하세요</p>
           )}
         </div>
+      </div>
+
+      {/* 발주서 이메일 발송 (수동 버튼) — 발주서 생성·다운로드 다음 단계라 결과 카드 아래 배치 */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-xl">📧</div>
+          <div>
+            <h3 className="text-base font-bold text-gray-900">발주서 이메일 발송</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              최종 고구마 발주파일을 올리고(드래그 가능) 버튼을 누르면
+              shach457@gmail.com → farmers2022@naver.com로 첨부 발송합니다.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 md:items-end">
+          <FileUpload
+            label="최종 고구마 발주파일"
+            file={emailFile}
+            onFileSelect={(f) => { setEmailFile(f); setEmailResult(''); setEmailError(''); }}
+          />
+          <button
+            onClick={handleSendOrderEmail}
+            disabled={!emailFile || emailSending}
+            className="bg-orange-500 text-white px-6 py-3 rounded-xl font-semibold text-sm hover:bg-orange-600
+                       disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-orange-200"
+          >
+            {emailSending ? '발송 중...' : '📧 이메일 발송'}
+          </button>
+        </div>
+        {emailResult && <p className="mt-3 text-sm font-bold text-green-700">{emailResult}</p>}
+        {emailError && <p className="mt-3 text-sm font-bold text-red-600">{emailError}</p>}
       </div>
 
       {/* Toss Order Query (optional detail view) */}
