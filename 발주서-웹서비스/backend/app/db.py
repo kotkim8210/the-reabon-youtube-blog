@@ -346,6 +346,40 @@ async def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_order_batch_items_batch_id
             ON order_batch_items(batch_id);
+
+        -- ── 규칙 엔진 (Phase 1-A): 발주처/상품 매칭 규칙을 코드가 아닌 데이터로 ──
+        CREATE TABLE IF NOT EXISTS rule_suppliers (
+            key TEXT PRIMARY KEY,               -- 'jejudapam', 'jewelryfruit' ...
+            name TEXT NOT NULL,                 -- '제주다팜'
+            courier TEXT NOT NULL DEFAULT '롯데택배',
+            order_cutoff TEXT NOT NULL DEFAULT '10:00',
+            delivery_method TEXT NOT NULL DEFAULT 'download',  -- download|email
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS product_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_key TEXT NOT NULL,
+            label TEXT NOT NULL,                     -- '홍감자'
+            priority INTEGER NOT NULL DEFAULT 100,   -- 낮을수록 먼저 평가
+            name_keywords TEXT NOT NULL DEFAULT '[]',    -- JSON any-of, 공백제거 부분일치
+            exclude_keywords TEXT NOT NULL DEFAULT '[]', -- JSON — 오분류 방지(신비/백도 충돌 교훈)
+            grades TEXT NOT NULL DEFAULT '[]',           -- JSON 등급 사전(긴 것 먼저: '특대'>'대')
+            kg_allow TEXT NOT NULL DEFAULT '[]',         -- JSON 허용 kg 목록. 빈배열=전체
+            pair_map TEXT NOT NULL DEFAULT '{}',         -- JSON {"등급|kg":"등급|kg"} 치환(중1→중2 등)
+            extra_map TEXT NOT NULL DEFAULT '{}',        -- JSON {"등급|kg":"과수문구"} → {extra}
+            output_template TEXT NOT NULL,               -- '홍감자 {grade} {kg}kg'
+            require_grade INTEGER NOT NULL DEFAULT 0,
+            require_kg INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (supplier_key) REFERENCES rule_suppliers(key) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_product_rules_supplier
+            ON product_rules(supplier_key, active, priority);
     """)
     # --- Column migrations for existing deployments ---
     # user_product_options.unit_price_krw (정산 단가)
@@ -393,6 +427,36 @@ async def init_db():
             ("pro", "Pro", 29000, None, 3000, '{"tracking": true, "coupang_api": true, "pricing": true, "sales_history_days": null}'),
         )
         logger.info("Plans seeded")
+
+    # Seed 규칙 엔진 PoC: 제주다팜 홍감자 (2026-07-13 사용자 확정 매칭)
+    cursor = await db.execute("SELECT COUNT(*) as cnt FROM rule_suppliers WHERE key = 'jejudapam'")
+    if (await cursor.fetchone())["cnt"] == 0:
+        now = datetime.utcnow().isoformat()
+        await db.execute(
+            "INSERT INTO rule_suppliers (key, name, courier, order_cutoff, delivery_method, active, created_at, updated_at) "
+            "VALUES ('jejudapam', '제주다팜', '롯데택배', '10:00', 'download', 1, ?, ?)",
+            (now, now),
+        )
+        logger.info("Rule supplier seeded: jejudapam")
+    cursor = await db.execute(
+        "SELECT COUNT(*) as cnt FROM product_rules WHERE supplier_key = 'jejudapam' AND label = '홍감자'"
+    )
+    if (await cursor.fetchone())["cnt"] == 0:
+        now = datetime.utcnow().isoformat()
+        await db.execute(
+            "INSERT INTO product_rules (supplier_key, label, priority, name_keywords, exclude_keywords, "
+            "grades, kg_allow, pair_map, extra_map, output_template, require_grade, require_kg, active, notes, created_at, updated_at) "
+            "VALUES ('jejudapam', '홍감자', 100, ?, '[]', ?, '[]', ?, '{}', ?, 1, 1, 1, ?, ?, ?)",
+            (
+                json.dumps(["홍감자"], ensure_ascii=False),
+                json.dumps(["왕특", "특대", "특", "대", "중", "소"], ensure_ascii=False),
+                json.dumps({"중|1": "중|2", "대|3": "특|3", "대|5": "특|5"}, ensure_ascii=False),
+                "홍감자 {grade} {kg}kg",
+                "2026-07-13 쥬얼리 품절→제주다팜 이관. 매칭 사용자 확정(중1→중2, 대3→특3, 대5→특5).",
+                now, now,
+            ),
+        )
+        logger.info("Product rule seeded: jejudapam/홍감자")
 
     # Ensure admin has pro subscription
     cursor = await db.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
@@ -2000,3 +2064,143 @@ async def option_decline_alerts(
             })
 
     return sorted(alerts, key=lambda item: item["drop_qty"], reverse=True)
+
+
+# ── 규칙 엔진 CRUD (Phase 1-A) ─────────────────────────────────
+
+def _rule_row_to_dict(row) -> dict:
+    d = dict(row)
+    for key in ("name_keywords", "exclude_keywords", "grades", "kg_allow"):
+        try:
+            d[key] = json.loads(d.get(key) or "[]")
+        except (TypeError, ValueError):
+            d[key] = []
+    for key in ("pair_map", "extra_map"):
+        try:
+            d[key] = json.loads(d.get(key) or "{}")
+        except (TypeError, ValueError):
+            d[key] = {}
+    return d
+
+
+async def list_rule_suppliers(include_inactive: bool = True) -> list[dict]:
+    db = await get_db()
+    sql = "SELECT * FROM rule_suppliers"
+    if not include_inactive:
+        sql += " WHERE active = 1"
+    cursor = await db.execute(sql + " ORDER BY name")
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def upsert_rule_supplier(data: dict) -> None:
+    db = await get_db()
+    now = datetime.utcnow().isoformat()
+    await db.execute(
+        """INSERT INTO rule_suppliers (key, name, courier, order_cutoff, delivery_method, active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET
+             name=excluded.name, courier=excluded.courier, order_cutoff=excluded.order_cutoff,
+             delivery_method=excluded.delivery_method, active=excluded.active, updated_at=excluded.updated_at""",
+        (
+            data["key"], data["name"], data.get("courier") or "롯데택배",
+            data.get("order_cutoff") or "10:00", data.get("delivery_method") or "download",
+            1 if data.get("active", True) else 0, now, now,
+        ),
+    )
+    await db.commit()
+
+
+async def delete_rule_supplier(key: str) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM rule_suppliers WHERE key = ?", (key,))
+    await db.commit()
+
+
+async def list_product_rules(supplier_key: str | None = None, active_only: bool = False) -> list[dict]:
+    db = await get_db()
+    sql = "SELECT * FROM product_rules"
+    conds, params = [], []
+    if supplier_key:
+        conds.append("supplier_key = ?")
+        params.append(supplier_key)
+    if active_only:
+        conds.append("active = 1")
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
+    sql += " ORDER BY supplier_key, priority, id"
+    cursor = await db.execute(sql, params)
+    return [_rule_row_to_dict(r) for r in await cursor.fetchall()]
+
+
+async def get_product_rule(rule_id: int) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM product_rules WHERE id = ?", (rule_id,))
+    row = await cursor.fetchone()
+    return _rule_row_to_dict(row) if row else None
+
+
+_RULE_JSON_LIST_FIELDS = ("name_keywords", "exclude_keywords", "grades", "kg_allow")
+_RULE_JSON_DICT_FIELDS = ("pair_map", "extra_map")
+
+
+def _rule_payload_to_columns(data: dict) -> dict:
+    cols = {
+        "supplier_key": data["supplier_key"],
+        "label": data["label"],
+        "priority": int(data.get("priority") or 100),
+        "output_template": data["output_template"],
+        "require_grade": 1 if data.get("require_grade") else 0,
+        "require_kg": 1 if data.get("require_kg") else 0,
+        "active": 1 if data.get("active", True) else 0,
+        "notes": data.get("notes") or "",
+    }
+    for key in _RULE_JSON_LIST_FIELDS:
+        cols[key] = json.dumps(data.get(key) or [], ensure_ascii=False)
+    for key in _RULE_JSON_DICT_FIELDS:
+        cols[key] = json.dumps(data.get(key) or {}, ensure_ascii=False)
+    return cols
+
+
+async def create_product_rule(data: dict) -> int:
+    db = await get_db()
+    now = datetime.utcnow().isoformat()
+    cols = _rule_payload_to_columns(data)
+    cursor = await db.execute(
+        """INSERT INTO product_rules (supplier_key, label, priority, name_keywords, exclude_keywords,
+             grades, kg_allow, pair_map, extra_map, output_template, require_grade, require_kg, active, notes,
+             created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            cols["supplier_key"], cols["label"], cols["priority"], cols["name_keywords"],
+            cols["exclude_keywords"], cols["grades"], cols["kg_allow"], cols["pair_map"],
+            cols["extra_map"], cols["output_template"], cols["require_grade"], cols["require_kg"],
+            cols["active"], cols["notes"], now, now,
+        ),
+    )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def update_product_rule(rule_id: int, data: dict) -> None:
+    db = await get_db()
+    now = datetime.utcnow().isoformat()
+    cols = _rule_payload_to_columns(data)
+    await db.execute(
+        """UPDATE product_rules SET supplier_key=?, label=?, priority=?, name_keywords=?, exclude_keywords=?,
+             grades=?, kg_allow=?, pair_map=?, extra_map=?, output_template=?, require_grade=?, require_kg=?,
+             active=?, notes=?, updated_at=?
+           WHERE id=?""",
+        (
+            cols["supplier_key"], cols["label"], cols["priority"], cols["name_keywords"],
+            cols["exclude_keywords"], cols["grades"], cols["kg_allow"], cols["pair_map"],
+            cols["extra_map"], cols["output_template"], cols["require_grade"], cols["require_kg"],
+            cols["active"], cols["notes"], now, rule_id,
+        ),
+    )
+    await db.commit()
+
+
+async def delete_product_rule(rule_id: int) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM product_rules WHERE id = ?", (rule_id,))
+    await db.commit()

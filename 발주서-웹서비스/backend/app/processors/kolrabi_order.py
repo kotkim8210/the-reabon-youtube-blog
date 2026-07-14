@@ -104,9 +104,18 @@ def is_jeju_potato_order(product_name: object, option_text: object) -> bool:
 
 
 def convert_potato_option(product_name: object, option_text: object) -> str | None:
-    """홍감자 DeliveryList → 제주다팜 발주 품목 '홍감자 {등급} {kg}kg'."""
+    """홍감자 DeliveryList → 제주다팜 발주 품목 '홍감자 {등급} {kg}kg'.
+
+    Phase 1-A PoC: 규칙 엔진(product_rules 'jejudapam/홍감자' 시드)이 로드돼 있으면
+    그 해석 결과를 우선 사용하고, 엔진 미로드/미매칭이면 아래 하드코딩으로 폴백
+    (시드 데이터가 하드코딩과 동일 매핑이라 결과는 항상 같다 — 패리티 테스트로 보증).
+    """
     if not is_jeju_potato_order(product_name, option_text):
         return None
+    from app.rules_engine import convert as _rules_convert
+    engine_result = _rules_convert("jejudapam", product_name, option_text)
+    if engine_result is not None:
+        return engine_result
     text = _combined_text(product_name, option_text)
     option = normalize(option_text)
     grade = ""

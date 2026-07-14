@@ -49,9 +49,11 @@ def test_jewelry_bamhobak_via_convert_option():
     )
 
 
-def test_jewelry_potato_large_ships_as_special():
-    assert M._jewelry_potato_option("햇 홍감자", "3kg(대)") == "햇 홍감자 특 3kg"
-    assert M._jewelry_potato_option("햇 홍감자", "5kg(대)") == "햇 홍감자 특 5kg"
+def test_jeju_potato_large_ships_as_special():
+    # 홍감자는 2026-07-13 쥬얼리 품절→제주다팜 이관: 대→특, 중1kg→중2kg
+    assert K.convert_potato_option("햇 홍감자", "3kg(대)") == "홍감자 특 3kg"
+    assert K.convert_potato_option("햇 홍감자", "5kg(대)") == "홍감자 특 5kg"
+    assert K.convert_potato_option("햇 홍감자", "1kg(중)") == "홍감자 중 2kg"
 
 
 def test_bamhobak_excludes_other_products():

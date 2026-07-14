@@ -53,6 +53,7 @@ from app.routes.admin import router as admin_router
 from app.routes.tenant import router as tenant_router
 from app.routes.billing import router as billing_router
 from app.routes.automation import router as automation_router
+from app.routes.rules import router as rules_router
 from app.middleware import IPBlockMiddleware
 from app import db as database
 from app.scheduler import start_scheduler, stop_scheduler, refresh_products, refresh_orders
@@ -118,6 +119,12 @@ async def record_sales_from_process_stats(
 async def lifespan(app: FastAPI):
     # Startup
     await database.init_db()
+    try:
+        from app import rules_engine
+        await rules_engine.refresh_rules()
+    except Exception as e:
+        # 캐시 미로드 시 프로세서들은 하드코딩 폴백으로 동작 — 발주 기능은 영향 없음
+        logger.warning(f"규칙 엔진 초기 로드 실패(하드코딩 폴백으로 계속): {e}")
     start_scheduler()
     # Initial data load
     try:
@@ -149,6 +156,7 @@ app.include_router(admin_router)
 app.include_router(tenant_router)
 app.include_router(billing_router)
 app.include_router(automation_router)
+app.include_router(rules_router)
 app.include_router(dashboard_router, dependencies=[Depends(require_pro)])
 app.include_router(products_router, dependencies=[Depends(require_pro)])
 app.include_router(pricing_router, dependencies=[Depends(require_pro)])
