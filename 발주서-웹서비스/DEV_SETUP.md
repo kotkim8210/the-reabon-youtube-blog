@@ -15,6 +15,19 @@
 * GitHub 기본 브랜치를 `claude/balju-saas-phase0`로 지정해 뒀으므로, 그냥 `git clone` 하면 최신 소스가 받아진다.
 * 시크릿(API 키·토큰)은 git에 **없다**(fly secrets에만 있음). 로컬 실행/배포 시 별도 주입 필요(아래).
 
+## ⚠️ 개인용 ↔ 서비스 분리 (2026-07 확정 — 절대 혼동 금지)
+
+같은 코드베이스, **2개 Fly 앱 + 2개 브랜치**로 완전 분리. 개인용은 매일 실사용 중이라 건드리면 안 됨.
+
+| 구분 | 브랜치 | Fly 앱 (fly config) | 배포 명령 | 성격 |
+|---|---|---|---|---|
+| **개인용** | `claude/balju-saas-phase0` (기본) | `rj-balju` (`fly.toml`) → rj-balju.fly.dev | `fly deploy` | 김광은 실사용. **frozen** — 개인 요청 있을 때만 손댐 |
+| **서비스(SaaS)** | `saas` | `danharu-ops-hub` (`fly.danharu.toml`) → danharu-ops-hub.fly.dev | `fly deploy -c fly.danharu.toml` | 상용화 개발 전용 |
+
+- **DB·시크릿·도메인은 앱별로 완전 격리.** 특히 서비스 앱(danharu-ops-hub)에는 개인 쿠팡/토스/Gmail 시크릿을 **일부러 제거**해 뒀다(SECRET_KEY·TEAM_PASSWORD만 유지) → 서비스 개발/테스트가 개인 판매계정을 절대 못 건드림. 서비스가 외부 API를 쓰려면 **서비스 전용 테스트 계정**을 별도로 넣어야 함.
+- SaaS 작업은 `git checkout saas` 후 진행하고 `fly deploy -c fly.danharu.toml`로만 배포. **개인용 rj-balju에는 SaaS 코드를 배포하지 않는다.**
+- 두 브랜치는 2026-07-14 커밋 `4abe0de4`에서 분기(공통 안정 상태). 이후 divergent.
+
 ## 받기
 
 ```bash
