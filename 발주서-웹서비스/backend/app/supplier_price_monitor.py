@@ -263,6 +263,29 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("미니밤호박 로얄과 1kg", "로얄과 1kg", 8),
         ),
     ),
+    # 홍감자 (2026-07-14 쥬얼리 품절 → 제주다팜 이관). kkangta55 pcode=10001051 '국산 홍감자',
+    # popup 옵션명 '홍감자 {등급}_{KG}KG' (라이브 확인). 소싱시트(V3.0)는 쿠팡 판매옵션 기준 행이고
+    # 공급가(J열)는 발주 매핑된 옵션 단가: 중1kg→중_2KG, 대3kg→특_3KG, 대5kg→특_5KG.
+    # ※ 이 양식은 공급가가 I가 아닌 J열 → cell="J".
+    "potato-jeju": SupplierMonitorConfig(
+        key="potato-jeju",
+        source_type="adminplus",
+        base_url="https://kkangta55.adminplus.co.kr",
+        supplier_name="제주다팜",
+        product_name="국산 홍감자",
+        product_code="10001051",
+        template_path=TEMPLATE_DIR / "홍감자_제주다팜_소싱현황_원본.xlsx",
+        output_prefix="홍감자_제주다팜_V3.0",
+        output_name_pattern="홍감자_제주다팜 소싱현황관리_V3.0_{date}.xlsx",
+        skip_missing_options=True,
+        options=(
+            SupplierOptionConfig("홍감자 중 1kg(발주 중 2kg)", "홍감자 중_2KG", 8, cell="J"),
+            SupplierOptionConfig("홍감자 중 3kg", "홍감자 중_3KG", 9, cell="J"),
+            SupplierOptionConfig("홍감자 중 5kg", "홍감자 중_5KG", 10, cell="J"),
+            SupplierOptionConfig("홍감자 대 3kg(발주 특 3kg)", "홍감자 특_3KG", 11, cell="J"),
+            SupplierOptionConfig("홍감자 대 5kg(발주 특 5kg)", "홍감자 특_5KG", 12, cell="J"),
+        ),
+    ),
     "corn-jbt": SupplierMonitorConfig(
         key="corn-jbt",
         source_type="google_sheet",

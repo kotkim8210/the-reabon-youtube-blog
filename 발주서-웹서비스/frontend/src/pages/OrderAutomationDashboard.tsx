@@ -50,6 +50,7 @@ const SUPPLIER_MONITOR_KEYS = [
   { key: 'dureup-jbt', accent: 'amber' },
   { key: 'bamhobak-jewelry', accent: 'emerald' },
   { key: 'bamhobak-jeju', accent: 'sky' },
+  { key: 'potato-jeju', accent: 'sky' },
   { key: 'baekdo-jewelry', accent: 'emerald' },
 ] as const;
 
@@ -71,6 +72,7 @@ const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   'dureup-jbt': '남해땅두릅',
   'bamhobak-jewelry': '미니밤호박 3·5·10kg(쥬얼리)',
   'bamhobak-jeju': '미니밤호박 1kg(제주다팜)',
+  'potato-jeju': '홍감자(제주다팜)',
   'baekdo-jewelry': '백도 딱딱이복숭아(쥬얼리)',
 };
 
