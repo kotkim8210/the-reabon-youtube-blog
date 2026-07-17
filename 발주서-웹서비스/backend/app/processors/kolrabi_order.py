@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
+from app.rules_engine import convert as rules_convert
 
 
 KST = timezone(timedelta(hours=9))
@@ -28,6 +29,10 @@ def convert_quantity(option_text: str) -> str | None:
     """
     if not option_text:
         return None
+    # 규칙 엔진 우선 (호출부가 '콜라비'를 보장하므로 키워드 힌트 주입). 미스 시 하드코딩 폴백.
+    engine_result = rules_convert("jejudapam", "콜라비", option_text)
+    if engine_result is not None:
+        return engine_result
     match = re.search(r"(\d+)\s*kg", str(option_text), re.IGNORECASE)
     if match and match.group(1) in ("3", "5", "10"):
         return f"콜라비 정품 {match.group(1)}kg"
@@ -79,6 +84,9 @@ def convert_bamhobak_option(product_name: object, option_text: object) -> str | 
     """
     if not is_bamhobak_order(product_name, option_text):
         return None
+    engine_result = rules_convert("jejudapam", product_name, option_text)
+    if engine_result is not None:
+        return engine_result
     text = _combined_text(product_name, option_text)
     match = re.search(r"(\d+)\s*kg", text, re.IGNORECASE)
     if not match or match.group(1) not in BAMHOBAK_WEIGHTS:
@@ -112,8 +120,7 @@ def convert_potato_option(product_name: object, option_text: object) -> str | No
     """
     if not is_jeju_potato_order(product_name, option_text):
         return None
-    from app.rules_engine import convert as _rules_convert
-    engine_result = _rules_convert("jejudapam", product_name, option_text)
+    engine_result = rules_convert("jejudapam", product_name, option_text)
     if engine_result is not None:
         return engine_result
     text = _combined_text(product_name, option_text)

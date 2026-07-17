@@ -6,6 +6,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
+from app.rules_engine import convert as rules_convert
 
 
 KST = timezone(timedelta(hours=9))
@@ -94,6 +95,9 @@ def _jewelry_bamhobak_option(product_name: object, option_text: object) -> str |
     """
     if not is_jewelry_bamhobak_order(product_name, option_text):
         return None
+    engine_result = rules_convert("jewelryfruit", product_name, option_text)
+    if engine_result is not None:
+        return engine_result
     text = _combined_text(product_name, option_text)
     m = re.search(r"(\d+)\s*kg", text, re.IGNORECASE)
     kg = m.group(1) if m else ""
@@ -197,6 +201,9 @@ _DAEGEUKCHEON_COUNTS = {
 def _jewelry_daegeukcheon_option(product_name: object, option_text: object) -> str | None:
     if not is_jewelry_daegeukcheon_order(product_name, option_text):
         return None
+    engine_result = rules_convert("jewelryfruit", product_name, option_text)
+    if engine_result is not None:
+        return engine_result
     text = _combined_text(product_name, option_text)
     m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
     kg = _fmt_kg(m.group(1)) if m else ""
@@ -234,6 +241,9 @@ _BAEKDO_COUNTS = {
 def _jewelry_baekdo_option(product_name: object, option_text: object) -> str | None:
     if not _is_baekdo(product_name, option_text):
         return None
+    engine_result = rules_convert("jewelryfruit", product_name, option_text)
+    if engine_result is not None:
+        return engine_result
     text = _combined_text(product_name, option_text)
     m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
     kg = _fmt_kg(m.group(1)) if m else ""
@@ -265,6 +275,9 @@ def is_jewelry_peach_order(product_name: object, option_text: object) -> bool:
 def _jewelry_peach_option(product_name: object, option_text: object) -> str | None:
     if _non_shinbi_peach(product_name, option_text):  # 거반도·대극천은 신비복숭아 아님
         return None
+    engine_result = rules_convert("jewelryfruit", product_name, option_text)
+    if engine_result is not None:
+        return engine_result
     from app.processors.tomato_order import peach_kg, JEWELRY_PEACH_KGS
     kg = peach_kg(str(product_name or ""), str(option_text or ""))
     if kg not in JEWELRY_PEACH_KGS:
@@ -394,6 +407,9 @@ def _apple_corn_option(product_name: object, option_text: object) -> str | None:
     text = _combined_text(product_name, option_text)
     if not is_apple_corn_order(product_name, option_text):
         return None
+    engine_result = rules_convert("jewelryfruit", product_name, option_text)
+    if engine_result is not None:
+        return engine_result
 
     count_match = re.search(r"(\d+)\s*(?:개|입)", text)
     if not count_match:
@@ -417,6 +433,9 @@ def _jewelry_corn_option(product_name: object, option_text: object) -> str | Non
     """
     if not is_jewelry_corn_order(product_name, option_text):
         return None
+    engine_result = rules_convert("jewelryfruit", product_name, option_text)
+    if engine_result is not None:
+        return engine_result
     text = _combined_text(product_name, option_text)
     count_match = re.search(r"(\d+)\s*(?:개|입)", text)
     grade = "중품" if "중품" in text else "특품" if "특품" in text else ""

@@ -428,35 +428,46 @@ async def init_db():
         )
         logger.info("Plans seeded")
 
-    # Seed 규칙 엔진 PoC: 제주다팜 홍감자 (2026-07-13 사용자 확정 매칭)
-    cursor = await db.execute("SELECT COUNT(*) as cnt FROM rule_suppliers WHERE key = 'jejudapam'")
-    if (await cursor.fetchone())["cnt"] == 0:
-        now = datetime.utcnow().isoformat()
-        await db.execute(
-            "INSERT INTO rule_suppliers (key, name, courier, order_cutoff, delivery_method, active, created_at, updated_at) "
-            "VALUES ('jejudapam', '제주다팜', '롯데택배', '10:00', 'download', 1, ?, ?)",
-            (now, now),
+    # Seed 규칙 엔진 (Phase 1-C): 하드코딩 상품들의 규칙 데이터화.
+    # (supplier key) / (supplier_key, label)이 없을 때만 삽입 — 화면에서 수정한 규칙은 덮지 않는다.
+    from app.rules_engine import DEFAULT_RULE_SEEDS, DEFAULT_SUPPLIER_SEEDS
+    now = datetime.utcnow().isoformat()
+    seeded_suppliers = 0
+    for sup in DEFAULT_SUPPLIER_SEEDS:
+        cursor = await db.execute("SELECT COUNT(*) as cnt FROM rule_suppliers WHERE key = ?", (sup["key"],))
+        if (await cursor.fetchone())["cnt"] == 0:
+            await db.execute(
+                "INSERT INTO rule_suppliers (key, name, courier, order_cutoff, delivery_method, active, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                (sup["key"], sup["name"], sup["courier"], sup["order_cutoff"], sup["delivery_method"], now, now),
+            )
+            seeded_suppliers += 1
+    seeded_rules = 0
+    for rule in DEFAULT_RULE_SEEDS:
+        cursor = await db.execute(
+            "SELECT COUNT(*) as cnt FROM product_rules WHERE supplier_key = ? AND label = ?",
+            (rule["supplier_key"], rule["label"]),
         )
-        logger.info("Rule supplier seeded: jejudapam")
-    cursor = await db.execute(
-        "SELECT COUNT(*) as cnt FROM product_rules WHERE supplier_key = 'jejudapam' AND label = '홍감자'"
-    )
-    if (await cursor.fetchone())["cnt"] == 0:
-        now = datetime.utcnow().isoformat()
-        await db.execute(
-            "INSERT INTO product_rules (supplier_key, label, priority, name_keywords, exclude_keywords, "
-            "grades, kg_allow, pair_map, extra_map, output_template, require_grade, require_kg, active, notes, created_at, updated_at) "
-            "VALUES ('jejudapam', '홍감자', 100, ?, '[]', ?, '[]', ?, '{}', ?, 1, 1, 1, ?, ?, ?)",
-            (
-                json.dumps(["홍감자"], ensure_ascii=False),
-                json.dumps(["왕특", "특대", "특", "대", "중", "소"], ensure_ascii=False),
-                json.dumps({"중|1": "중|2", "대|3": "특|3", "대|5": "특|5"}, ensure_ascii=False),
-                "홍감자 {grade} {kg}kg",
-                "2026-07-13 쥬얼리 품절→제주다팜 이관. 매칭 사용자 확정(중1→중2, 대3→특3, 대5→특5).",
-                now, now,
-            ),
-        )
-        logger.info("Product rule seeded: jejudapam/홍감자")
+        if (await cursor.fetchone())["cnt"] == 0:
+            await db.execute(
+                "INSERT INTO product_rules (supplier_key, label, priority, name_keywords, exclude_keywords, "
+                "grades, kg_allow, pair_map, extra_map, output_template, require_grade, require_kg, active, notes, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (
+                    rule["supplier_key"], rule["label"], rule["priority"],
+                    json.dumps(rule["name_keywords"], ensure_ascii=False),
+                    json.dumps(rule["exclude_keywords"], ensure_ascii=False),
+                    json.dumps(rule["grades"], ensure_ascii=False),
+                    json.dumps(rule["kg_allow"], ensure_ascii=False),
+                    json.dumps(rule["pair_map"], ensure_ascii=False),
+                    json.dumps(rule["extra_map"], ensure_ascii=False),
+                    rule["output_template"], rule["require_grade"], rule["require_kg"],
+                    rule["notes"], now, now,
+                ),
+            )
+            seeded_rules += 1
+    if seeded_suppliers or seeded_rules:
+        logger.info("Rule seeds: suppliers +%d, rules +%d", seeded_suppliers, seeded_rules)
 
     # Ensure admin has pro subscription
     cursor = await db.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
