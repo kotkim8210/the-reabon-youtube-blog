@@ -30,6 +30,7 @@ from app.processors import (
     gaegeolmu_order,
     gaegeolmu_tracking,
     goguma_auto,
+    goguma_cs,
     goguma_order,
     goguma_tracking,
     goguma_tracking_alwayz,
@@ -1374,6 +1375,106 @@ async def process_goguma_tracking_api_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.exception("고구마 운송장 API 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+class GogumaCsReplyRequest(BaseModel):
+    inquiry_id: int
+    content: str
+
+
+class GogumaCsInquiriesRequest(BaseModel):
+    days: int = 7
+
+
+@app.get("/api/process/goguma-cs/inquiries")
+async def get_goguma_cs_inquiries(
+    days: int = 7,
+    _token: dict = Depends(verify_token),
+):
+    """고구마 쿠팡 계정 미답변 온라인문의 목록 + 추천 답변."""
+    try:
+        if _goguma_proxy_enabled():
+            proxy_response = await _post_proxy_json("goguma-cs-inquiries", {"days": days})
+            return proxy_response.json()
+        return await goguma_cs.list_unanswered_inquiries(days)
+    except CoupangApiError as e:
+        logger.warning("Goguma CS inquiry fetch failed: %s", e.message)
+        _raise_coupang_http_error(e)
+    except Exception as e:
+        logger.exception("고구마 CS 문의 조회 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/goguma-cs/reply")
+async def post_goguma_cs_reply(
+    req: GogumaCsReplyRequest,
+    _token: dict = Depends(verify_token),
+):
+    """고구마 쿠팡 온라인문의에 답변 전송 (사용자가 확인 버튼을 누른 뒤 호출)."""
+    try:
+        if _goguma_proxy_enabled():
+            proxy_response = await _post_proxy_json(
+                "goguma-cs-reply",
+                {"inquiry_id": req.inquiry_id, "content": req.content},
+            )
+            return proxy_response.json()
+        result = await goguma_cs.send_reply(req.inquiry_id, req.content)
+        logger.info(f"고구마 CS 답변 전송: inquiry_id={req.inquiry_id}")
+        return result
+    except CoupangApiError as e:
+        logger.warning("Goguma CS reply failed: %s", e.message)
+        _raise_coupang_http_error(e)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("고구마 CS 답변 전송 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/internal/goguma/goguma-cs-inquiries")
+async def internal_goguma_cs_inquiries(
+    req: GogumaCsInquiriesRequest,
+    _guard: None = Depends(_internal_api_key_guard),
+):
+    del _guard
+    try:
+        return await goguma_cs.list_unanswered_inquiries(req.days)
+    except CoupangApiError as e:
+        logger.warning("Internal goguma CS inquiry fetch failed: %s", e.message)
+        _raise_coupang_http_error(e)
+    except Exception as e:
+        logger.exception("Internal goguma CS inquiry bridge failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/internal/goguma/goguma-cs-reply")
+async def internal_goguma_cs_reply(
+    req: GogumaCsReplyRequest,
+    _guard: None = Depends(_internal_api_key_guard),
+):
+    del _guard
+    try:
+        return await goguma_cs.send_reply(req.inquiry_id, req.content)
+    except CoupangApiError as e:
+        logger.warning("Internal goguma CS reply failed: %s", e.message)
+        _raise_coupang_http_error(e)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("Internal goguma CS reply bridge failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",

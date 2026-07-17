@@ -10,6 +10,7 @@ import {
   approveTossExchange, rejectTossExchange,
   approveTossReturn, rejectTossReturn,
   TossOrder, TossClaim,
+  fetchGogumaCsInquiries, replyGogumaCsInquiry, GogumaCsInquiry,
 } from '../api';
 import FileUpload from '../components/FileUpload';
 import { getDefaultGogumaDateRange, getGogumaDateRangeForDays } from '../lib/gogumaDateRange';
@@ -788,14 +789,146 @@ function TrackingTab() {
 // ══════════════════════════════════════════════════════════════════
 // TAB 3: CS 관리 (토스)
 // ══════════════════════════════════════════════════════════════════
-type ClaimTabId = 'cancel' | 'exchange' | 'return' | 'cs';
+type ClaimTabId = 'coupang-inquiry' | 'cancel' | 'exchange' | 'return' | 'cs';
 
 const CLAIM_TABS: { id: ClaimTabId; label: string; icon: string }[] = [
+  { id: 'coupang-inquiry', label: '쿠팡 문의', icon: '💬' },
   { id: 'cancel', label: '주문취소', icon: '❌' },
   { id: 'exchange', label: '교환', icon: '🔄' },
   { id: 'return', label: '반품', icon: '↩️' },
   { id: 'cs', label: 'CS 현황', icon: '🎧' },
 ];
+
+// ── 쿠팡 온라인문의: 미답변 목록 + 추천 답변 → 확인 후 즉시 전송 ──
+function CoupangInquiryTab() {
+  const [days, setDays] = useState(7);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [period, setPeriod] = useState('');
+  const [inquiries, setInquiries] = useState<GogumaCsInquiry[]>([]);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [sendingId, setSendingId] = useState<number | null>(null);
+  const [sentIds, setSentIds] = useState<number[]>([]);
+  const [fetched, setFetched] = useState(false);
+
+  const handleFetch = useCallback(async (d: number) => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetchGogumaCsInquiries(d);
+      setInquiries(res.inquiries);
+      setPeriod(res.period);
+      // 추천 답변을 편집 가능한 초안으로 미리 채움 (이미 수정 중인 초안은 유지)
+      setDrafts((prev) => {
+        const next: Record<number, string> = {};
+        res.inquiries.forEach((inq) => {
+          next[inq.inquiry_id] = prev[inq.inquiry_id] ?? inq.suggested_reply;
+        });
+        return next;
+      });
+      setFetched(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '쿠팡 문의 조회 실패');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { handleFetch(7); }, [handleFetch]);
+
+  const handleSend = async (inq: GogumaCsInquiry) => {
+    const content = (drafts[inq.inquiry_id] ?? inq.suggested_reply).trim();
+    if (!content) return;
+    const preview = content.length > 120 ? `${content.slice(0, 120)}…` : content;
+    if (!window.confirm(`이 답변을 쿠팡 문의에 바로 전송합니다.\n\n"${preview}"\n\n전송할까요?`)) return;
+    setSendingId(inq.inquiry_id);
+    setError('');
+    try {
+      await replyGogumaCsInquiry(inq.inquiry_id, content);
+      setSentIds((prev) => [...prev, inq.inquiry_id]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '답변 전송 실패');
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  const pending = inquiries.filter((i) => !sentIds.includes(i.inquiry_id));
+
+  return (
+    <div className="space-y-4">
+      {/* 입력: 조회 기간 → 실행: 조회 */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <PlatformBadge platform="coupang" />
+          <span className="text-sm font-bold text-gray-900">미답변 고객 문의</span>
+          {period && <span className="text-xs text-gray-400">({period})</span>}
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          쿠팡 고구마 계정의 미답변 온라인문의를 불러와 추천 답변을 보여줍니다.
+          내용을 확인·수정한 뒤 <b>답변 전송</b>을 누르면 쿠팡에 바로 등록됩니다.
+          (24시간 내 미답변은 판매자점수에 영향)
+        </p>
+        <div className="flex items-center gap-3">
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))}
+            className="px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-orange-300 outline-none">
+            <option value={3}>최근 3일</option>
+            <option value={7}>최근 7일</option>
+            <option value={14}>최근 14일</option>
+            <option value={30}>최근 30일</option>
+          </select>
+          <button onClick={() => handleFetch(days)} disabled={loading}
+            className="bg-orange-500 text-white px-6 py-2.5 rounded-xl font-semibold text-sm hover:bg-orange-600 disabled:opacity-50 transition-all shadow-md shadow-orange-200">
+            {loading ? '조회 중...' : '문의 조회'}
+          </button>
+        </div>
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+      {loading && <Spinner text="쿠팡 미답변 문의를 불러오고 있습니다..." color="orange" />}
+
+      {/* 결과: 문의별 카드 (문의내용 → 추천 답변 → 전송 버튼) */}
+      {!loading && fetched && pending.length === 0 && (
+        <div className="bg-green-50 border border-green-200 rounded-2xl p-6 text-center animate-fade-in">
+          <p className="text-sm font-bold text-green-700">
+            {sentIds.length > 0 ? `답변 ${sentIds.length}건 전송 완료 — 남은 미답변 문의가 없습니다. 🎉` : '미답변 문의가 없습니다. 🎉'}
+          </p>
+        </div>
+      )}
+      {pending.map((inq) => (
+        <div key={inq.inquiry_id} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+                {inq.category}
+              </span>
+              <span className="text-xs text-gray-400">{inq.inquiry_at}</span>
+            </div>
+            {inq.order_ids.length > 0 && (
+              <span className="text-xs text-gray-500 font-mono">주문 {inq.order_ids.join(', ')}</span>
+            )}
+          </div>
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-3">
+            <p className="text-xs font-semibold text-gray-500 mb-1">문의 내용</p>
+            <p className="text-sm text-gray-900 whitespace-pre-wrap">{inq.content || '(내용 없음)'}</p>
+          </div>
+          <p className="text-xs font-semibold text-gray-500 mb-1">추천 답변 (수정 가능)</p>
+          <textarea
+            value={drafts[inq.inquiry_id] ?? inq.suggested_reply}
+            onChange={(e) => setDrafts((prev) => ({ ...prev, [inq.inquiry_id]: e.target.value }))}
+            rows={6}
+            className="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-orange-300 focus:border-orange-400 outline-none transition-all mb-3"
+          />
+          <button onClick={() => handleSend(inq)}
+            disabled={sendingId !== null || !(drafts[inq.inquiry_id] ?? inq.suggested_reply).trim()}
+            className="bg-orange-500 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-orange-600 disabled:opacity-50 transition-all shadow-md shadow-orange-200">
+            {sendingId === inq.inquiry_id ? '전송 중...' : '✅ 확인 — 답변 전송'}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function ClaimsTab({ claimType, approveAction, rejectAction }: {
   claimType: string;
@@ -1015,7 +1148,7 @@ function CSOverviewTab() {
 }
 
 function CSManagementTab() {
-  const [activeClaimTab, setActiveClaimTab] = useState<ClaimTabId>('cancel');
+  const [activeClaimTab, setActiveClaimTab] = useState<ClaimTabId>('coupang-inquiry');
 
   return (
     <div className="space-y-4">
@@ -1034,11 +1167,14 @@ function CSManagementTab() {
         ))}
       </div>
 
-      <div className="flex items-center gap-2 mb-2">
-        <PlatformBadge platform="toss" />
-        <span className="text-xs text-gray-500">토스 플랫폼에서만 CS 관리가 가능합니다</span>
-      </div>
+      {activeClaimTab !== 'coupang-inquiry' && (
+        <div className="flex items-center gap-2 mb-2">
+          <PlatformBadge platform="toss" />
+          <span className="text-xs text-gray-500">취소/교환/반품은 토스 플랫폼 전용입니다</span>
+        </div>
+      )}
 
+      {activeClaimTab === 'coupang-inquiry' && <CoupangInquiryTab />}
       {activeClaimTab === 'cancel' && <ClaimsTab claimType="CANCEL" approveAction={approveTossCancel} rejectAction={rejectTossCancel} />}
       {activeClaimTab === 'exchange' && <ClaimsTab claimType="EXCHANGE" approveAction={approveTossExchange} rejectAction={rejectTossExchange} />}
       {activeClaimTab === 'return' && <ClaimsTab claimType="RETURN" approveAction={approveTossReturn} rejectAction={rejectTossReturn} />}
@@ -1055,7 +1191,7 @@ type MainTabId = 'orders' | 'tracking' | 'claims';
 const MAIN_TABS: { id: MainTabId; label: string; icon: string; desc: string }[] = [
   { id: 'orders', label: '발주서 생성', icon: '📋', desc: '쿠팡 + 토스 주문 수집' },
   { id: 'tracking', label: '운송장 등록', icon: '📦', desc: '쿠팡 + 토스 + 올웨이즈 운송장 입력' },
-  { id: 'claims', label: 'CS 관리', icon: '🎧', desc: '취소/교환/반품 처리' },
+  { id: 'claims', label: 'CS 관리', icon: '🎧', desc: '쿠팡 문의 답변 + 취소/교환/반품' },
 ];
 
 function GogumaUnifiedPage() {

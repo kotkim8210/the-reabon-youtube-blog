@@ -754,6 +754,33 @@ export async function processGogumaTrackingApi(
   return res.json();
 }
 
+// --- Goguma Coupang CS (온라인 문의) ---
+
+export interface GogumaCsInquiry {
+  inquiry_id: number;
+  content: string;
+  inquiry_at: string;
+  order_ids: string[];
+  category: string;
+  suggested_reply: string;
+}
+
+export interface GogumaCsInquiriesResult {
+  total: number;
+  days: number;
+  period: string;
+  inquiries: GogumaCsInquiry[];
+}
+
+export const fetchGogumaCsInquiries = (days = 7) =>
+  apiGet<GogumaCsInquiriesResult>(`/process/goguma-cs/inquiries?days=${days}`);
+
+export const replyGogumaCsInquiry = (inquiryId: number, content: string) =>
+  apiPost<{ status: string; inquiry_id: number }>('/process/goguma-cs/reply', {
+    inquiry_id: inquiryId,
+    content,
+  });
+
 // --- Toss Auto ---
 
 export async function processTossOrder(

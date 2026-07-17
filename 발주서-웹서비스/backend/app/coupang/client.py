@@ -221,6 +221,46 @@ class CoupangClient:
             params["createdAtTo"] = created_at_to
         return await self._request("GET", path, query_params=params)
 
+    # --- Online Inquiry (고객 문의) APIs ---
+
+    async def get_online_inquiries(
+        self,
+        inquiry_start_at: str,
+        inquiry_end_at: str,
+        answered_type: str = "NOANSWER",
+        page_num: int = 1,
+        page_size: int = 50,
+    ) -> dict:
+        """온라인 문의 조회. 날짜는 yyyy-MM-dd, 조회 구간은 최대 7일."""
+        path = f"/v2/providers/openapi/apis/api/v4/vendors/{self.vendor_id}/onlineInquiries"
+        params = {
+            "vendorId": self.vendor_id,
+            "answeredType": answered_type,
+            "inquiryStartAt": inquiry_start_at,
+            "inquiryEndAt": inquiry_end_at,
+            "pageNum": str(page_num),
+            "pageSize": str(page_size),
+        }
+        return await self._request("GET", path, query_params=params)
+
+    async def reply_online_inquiry(
+        self,
+        inquiry_id: int,
+        content: str,
+        reply_by: str,
+    ) -> dict | None:
+        """온라인 문의에 답변 등록. reply_by는 쿠팡 WING 로그인 ID."""
+        path = (
+            f"/v2/providers/openapi/apis/api/v4/vendors/{self.vendor_id}"
+            f"/onlineInquiries/{inquiry_id}/replies"
+        )
+        body = {
+            "content": content,
+            "vendorId": self.vendor_id,
+            "replyBy": reply_by,
+        }
+        return await self._request("POST", path, json_body=body)
+
     # --- Order Confirmation ---
 
     async def confirm_orders(
