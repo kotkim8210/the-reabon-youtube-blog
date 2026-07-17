@@ -82,6 +82,9 @@ export default function PricingPage() {
         <header className="text-center mb-10 mt-8">
           <h1 className="text-3xl font-bold text-slate-900">요금제</h1>
           <p className="text-slate-500 mt-2">무료로 시작하고 필요할 때 업그레이드하세요.</p>
+          <p className="inline-block mt-3 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-4 py-1.5">
+            신규 가입 시 14일 Pro 무료체험 — 카드 등록 없음 · 종료 후 자동결제 없음
+          </p>
         </header>
 
         {err && (
@@ -95,8 +98,8 @@ export default function PricingPage() {
             <h2 className="text-xl font-semibold">{freePlan?.name || '무료'}</h2>
             <p className="text-3xl font-bold mt-3">₩0 <span className="text-sm text-slate-500 font-normal">/월</span></p>
             <ul className="mt-6 space-y-2 text-sm text-slate-700">
-              <li>✔ 제품 {freePlan?.max_products ?? 1}개 등록</li>
-              <li>✔ 월 {freePlan?.max_monthly_orders ?? 50}건 처리</li>
+              <li>✔ 제품 {freePlan?.max_products ?? 2}개 등록</li>
+              <li>✔ 월 {freePlan?.max_monthly_orders ?? 300}건 처리</li>
               <li>✔ 발주 자동화 대시보드</li>
               <li className="text-slate-400">✘ 운송장 자동 입력</li>
               <li className="text-slate-400">✘ 쿠팡 실시간 재고/가격</li>

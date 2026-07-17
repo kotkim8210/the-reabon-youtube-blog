@@ -170,6 +170,11 @@ async def renew_subscriptions():
             await db.upsert_subscription(user_id, plan_code="free", status="cancelled")
             await db.add_billing_event(user_id, "cancel", 0, raw={"reason": "period_end"})
             continue
+        if sub.get("status") == "trialing":
+            # 14일 Pro 체험 만료 → Free로 강등(차단 아님 — 재접점 유지, PRD §4)
+            await db.upsert_subscription(user_id, plan_code="free", status="active")
+            await db.add_billing_event(user_id, "trial_end", 0, raw={"reason": "trial_expired"})
+            continue
         if not billing_key or not customer_key:
             await db.upsert_subscription(user_id, plan_code=sub["plan_code"], status="past_due")
             continue

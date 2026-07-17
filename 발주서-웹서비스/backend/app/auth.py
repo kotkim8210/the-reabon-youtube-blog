@@ -172,7 +172,16 @@ async def signup(request: SignupRequest):
 
     password_hash = bcrypt.hash(password)
     user_id = await create_user(username, password_hash, role="user", email=email)
-    await upsert_subscription(user_id, plan_code="free", status="active")
+    # 가입 즉시 14일 Pro 체험(카드 등록 불요). 만료 시 스케줄러가 Free로 강등(차단 아님).
+    trial_start = datetime.utcnow()
+    trial_end = trial_start + timedelta(days=14)
+    await upsert_subscription(
+        user_id,
+        plan_code="pro",
+        status="trialing",
+        current_period_start=trial_start.isoformat(),
+        current_period_end=trial_end.isoformat(),
+    )
 
     token = create_access_token(user_id, "user", username)
     return TokenResponse(access_token=token)

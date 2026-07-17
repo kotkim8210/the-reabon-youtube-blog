@@ -15,6 +15,8 @@ import OrderAutomationDashboard from './pages/OrderAutomationDashboard';
 import OrderTools from './pages/OrderTools';
 import PricingDashboard from './pages/PricingDashboard';
 import PricingPage from './pages/PricingPage';
+import LandingPage from './pages/LandingPage';
+import OnboardingPage from './pages/OnboardingPage';
 import ProcessPage from './pages/ProcessPage';
 import RulesEnginePage from './pages/RulesEnginePage';
 import SignupPage from './pages/SignupPage';
@@ -52,7 +54,8 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!token) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    // 비로그인 진입은 랜딩(/welcome)으로 — 로그인 후 원위치 복귀는 state로
+    return <Navigate to="/welcome" state={{ from: location }} replace />;
   }
 
   return <>{children}</>;
@@ -119,6 +122,7 @@ export default function App() {
         <Route path="/login" element={authDisabled ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/welcome" element={<LandingPage />} />
         <Route
           path="/"
           element={
@@ -138,6 +142,7 @@ export default function App() {
           <Route path="process/:toolId" element={<ProcessPage />} />
           <Route path="pricing" element={<PricingDashboard />} />
           <Route path="rules" element={<RulesEnginePage />} />
+          <Route path="onboarding" element={<OnboardingPage />} />
           <Route path="inventory" element={<PlaceholderTab />} />
           <Route path="cs" element={<PlaceholderTab />} />
           <Route path="ai-content" element={<PlaceholderTab />} />

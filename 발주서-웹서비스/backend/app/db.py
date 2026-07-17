@@ -420,13 +420,19 @@ async def init_db():
     if (await cursor.fetchone())["cnt"] == 0:
         await db.execute(
             "INSERT INTO plans (code, name, price_krw, max_products, max_monthly_orders, features_json, active) VALUES (?, ?, ?, ?, ?, ?, 1)",
-            ("free", "무료", 0, 1, 50, '{"tracking": false, "coupang_api": false, "pricing": false, "sales_history_days": 30}'),
+            ("free", "무료", 0, 2, 300, '{"tracking": false, "coupang_api": false, "pricing": false, "sales_history_days": 30}'),
         )
         await db.execute(
             "INSERT INTO plans (code, name, price_krw, max_products, max_monthly_orders, features_json, active) VALUES (?, ?, ?, ?, ?, ?, 1)",
             ("pro", "Pro", 29000, None, 3000, '{"tracking": true, "coupang_api": true, "pricing": true, "sales_history_days": null}'),
         )
         logger.info("Plans seeded")
+
+    # Phase 2-A: Free 한도 PRD 정합(상품 2 · 월 300건) — 구버전 시드값(1/50)만 갱신
+    await db.execute(
+        "UPDATE plans SET max_products = 2, max_monthly_orders = 300 "
+        "WHERE code = 'free' AND max_products = 1 AND max_monthly_orders = 50"
+    )
 
     # Seed 규칙 엔진 (Phase 1-C): 하드코딩 상품들의 규칙 데이터화.
     # (supplier key) / (supplier_key, label)이 없을 때만 삽입 — 화면에서 수정한 규칙은 덮지 않는다.
@@ -1103,11 +1109,11 @@ async def set_subscription_cancel(user_id: int, cancel: bool):
 
 
 async def list_due_subscriptions(now_iso: str) -> list[dict]:
-    """Pro subs whose period has ended."""
+    """Pro subs whose period has ended (정기결제 갱신 대상 + 만료된 14일 체험)."""
     db = await get_db()
     cursor = await db.execute(
         """SELECT * FROM subscriptions
-           WHERE plan_code = 'pro' AND status = 'active'
+           WHERE plan_code = 'pro' AND status IN ('active', 'trialing')
              AND current_period_end IS NOT NULL
              AND current_period_end <= ?""",
         (now_iso,),

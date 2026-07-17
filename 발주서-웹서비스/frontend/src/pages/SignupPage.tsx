@@ -22,7 +22,7 @@ function SignupForm({ oauthCfg }: { oauthCfg: OAuthConfig }) {
     localStorage.setItem('token', accessToken);
     const me = await fetchMe();
     setUser(me);
-    navigate('/my/products');
+    navigate('/onboarding');
   }, [navigate, setUser]);
 
   async function handleSubmit(e: React.FormEvent) {
