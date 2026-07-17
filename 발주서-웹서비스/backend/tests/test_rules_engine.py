@@ -83,6 +83,36 @@ def test_priority_order_first_match_wins():
     assert RE.convert("jejudapam", "홍감자", "3kg(대)") == "특판 홍감자 3kg"
 
 
+def test_resolve_any_and_simulate_delivery():
+    """시뮬레이터: DeliveryList 행별 매칭/미매칭 집계 + resolve_any 발주처 표기."""
+    import io
+
+    from openpyxl import Workbook
+
+    RE._set_cache_for_test(
+        {"jejudapam": [dict(POTATO_RULE)]},
+        {"jejudapam": {"key": "jejudapam", "name": "제주다팜"}},
+    )
+    r = RE.resolve_any("햇 홍감자", "1박스 3kg(대)")
+    assert r and r["supplier_name"] == "제주다팜" and r["output"] == "홍감자 특 3kg"
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["헤더"] * 12)
+    ws.append([""] * 10 + ["햇 홍감자 카스테라", "1박스 1kg(중)"])   # K, L → 매칭
+    ws.append([""] * 10 + ["새싹보리 분말", "500g 1통"])            # 미매칭
+    ws.append([""] * 10 + ["햇 홍감자 카스테라", "1박스 5kg(대)"])   # 매칭
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    result = RE.simulate_delivery(buf.getvalue())
+    assert result["total"] == 3 and result["matched"] == 2 and result["unmatched"] == 1
+    outputs = [row["output"] for row in result["rows"] if row["matched"]]
+    assert outputs == ["홍감자 중 2kg", "홍감자 특 5kg"]
+    assert result["unmatched_options"][0]["text"].startswith("새싹보리")
+    assert result["truncated"] is False
+
+
 def test_kg_allow_and_require_filters():
     rule = dict(POTATO_RULE, kg_allow=["3", "5"])
     RE._set_cache_for_test({"jejudapam": [rule]})

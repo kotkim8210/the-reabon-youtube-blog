@@ -25,6 +25,7 @@ import SidebarItem from './mvp/SidebarItem';
 const adminNavItems = [
   { icon: LayoutDashboard, label: '자동화 대시보드', path: '/' },
   { icon: ShoppingCart, label: '발주 도구', path: '/orders' },
+  { icon: SlidersHorizontal, label: '규칙 엔진', path: '/rules' },
   { icon: CreditCard, label: '구독 & 사용량', path: '/billing' },
 ];
 

@@ -132,6 +132,81 @@ def convert(supplier_key: str, product_name: object, option_text: object) -> str
     return result["output"] if result else None
 
 
+def resolve_any(product_name: object, option_text: object) -> dict | None:
+    """전체 발주처를 대상으로 첫 매칭 규칙 해석 (시뮬레이터용).
+
+    발주처는 key 정렬 순으로 평가(결정적). 반환에 supplier_key/supplier_name 포함.
+    """
+    if not _loaded:
+        return None
+    for supplier_key in sorted(_rules_by_supplier):
+        result = resolve(supplier_key, product_name, option_text)
+        if result:
+            supplier = _suppliers.get(supplier_key) or {}
+            return {
+                **result,
+                "supplier_key": supplier_key,
+                "supplier_name": supplier.get("name") or supplier_key,
+            }
+    return None
+
+
+def simulate_delivery(delivery_bytes: bytes, max_rows: int = 500) -> dict:
+    """DeliveryList 전 행에 규칙을 적용한 미리보기 (파일 미저장, 발주서 미생성).
+
+    '이 규칙이면 이렇게 발주됩니다'를 보여주는 시뮬레이터의 코어.
+    반환: {total, matched, unmatched, truncated, rows[], unmatched_options[]}
+    rows: [{row_no, product_name, option, matched, supplier_name, label, output}]
+    """
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(filename=BytesIO(delivery_bytes), data_only=True, read_only=True)
+    ws = wb.active
+
+    rows: list[dict] = []
+    matched = 0
+    unmatched = 0
+    unmatched_options: dict[str, int] = {}
+    total = 0
+    for row_no, row in enumerate(ws.iter_rows(min_row=2), start=2):
+        product_name = _normalize(row[10].value) if len(row) > 10 else ""  # K열
+        option = _normalize(row[11].value) if len(row) > 11 else ""        # L열
+        if not product_name and not option:
+            continue
+        total += 1
+        result = resolve_any(product_name, option)
+        if result:
+            matched += 1
+        else:
+            unmatched += 1
+            key = f"{product_name} | {option}".strip(" |")
+            unmatched_options[key] = unmatched_options.get(key, 0) + 1
+        if len(rows) < max_rows:
+            rows.append({
+                "row_no": row_no,
+                "product_name": product_name,
+                "option": option,
+                "matched": result is not None,
+                "supplier_name": (result or {}).get("supplier_name") or "",
+                "label": (result or {}).get("label") or "",
+                "output": (result or {}).get("output") or "",
+            })
+    wb.close()
+    return {
+        "total": total,
+        "matched": matched,
+        "unmatched": unmatched,
+        "truncated": total > len(rows),
+        "rows": rows,
+        "unmatched_options": [
+            {"text": k, "count": v}
+            for k, v in sorted(unmatched_options.items(), key=lambda kv: -kv[1])[:50]
+        ],
+    }
+
+
 async def refresh_rules() -> dict:
     """DB에서 활성 규칙을 다시 읽어 캐시 교체. 반환: 상태 요약."""
     global _rules_by_supplier, _suppliers, _loaded, _refreshed_at

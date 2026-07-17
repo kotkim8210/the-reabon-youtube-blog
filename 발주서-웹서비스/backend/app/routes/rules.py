@@ -4,7 +4,7 @@
 변이 후에는 항상 인메모리 캐시를 갱신한다. 관리자 전용(운영 규칙이므로).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app import db
@@ -119,3 +119,23 @@ async def preview(data: PreviewInput, _admin: dict = Depends(require_admin)):
         await rules_engine.refresh_rules()
     result = rules_engine.resolve(data.supplier_key, data.product_name, data.option_text)
     return {"matched": result is not None, "result": result}
+
+
+@router.post("/simulate")
+async def simulate(delivery_file: UploadFile = File(...), _admin: dict = Depends(require_admin)):
+    """DeliveryList 업로드 → 전 행 규칙 적용 미리보기 (저장·발주서 생성 없음).
+
+    미매칭 행이 곧 '규칙 추가가 필요한 상품' 목록이 된다.
+    """
+    if not rules_engine.get_status()["loaded"]:
+        await rules_engine.refresh_rules()
+    delivery_bytes = await delivery_file.read()
+    if not delivery_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="빈 파일입니다.")
+    try:
+        return rules_engine.simulate_delivery(delivery_bytes)
+    except Exception as exc:  # openpyxl 파싱 실패 등
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"DeliveryList를 읽지 못했습니다: {exc}",
+        )

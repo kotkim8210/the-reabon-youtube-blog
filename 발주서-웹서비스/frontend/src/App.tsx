@@ -16,6 +16,7 @@ import OrderTools from './pages/OrderTools';
 import PricingDashboard from './pages/PricingDashboard';
 import PricingPage from './pages/PricingPage';
 import ProcessPage from './pages/ProcessPage';
+import RulesEnginePage from './pages/RulesEnginePage';
 import SignupPage from './pages/SignupPage';
 import TenantOrderPage from './pages/TenantOrderPage';
 import TenantProductConfig from './pages/TenantProductConfig';
@@ -136,6 +137,7 @@ export default function App() {
           <Route path="process/toss-auto" element={<TossAutoPage />} />
           <Route path="process/:toolId" element={<ProcessPage />} />
           <Route path="pricing" element={<PricingDashboard />} />
+          <Route path="rules" element={<RulesEnginePage />} />
           <Route path="inventory" element={<PlaceholderTab />} />
           <Route path="cs" element={<PlaceholderTab />} />
           <Route path="ai-content" element={<PlaceholderTab />} />
