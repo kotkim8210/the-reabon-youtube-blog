@@ -316,49 +316,76 @@ class TossClient:
     ) -> list[dict]:
         """Fetch claims (cancel/exchange/return) for a date range.
 
+        실측 스펙(2026-07): GET /api/v3/shopping-fep/claims?startDate&endDate
+        - 응답: success.{items, hasNext, nextToken}
+        - type/status 필터는 둘 다 주거나 둘 다 생략해야 해서, 전체 조회 후
+          claim_type은 클라이언트에서 거른다.
+        - item: {id, type, status, requestedDt, requestReason, requestDetailReason,
+                 order{id, orderProductId, receiverName, ...}, product{name, optionName, quantity}}
+
         Args:
             start_date: yyyy-MM-dd
             end_date: yyyy-MM-dd
             claim_type: CANCEL, EXCHANGE, RETURN or None for all
-            limit: Page size (max 50)
+            limit: (미사용 — API가 페이지 크기를 무시함, 하위호환용 유지)
         """
-        all_claims = []
-        next_cursor = None
+        del limit
+        all_items: list[dict] = []
+        next_token = None
 
         while True:
             params = {
                 "startDate": start_date,
                 "endDate": end_date,
-                "limit": limit,
             }
-            if claim_type:
-                params["claimType"] = claim_type
-            if next_cursor:
-                params["nextCursor"] = next_cursor
+            if next_token:
+                params["nextToken"] = next_token
 
             result = await self._request(
                 "GET",
-                "/api/v3/shopping-fep/orders/claims",
+                "/api/v3/shopping-fep/claims",
                 params=params,
             )
 
             if not result:
                 break
 
-            if result.get("resultType") == "FAIL":
-                error_info = result.get("error", {})
-                logger.error(f"토스 클레임 API 실패: {error_info}")
-                raise RuntimeError(f"토스 클레임 조회 API 실패: {error_info}")
+            self._raise_if_failed(result, "토스 클레임 조회 실패")
 
-            data = result.get("success") or result
-            items = data.get("results", [])
-            all_claims.extend(items)
+            data = result.get("success") or {}
+            items = data.get("items") or []
+            all_items.extend(i for i in items if isinstance(i, dict))
 
-            next_cursor = data.get("nextCursor")
-            if not next_cursor:
+            next_token = data.get("nextToken")
+            if not data.get("hasNext") or not next_token:
                 break
 
-        return all_claims
+        if claim_type:
+            all_items = [i for i in all_items if i.get("type") == claim_type]
+
+        # 프론트(TossClaim)가 쓰는 평평한 형태로 정규화
+        claims = []
+        for it in all_items:
+            order = it.get("order") or {}
+            product = it.get("product") or {}
+            reason = str(it.get("requestReason") or "")
+            detail = str(it.get("requestDetailReason") or "")
+            if detail and detail != reason:
+                reason = f"{reason} — {detail}" if reason else detail
+            claims.append({
+                "claimId": it.get("id"),
+                "claimType": it.get("type"),
+                "claimStatus": it.get("status"),
+                "claimReason": reason,
+                "requestedAt": str(it.get("requestedDt") or ""),
+                "orderId": order.get("id"),
+                "orderProductId": order.get("orderProductId"),
+                "receiverName": order.get("receiverName") or order.get("ordererName"),
+                "productName": product.get("name"),
+                "optionName": product.get("optionName"),
+                "quantity": product.get("quantity"),
+            })
+        return claims
 
     async def approve_cancel(self, order_product_id: int) -> dict | None:
         """Approve a cancellation request."""
