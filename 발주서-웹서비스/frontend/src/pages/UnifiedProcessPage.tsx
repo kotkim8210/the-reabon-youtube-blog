@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Pencil, Check, X } from 'lucide-react';
 import FileUpload from '../components/FileUpload';
-import { processFile, downloadBlob, ProcessResult, processTossWatermelonTracking, processDaangnOrder } from '../api';
+import {
+  processFile, downloadBlob, ProcessResult, processTossWatermelonTracking, processDaangnOrder,
+  fetchSabangStatus, testSabangConnection, processSabangFruitOrder, processSabangFruitTracking,
+  SabangStatus, SabangTrackingResult,
+} from '../api';
 import { useUser } from '../App';
 import { loadToolPrefs, setSectionTitle } from '../lib/toolCatalog';
 import { getDefaultGogumaDateRange } from '../lib/gogumaDateRange';
@@ -675,6 +679,251 @@ function DaangnOrderCard() {
   );
 }
 
+// ── 사방넷 주문 자동수집 → 발주서 (과일/Itsoft) ────────────────────
+function SabangOrderCard({ section, supplierLabel }: { section: 'myeongi' | 'kolrabi'; supplierLabel: string }) {
+  const [status, setStatus] = useState<SabangStatus | null>(null);
+  const [fromDate, setFromDate] = useState(() => {
+    const auto = getDefaultGogumaDateRange();
+    return localDateString(-(auto.days - 1));
+  });
+  const [toDate, setToDate] = useState(localDateString());
+  const [mergeToss, setMergeToss] = useState(true);
+  const [excludeIssued, setExcludeIssued] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [testMsg, setTestMsg] = useState('');
+  const [result, setResult] = useState<ProcessResult | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchSabangStatus().then(setStatus).catch(() => {});
+  }, []);
+
+  const run = async () => {
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await processSabangFruitOrder(section, {
+        fromDate,
+        toDate,
+        tossFromDate: mergeToss ? fromDate : '',
+        tossToDate: mergeToss ? toDate : '',
+        excludeIssued,
+      });
+      setResult(res);
+      downloadBlob(res.blob, res.filename);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '사방넷 수집 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runTest = async () => {
+    setTestMsg('확인 중...');
+    try {
+      const res = await testSabangConnection();
+      setTestMsg(res.status === 'ok' ? `✅ ${res.message}` : `❌ ${res.message}`);
+    } catch (e) {
+      setTestMsg(`❌ ${e instanceof Error ? e.message : '연결 실패'}`);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-purple-200 p-6 flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-xl">🔄</div>
+          <div>
+            <h3 className="text-base font-bold text-gray-900">사방넷 주문 자동수집 → {supplierLabel} 발주서</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              쿠팡 Itsoft(과일) 주문을 사방넷 API로 끌어와 DeliveryList 업로드 없이 바로 발주서를 만듭니다.
+              생성 즉시 자동 다운로드됩니다.
+            </p>
+          </div>
+        </div>
+        <button onClick={runTest}
+          className="shrink-0 px-3 py-1.5 rounded-lg border border-purple-200 text-xs font-semibold text-purple-700 hover:bg-purple-50 transition">
+          연결 테스트
+        </button>
+      </div>
+
+      {status && !status.configured && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          ⚠️ 사방넷 연동키 미설정 — 사방넷 <b>마이페이지 &gt; 서비스 관리 &gt; 연동키 관리</b>에서 인증키 발급(유료 API 서비스) 후
+          <code className="mx-1 rounded bg-amber-100 px-1">fly secrets set SABANG_COMPANY_ID=로그인ID SABANG_AUTH_KEY=인증키</code>
+          설정이 필요합니다.
+        </div>
+      )}
+      {testMsg && <p className="text-xs font-semibold text-gray-700">{testMsg}</p>}
+
+      <div className="flex gap-1.5">
+        {[
+          { label: '오늘', days: 0 },
+          { label: '2일', days: 1 },
+          { label: '3일', days: 2 },
+          { label: '4일', days: 3 },
+        ].map((preset) => {
+          const isActive = fromDate === localDateString(-preset.days) && toDate === localDateString();
+          return (
+            <button key={preset.label} type="button"
+              onClick={() => { setFromDate(localDateString(-preset.days)); setToDate(localDateString()); setResult(null); }}
+              className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${
+                isActive
+                  ? 'border-purple-500 bg-purple-500 text-white shadow-sm'
+                  : 'border-purple-300 text-purple-700 hover:bg-purple-100'
+              }`}>
+              {preset.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-500">시작일</span>
+          <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setResult(null); }}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200" />
+        </label>
+        <span className="hidden pb-2 text-gray-400 sm:block">~</span>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-500">종료일</span>
+          <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setResult(null); }}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200" />
+        </label>
+      </div>
+
+      <div className="flex flex-wrap gap-4">
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={mergeToss} onChange={(e) => setMergeToss(e.target.checked)}
+            className="w-4 h-4 accent-purple-600" />
+          토스 주문도 같은 기간으로 합치기
+        </label>
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={excludeIssued} onChange={(e) => setExcludeIssued(e.target.checked)}
+            className="w-4 h-4 accent-purple-600" />
+          이전 발주분 자동 제외
+        </label>
+      </div>
+
+      <div>
+        <button onClick={run} disabled={loading || !fromDate || !toDate}
+          className="bg-purple-600 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-purple-700
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2">
+          {loading ? '사방넷에서 수집 중...' : '사방넷 수집 → 발주서 생성'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm text-red-600">{error}</p>
+        </div>
+      )}
+      {result && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+          <p className="text-sm font-bold text-green-800 mb-2">발주서 생성 완료 (자동 다운로드됨)</p>
+          {result.stats && (
+            <div className="space-y-0.5 mb-3">
+              {formatStats(result.stats).map((line, i) => (
+                <p key={i} className="text-sm text-green-700">{line}</p>
+              ))}
+            </div>
+          )}
+          <button onClick={() => downloadBlob(result.blob, result.filename)}
+            className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-green-700 transition-all">
+            {result.filename} 다시 다운로드
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 사방넷 송장 자동전송 (orderlist 업로드) ────────────────────────
+function SabangTrackingCard({ supplierLabel }: { supplierLabel: string }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [takCode, setTakCode] = useState('');
+  const [statusTak, setStatusTak] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<SabangTrackingResult | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchSabangStatus().then((s) => {
+      setStatusTak(s.tak_code);
+      setTakCode((prev) => prev || s.tak_code);
+    }).catch(() => {});
+  }, []);
+
+  const run = async () => {
+    if (!file) return;
+    if (!window.confirm(`orderlist의 운송장번호를 사방넷에 바로 등록합니다.\n택배사코드: ${takCode || '(미입력)'}\n\n전송할까요?`)) return;
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await processSabangFruitTracking(file, takCode || undefined);
+      setResult(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '사방넷 송장 전송 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-purple-200 p-6 flex flex-col gap-4">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-xl">📮</div>
+        <div>
+          <h3 className="text-base font-bold text-gray-900">사방넷 송장 자동전송 (orderlist)</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {supplierLabel} 거래처 회신(orderlist)을 올리면 운송장번호를 사방넷에 자동 등록합니다.
+            <b> 사방넷 수집으로 만든 발주서의 회신에만 사용하세요</b> (D열 주문번호가 사방넷 번호여야 매칭됩니다).
+          </p>
+        </div>
+      </div>
+
+      <FileUpload
+        label={`${supplierLabel} 거래처 회신(orderlist) 파일`}
+        file={file}
+        onFileSelect={(f) => { setFile(f || null); setResult(null); setError(''); }}
+      />
+
+      <label className="block max-w-xs">
+        <span className="mb-1 block text-xs font-medium text-gray-500">
+          사방넷 택배사코드 (롯데택배 — 사방넷 관리자 기초코드 참고{statusTak ? `, 기본값 ${statusTak}` : ''})
+        </span>
+        <input value={takCode} onChange={(e) => setTakCode(e.target.value)} placeholder="예: 0019"
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200" />
+      </label>
+
+      <div>
+        <button onClick={run} disabled={!file || loading}
+          className="bg-purple-600 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-purple-700
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2">
+          {loading ? '전송 중...' : '✅ 확인 — 사방넷 송장 전송'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm text-red-600">{error}</p>
+        </div>
+      )}
+      {result && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+          <p className="text-sm font-bold text-green-800 mb-1">사방넷 송장 전송 완료</p>
+          <p className="text-sm text-green-700">전송 {result.sent ?? result.total}건 (택배사코드 {result.tak_code})</p>
+          {result.result && (result.result as Record<string, unknown>).raw != null && (
+            <p className="mt-1 text-xs text-gray-500 break-all">응답: {String((result.result as Record<string, unknown>).raw).slice(0, 300)}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── 메인 페이지 ───────────────────────────────────────────────────
 function UnifiedProcessPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -735,6 +984,16 @@ function UnifiedProcessPage() {
         </div>
       </div>
 
+      {/* 사방넷 자동수집 — 과일(Itsoft) 주문을 API로 끌어와 발주서 생성 */}
+      {(productId === 'myeongi' || productId === 'kolrabi') && (
+        <div className="mb-4 animate-slide-up">
+          <SabangOrderCard
+            section={productId as 'myeongi' | 'kolrabi'}
+            supplierLabel={productId === 'kolrabi' ? '제주다팜' : '쥬얼리프룻'}
+          />
+        </div>
+      )}
+
       {/* 두 섹션 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-slide-up">
         <ProcessSection
@@ -748,6 +1007,13 @@ function UnifiedProcessPage() {
           onTitleSave={(t) => saveTitle('tracking', t)}
         />
       </div>
+
+      {/* 사방넷 송장 자동전송 — 회신(orderlist) 업로드 시 사방넷에 운송장 등록 */}
+      {(productId === 'myeongi' || productId === 'kolrabi') && (
+        <div className="mt-4 animate-slide-up">
+          <SabangTrackingCard supplierLabel={productId === 'kolrabi' ? '제주다팜' : '쥬얼리'} />
+        </div>
+      )}
 
       {/* 토스 운송장 자동등록 (API) — 명이(쥬얼리) · 콜라비(제주다팜 미니밤호박) 페이지 */}
       {(productId === 'myeongi' || productId === 'kolrabi') && (

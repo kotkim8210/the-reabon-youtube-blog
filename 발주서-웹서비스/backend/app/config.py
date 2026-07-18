@@ -27,6 +27,15 @@ COUPANG_PRODUCE_VENDOR_ID = os.getenv("COUPANG_PRODUCE_VENDOR_ID") or COUPANG_VE
 COUPANG_PRODUCE_ACCESS_KEY = os.getenv("COUPANG_PRODUCE_ACCESS_KEY") or COUPANG_ACCESS_KEY
 COUPANG_PRODUCE_SECRET_KEY = os.getenv("COUPANG_PRODUCE_SECRET_KEY") or COUPANG_SECRET_KEY
 
+# 사방넷 오픈API (과일/Itsoft 주문 자동수집·송장전송)
+# 요청 XML을 공개 URL로 노출하고 그 URL을 사방넷에 넘기는 방식(EUC-KR XML).
+SABANG_COMPANY_ID = os.getenv("SABANG_COMPANY_ID", "")     # 사방넷 로그인 ID
+SABANG_AUTH_KEY = os.getenv("SABANG_AUTH_KEY", "")         # 마이페이지>서비스관리>연동키 관리에서 발급
+SABANG_ADMIN_URL = os.getenv("SABANG_ADMIN_URL", "https://r.sabangnet.co.kr").rstrip("/")
+SABANG_TAK_CODE = os.getenv("SABANG_TAK_CODE", "")         # 송장전송용 택배사코드(사방넷 기초코드, 롯데택배)
+SABANG_ORDER_STATUSES = os.getenv("SABANG_ORDER_STATUSES", "001,002")  # 수집 주문상태(001 신규주문, 002 주문확인)
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://rj-balju.fly.dev").rstrip("/")
+
 # Toss Shopping API
 # 새 로컬 자동화는 TOSS_CLIENT_ID/SECRET을 쓰고, 기존 웹서비스는 TOSS_ACCESS/SECRET을 썼다.
 # 둘 다 지원해서 배포 시크릿 이름 차이로 주문 조회가 깨지지 않게 한다.

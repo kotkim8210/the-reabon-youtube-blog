@@ -781,6 +781,108 @@ export const replyGogumaCsInquiry = (inquiryId: number, content: string) =>
     content,
   });
 
+// --- 사방넷 (과일/Itsoft 자동수집·송장전송) ---
+
+export interface SabangStatus {
+  configured: boolean;
+  admin_url: string;
+  tak_code: string;
+  order_statuses: string;
+}
+
+export const fetchSabangStatus = () => apiGet<SabangStatus>('/sabang/status');
+
+export const testSabangConnection = () =>
+  apiPost<{ status: string; mall_count?: number; message: string }>('/sabang/test-connection');
+
+export async function processSabangFruitOrder(
+  section: 'myeongi' | 'kolrabi',
+  opts: {
+    fromDate: string;
+    toDate: string;
+    tossFromDate?: string;
+    tossToDate?: string;
+    excludeIssued?: boolean;
+  }
+): Promise<ProcessResult> {
+  const formData = new FormData();
+  formData.append('from_date', opts.fromDate);
+  formData.append('to_date', opts.toDate);
+  formData.append('toss_from_date', opts.tossFromDate || '');
+  formData.append('toss_to_date', opts.tossToDate || '');
+  formData.append('exclude_issued', opts.excludeIssued === false ? 'false' : 'true');
+
+  const res = await fetch(`${BASE_URL}/process/sabang-${section}-order`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('인증이 만료되었습니다.');
+    }
+    const data = await res.json().catch(() => ({ detail: '사방넷 발주 처리 중 오류가 발생했습니다.' }));
+    throw new Error(apiErrorMessage(data.detail, '사방넷 발주 처리 중 오류가 발생했습니다.'));
+  }
+
+  const blob = await res.blob();
+  const contentDisposition = res.headers.get('Content-Disposition') || '';
+  let filename = 'sabang-order.xlsx';
+  const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
+  if (filenameMatch) {
+    filename = decodeURIComponent(filenameMatch[1]);
+  }
+
+  let stats: Record<string, unknown> | null = null;
+  const statsHeader = res.headers.get('X-Stats');
+  if (statsHeader) {
+    try {
+      stats = JSON.parse(statsHeader);
+    } catch {
+      stats = null;
+    }
+  }
+
+  return { blob, filename, stats };
+}
+
+export interface SabangTrackingResult {
+  total: number;
+  tak_code: string;
+  sent: number;
+  result: Record<string, unknown>;
+}
+
+export async function processSabangFruitTracking(
+  orderlistFile: File,
+  takCode?: string
+): Promise<SabangTrackingResult> {
+  const formData = new FormData();
+  formData.append('orderlist_file', orderlistFile);
+  if (takCode) formData.append('tak_code', takCode);
+
+  const res = await fetch(`${BASE_URL}/process/sabang-fruit-tracking`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('인증이 만료되었습니다.');
+    }
+    const data = await res.json().catch(() => ({ detail: '사방넷 송장 전송 중 오류가 발생했습니다.' }));
+    throw new Error(apiErrorMessage(data.detail, '사방넷 송장 전송 중 오류가 발생했습니다.'));
+  }
+
+  return res.json();
+}
+
 // --- Toss Auto ---
 
 export async function processTossOrder(
