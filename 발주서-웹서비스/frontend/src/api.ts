@@ -851,6 +851,18 @@ export async function processSabangFruitOrder(
   return { blob, filename, stats };
 }
 
+export interface SabangCourierCode {
+  code: string;
+  count: number;
+  sample: string;
+  guess: string;
+}
+
+export const fetchSabangCourierCodes = (days = 14) =>
+  apiGet<{ days: number; total_orders: number; codes: SabangCourierCode[] }>(
+    `/sabang/courier-codes?days=${days}`
+  );
+
 export interface SabangTrackingResult {
   total: number;
   tak_code: string;

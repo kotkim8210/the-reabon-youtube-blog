@@ -5,6 +5,7 @@ import FileUpload from '../components/FileUpload';
 import {
   processFile, downloadBlob, ProcessResult, processTossWatermelonTracking, processDaangnOrder,
   fetchSabangStatus, testSabangConnection, processSabangFruitOrder, processSabangFruitTracking,
+  fetchSabangCourierCodes, SabangCourierCode,
   SabangStatus, SabangTrackingResult,
 } from '../api';
 import { useUser } from '../App';
@@ -849,10 +850,30 @@ function SabangTrackingCard({ supplierLabel }: { supplierLabel: string }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SabangTrackingResult | null>(null);
   const [error, setError] = useState('');
+  const [detecting, setDetecting] = useState(false);
+  const [detected, setDetected] = useState<SabangCourierCode[] | null>(null);
+  const [detectMsg, setDetectMsg] = useState('');
 
   useEffect(() => {
     fetchSabangStatus().then(setStatus).catch(() => {});
   }, []);
+
+  const detectCodes = async () => {
+    setDetecting(true);
+    setDetectMsg('');
+    setDetected(null);
+    try {
+      const res = await fetchSabangCourierCodes(14);
+      setDetected(res.codes);
+      setDetectMsg(res.codes.length
+        ? `최근 14일 출고완료 ${res.total_orders}건에서 코드 ${res.codes.length}종 발견 — 클릭하면 그 코드로 전송합니다.`
+        : `최근 14일 출고완료 주문(${res.total_orders}건)에 택배사 코드가 없습니다.`);
+    } catch (e) {
+      setDetectMsg(`❌ ${e instanceof Error ? e.message : '자동 인식 실패'}`);
+    } finally {
+      setDetecting(false);
+    }
+  };
 
   const COURIERS = [
     { id: 'lotte' as const, label: '롯데택배', code: status?.tak_code_lotte || '' },
@@ -919,12 +940,28 @@ function SabangTrackingCard({ supplierLabel }: { supplierLabel: string }) {
             <input value={customCode} onChange={(e) => setCustomCode(e.target.value)} placeholder="사방넷 택배사코드"
               className="w-36 rounded-lg border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200" />
           )}
+          <button type="button" onClick={detectCodes} disabled={detecting}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50 transition">
+            {detecting ? '인식 중...' : '🔍 코드 자동 인식'}
+          </button>
         </div>
         {courier !== 'custom' && !resolvedCode && (
           <p className="mt-1.5 text-xs text-amber-700">
-            ⚠️ {selected.label} 사방넷 코드가 미설정입니다. 사방넷 관리자 기초코드에서 확인해
-            {courier === 'lotte' ? ' SABANG_TAK_CODE_LOTTE' : ' SABANG_TAK_CODE_CJ'} 시크릿으로 설정하거나 직접입력을 사용하세요.
+            ⚠️ {selected.label}의 사방넷 코드가 미설정입니다. 코드를 모르면 <b>코드 자동 인식</b> 버튼을 누르세요
+            (최근 출고완료 주문의 실제 코드·송장 패턴에서 알아냅니다).
           </p>
+        )}
+        {detectMsg && <p className="mt-1.5 text-xs font-medium text-gray-600">{detectMsg}</p>}
+        {detected && detected.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {detected.map((c) => (
+              <button key={c.code} type="button"
+                onClick={() => { setCourier('custom'); setCustomCode(c.code); setResult(null); }}
+                className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition">
+                코드 {c.code} · {c.count}건{c.guess ? ` · ${c.guess}` : ''}{c.sample ? ` · 예 ${c.sample}` : ''}
+              </button>
+            ))}
+          </div>
         )}
       </div>
 

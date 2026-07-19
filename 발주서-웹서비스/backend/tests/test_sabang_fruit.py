@@ -137,6 +137,33 @@ def _make_orderlist(rows: list[tuple[str, str, str]]) -> bytes:
     return buf.getvalue()
 
 
+def test_summarize_courier_codes_guesses_lotte():
+    # 255278883171: 앞11자리(25527888317) % 7 == 1 == 마지막 자리 → 롯데 체크섬 통과
+    lotte_valid = "255278883171"
+    assert int(lotte_valid[:11]) % 7 == int(lotte_valid[11])
+    orders = [
+        {"delivery_id": "0019", "invoice_no": lotte_valid},
+        {"delivery_id": "0019", "invoice_no": lotte_valid},
+        {"delivery_id": "0019", "invoice_no": lotte_valid},
+        {"delivery_id": "0004", "invoice_no": "1234567890"},  # 10자리 — 롯데 아님
+        {"delivery_id": "0004", "invoice_no": "9876543210"},
+        {"delivery_id": "", "invoice_no": "111"},  # 코드 없음 → 제외
+    ]
+    codes = sabang_fruit.summarize_courier_codes(orders)
+    assert [c["code"] for c in codes] == ["0019", "0004"]  # 건수 많은 순
+    assert codes[0]["guess"] == "롯데택배(추정)"
+    assert codes[0]["count"] == 3
+    assert codes[1]["guess"] == ""
+
+
+def test_summarize_courier_codes_single_sample_no_guess():
+    # 표본 1건이면 추정하지 않음
+    codes = sabang_fruit.summarize_courier_codes(
+        [{"delivery_id": "0019", "invoice_no": "255278883171"}]
+    )
+    assert codes[0]["guess"] == ""
+
+
 def test_parse_orderlist_for_sabang():
     ol = _make_orderlist([
         ("김테스트", "20260718-0000001", "2552 7888 1234"),

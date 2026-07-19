@@ -1417,6 +1417,31 @@ async def sabang_test_connection(_token: dict = Depends(verify_token)):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message)
 
 
+@app.get("/api/sabang/courier-codes")
+async def sabang_courier_codes(
+    days: int = 14,
+    _token: dict = Depends(verify_token),
+):
+    """최근 출고완료(004) 주문에서 택배사코드(DELIVERY_ID)를 자동 수집·추정.
+
+    거래처가 쓰는 택배사 코드를 몰라도, 실제 발송된 주문의 코드·송장 패턴
+    (롯데 체크섬)으로 어떤 코드가 어느 택배사인지 알아낸다.
+    """
+    days = max(1, min(int(days or 14), 60))
+    to_date = datetime.now(KST).date()
+    from_date = to_date - timedelta(days=days - 1)
+    try:
+        orders = await sabang_client.fetch_orders(
+            from_date.strftime("%Y%m%d"),
+            to_date.strftime("%Y%m%d"),
+            statuses=["004"],
+        )
+    except SabangApiError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message)
+    codes = sabang_fruit.summarize_courier_codes(orders)
+    return {"days": days, "total_orders": len(orders), "codes": codes}
+
+
 def _sabang_delivery_upload(orders: list[dict]) -> UploadFile:
     ymd = datetime.now(KST).strftime("%Y%m%d")
     delivery_bytes = sabang_fruit.orders_to_delivery_xlsx(orders)
