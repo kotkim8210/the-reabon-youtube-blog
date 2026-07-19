@@ -32,7 +32,10 @@ COUPANG_PRODUCE_SECRET_KEY = os.getenv("COUPANG_PRODUCE_SECRET_KEY") or COUPANG_
 SABANG_COMPANY_ID = os.getenv("SABANG_COMPANY_ID", "")     # 사방넷 로그인 ID
 SABANG_AUTH_KEY = os.getenv("SABANG_AUTH_KEY", "")         # 마이페이지>서비스관리>연동키 관리에서 발급
 SABANG_ADMIN_URL = os.getenv("SABANG_ADMIN_URL", "https://r.sabangnet.co.kr").rstrip("/")
-SABANG_TAK_CODE = os.getenv("SABANG_TAK_CODE", "")         # 송장전송용 택배사코드(사방넷 기초코드, 롯데택배)
+SABANG_TAK_CODE = os.getenv("SABANG_TAK_CODE", "")         # (레거시) 기본 택배사코드
+# 발주처마다 택배사가 달라 코드 2종을 각각 설정 (사방넷 기초코드 기준)
+SABANG_TAK_CODE_LOTTE = os.getenv("SABANG_TAK_CODE_LOTTE") or SABANG_TAK_CODE
+SABANG_TAK_CODE_CJ = os.getenv("SABANG_TAK_CODE_CJ", "")
 SABANG_ORDER_STATUSES = os.getenv("SABANG_ORDER_STATUSES", "001,002")  # 수집 주문상태(001 신규주문, 002 주문확인)
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://rj-balju.fly.dev").rstrip("/")
 

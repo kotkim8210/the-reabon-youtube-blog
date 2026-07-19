@@ -842,27 +842,36 @@ function SabangOrderCard({ section, supplierLabel }: { section: 'myeongi' | 'kol
 // ── 사방넷 송장 자동전송 (orderlist 업로드) ────────────────────────
 function SabangTrackingCard({ supplierLabel }: { supplierLabel: string }) {
   const [file, setFile] = useState<File | null>(null);
-  const [takCode, setTakCode] = useState('');
-  const [statusTak, setStatusTak] = useState('');
+  // 발주처마다 택배사가 다름(쥬얼리·제주다팜 기본 롯데, CJ대한통운인 곳도 있음) — 전송 시마다 선택
+  const [courier, setCourier] = useState<'lotte' | 'cj' | 'custom'>('lotte');
+  const [customCode, setCustomCode] = useState('');
+  const [status, setStatus] = useState<SabangStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SabangTrackingResult | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetchSabangStatus().then((s) => {
-      setStatusTak(s.tak_code);
-      setTakCode((prev) => prev || s.tak_code);
-    }).catch(() => {});
+    fetchSabangStatus().then(setStatus).catch(() => {});
   }, []);
+
+  const COURIERS = [
+    { id: 'lotte' as const, label: '롯데택배', code: status?.tak_code_lotte || '' },
+    { id: 'cj' as const, label: 'CJ대한통운', code: status?.tak_code_cj || '' },
+    { id: 'custom' as const, label: '직접입력', code: customCode.trim() },
+  ];
+  const selected = COURIERS.find((c) => c.id === courier)!;
+  const resolvedCode = selected.code;
 
   const run = async () => {
     if (!file) return;
-    if (!window.confirm(`orderlist의 운송장번호를 사방넷에 바로 등록합니다.\n택배사코드: ${takCode || '(미입력)'}\n\n전송할까요?`)) return;
+    if (!window.confirm(
+      `orderlist의 운송장번호를 사방넷에 바로 등록합니다.\n택배사: ${selected.label} (코드 ${resolvedCode || '미설정'})\n\n전송할까요?`
+    )) return;
     setLoading(true);
     setError('');
     setResult(null);
     try {
-      const res = await processSabangFruitTracking(file, takCode || undefined);
+      const res = await processSabangFruitTracking(file, resolvedCode || undefined);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : '사방넷 송장 전송 중 오류가 발생했습니다.');
@@ -890,13 +899,34 @@ function SabangTrackingCard({ supplierLabel }: { supplierLabel: string }) {
         onFileSelect={(f) => { setFile(f || null); setResult(null); setError(''); }}
       />
 
-      <label className="block max-w-xs">
-        <span className="mb-1 block text-xs font-medium text-gray-500">
-          사방넷 택배사코드 (롯데택배 — 사방넷 관리자 기초코드 참고{statusTak ? `, 기본값 ${statusTak}` : ''})
+      <div>
+        <span className="mb-1.5 block text-xs font-medium text-gray-500">
+          발송 택배사 (발주처마다 다름 — 이 회신 건의 실제 택배사를 선택)
         </span>
-        <input value={takCode} onChange={(e) => setTakCode(e.target.value)} placeholder="예: 0019"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200" />
-      </label>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {COURIERS.map((c) => (
+            <button key={c.id} type="button"
+              onClick={() => { setCourier(c.id); setResult(null); }}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                courier === c.id
+                  ? 'border-purple-500 bg-purple-500 text-white shadow-sm'
+                  : 'border-purple-300 text-purple-700 hover:bg-purple-100'
+              }`}>
+              {c.label}{c.id !== 'custom' && c.code ? ` (${c.code})` : ''}
+            </button>
+          ))}
+          {courier === 'custom' && (
+            <input value={customCode} onChange={(e) => setCustomCode(e.target.value)} placeholder="사방넷 택배사코드"
+              className="w-36 rounded-lg border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200" />
+          )}
+        </div>
+        {courier !== 'custom' && !resolvedCode && (
+          <p className="mt-1.5 text-xs text-amber-700">
+            ⚠️ {selected.label} 사방넷 코드가 미설정입니다. 사방넷 관리자 기초코드에서 확인해
+            {courier === 'lotte' ? ' SABANG_TAK_CODE_LOTTE' : ' SABANG_TAK_CODE_CJ'} 시크릿으로 설정하거나 직접입력을 사용하세요.
+          </p>
+        )}
+      </div>
 
       <div>
         <button onClick={run} disabled={!file || loading}

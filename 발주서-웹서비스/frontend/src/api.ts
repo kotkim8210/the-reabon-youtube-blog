@@ -787,6 +787,8 @@ export interface SabangStatus {
   configured: boolean;
   admin_url: string;
   tak_code: string;
+  tak_code_lotte: string;
+  tak_code_cj: string;
   order_statuses: string;
 }
 

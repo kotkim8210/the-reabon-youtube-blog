@@ -1402,6 +1402,8 @@ async def sabang_status(_token: dict = Depends(verify_token)):
         "configured": bool(config.SABANG_COMPANY_ID and config.SABANG_AUTH_KEY),
         "admin_url": config.SABANG_ADMIN_URL,
         "tak_code": config.SABANG_TAK_CODE,
+        "tak_code_lotte": config.SABANG_TAK_CODE_LOTTE,
+        "tak_code_cj": config.SABANG_TAK_CODE_CJ,
         "order_statuses": config.SABANG_ORDER_STATUSES,
     }
 
