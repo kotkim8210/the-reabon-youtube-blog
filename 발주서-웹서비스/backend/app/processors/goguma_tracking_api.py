@@ -169,10 +169,11 @@ async def _fetch_orders_by_status(order_status: str, from_date: str, to_date: st
 
 
 async def fetch_pending_orders() -> list[dict]:
-    """Fetch ACCEPT + INSTRUCT goguma orders from Coupang.
+    """Fetch ACCEPT + INSTRUCT goguma orders from Coupang (조회만, 상태 변경 없음).
 
-    ACCEPT orders are acknowledged first, then refetched as INSTRUCT when
-    possible so invoice registration is less likely to be blocked by status.
+    결제완료(ACCEPT) 주문의 확인 처리(→상품준비중)는 여기서 하지 않는다 —
+    해달 운송장과 실제로 매칭된 주문만 process_tracking_api에서 확인 처리한다.
+    (매칭 안 된 결제완료 주문까지 넘어가면 고객 즉시취소가 막히는 부작용)
     """
     now = datetime.now(KST)
     from_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -180,42 +181,17 @@ async def fetch_pending_orders() -> list[dict]:
 
     instruct_orders = await _fetch_orders_by_status("INSTRUCT", from_date, to_date)
     accept_orders = await _fetch_orders_by_status("ACCEPT", from_date, to_date)
-    accept_shipment_box_ids = list({row["shipment_box_id"] for row in accept_orders})
-
-    if accept_shipment_box_ids:
-        logger.info("결제완료 주문 %s건 자동 확인 처리 시작", len(accept_shipment_box_ids))
-        try:
-            confirm_result = await coupang_goguma_client.confirm_orders(accept_shipment_box_ids)
-            code = (confirm_result or {}).get("code")
-            if code in (200, "200", 0):
-                logger.info("쿠팡 주문 확인 성공: %s건", len(accept_shipment_box_ids))
-            else:
-                logger.warning("쿠팡 주문 확인 응답 이상: %s", confirm_result)
-        except Exception as exc:
-            logger.error("쿠팡 주문 확인 실패 (송장 등록은 계속 시도): %s", exc)
-        await asyncio.sleep(3)
-
-    refreshed_instruct = await _fetch_orders_by_status("INSTRUCT", from_date, to_date)
-    refreshed_accept_map = {
-        (row["shipment_box_id"], row["vendor_item_id"]): row
-        for row in refreshed_instruct
-        if row["shipment_box_id"] in accept_shipment_box_ids
-    }
 
     combined: dict[tuple[int, int], dict] = {}
-    for row in instruct_orders + refreshed_instruct:
+    for row in instruct_orders + accept_orders:
         combined[(row["shipment_box_id"], row["vendor_item_id"])] = row
-    for row in accept_orders:
-        key = (row["shipment_box_id"], row["vendor_item_id"])
-        combined[key] = refreshed_accept_map.get(key, row)
 
     all_orders = list(combined.values())
     logger.info(
-        "고구마 주문 조회 완료: total=%s, instruct=%s, accept=%s, refreshed=%s",
+        "고구마 주문 조회 완료: total=%s, instruct=%s, accept=%s",
         len(all_orders),
         len(instruct_orders),
         len(accept_orders),
-        len(refreshed_accept_map),
     )
     return all_orders
 
@@ -454,6 +430,24 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
         return success_pairs, fail_pairs
 
     if matched_pairs:
+        # 매칭된 주문 중 결제완료(ACCEPT)만 확인 처리 — 송장 등록은 상품준비중에서만 가능.
+        # 매칭 안 된 결제완료 주문은 건드리지 않는다.
+        matched_accept_boxes = list({
+            order["shipment_box_id"]
+            for order, _ in matched_pairs
+            if order.get("order_status") == "ACCEPT"
+        })
+        if matched_accept_boxes:
+            logger.info("매칭된 결제완료 주문 %s건 확인 처리(상품준비중 전환)", len(matched_accept_boxes))
+            try:
+                confirm_result = await coupang_goguma_client.confirm_orders(matched_accept_boxes)
+                code = (confirm_result or {}).get("code")
+                if code not in (200, "200", 0, None):
+                    logger.warning("쿠팡 주문 확인 응답 이상: %s", confirm_result)
+            except Exception as exc:
+                logger.error("쿠팡 주문 확인 실패 (송장 등록은 계속 시도): %s", exc)
+            await asyncio.sleep(3)
+
         success_pairs, fail_items = await _upload_and_parse(matched_pairs)
 
         retry_pairs = [(order, tracking) for order, tracking, msg, code in fail_items if _is_accept_related_error(msg, code)]
