@@ -680,8 +680,39 @@ function DaangnOrderCard() {
   );
 }
 
+// ── 사방넷 카드 숨기기 래퍼 (localStorage에 유지) ──────────────────
+function SabangHideWrap({ storageKey, title, children }: {
+  storageKey: string;
+  title: string;
+  children: (onHide: () => void) => JSX.Element;
+}) {
+  const [hidden, setHidden] = useState(() => localStorage.getItem(storageKey) === '1');
+  useEffect(() => {
+    setHidden(localStorage.getItem(storageKey) === '1');
+  }, [storageKey]);
+  const hide = () => { localStorage.setItem(storageKey, '1'); setHidden(true); };
+  const show = () => { localStorage.setItem(storageKey, '0'); setHidden(false); };
+
+  if (hidden) {
+    return (
+      <div className="bg-white/60 border border-dashed border-gray-300 rounded-2xl px-5 py-3 flex items-center justify-between">
+        <span className="text-xs font-semibold text-gray-400">🔄 {title} — 숨겨져 있습니다</span>
+        <button onClick={show}
+          className="text-xs font-bold text-purple-600 hover:text-purple-700 transition">
+          보이기
+        </button>
+      </div>
+    );
+  }
+  return children(hide);
+}
+
 // ── 사방넷 주문 자동수집 → 발주서 (과일/Itsoft) ────────────────────
-function SabangOrderCard({ section, supplierLabel }: { section: 'myeongi' | 'kolrabi'; supplierLabel: string }) {
+function SabangOrderCard({ section, supplierLabel, onHide }: {
+  section: 'myeongi' | 'kolrabi';
+  supplierLabel: string;
+  onHide?: () => void;
+}) {
   const [status, setStatus] = useState<SabangStatus | null>(null);
   const [fromDate, setFromDate] = useState(() => {
     const auto = getDefaultGogumaDateRange();
@@ -743,10 +774,18 @@ function SabangOrderCard({ section, supplierLabel }: { section: 'myeongi' | 'kol
             </p>
           </div>
         </div>
-        <button onClick={runTest}
-          className="shrink-0 px-3 py-1.5 rounded-lg border border-purple-200 text-xs font-semibold text-purple-700 hover:bg-purple-50 transition">
-          연결 테스트
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button onClick={runTest}
+            className="px-3 py-1.5 rounded-lg border border-purple-200 text-xs font-semibold text-purple-700 hover:bg-purple-50 transition">
+            연결 테스트
+          </button>
+          {onHide && (
+            <button onClick={onHide} title="이 카드를 숨깁니다 (언제든 보이기로 복원)"
+              className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition">
+              숨기기
+            </button>
+          )}
+        </div>
       </div>
 
       {status && !status.configured && (
@@ -841,7 +880,7 @@ function SabangOrderCard({ section, supplierLabel }: { section: 'myeongi' | 'kol
 }
 
 // ── 사방넷 송장 자동전송 (orderlist 업로드) ────────────────────────
-function SabangTrackingCard({ supplierLabel }: { supplierLabel: string }) {
+function SabangTrackingCard({ supplierLabel, onHide }: { supplierLabel: string; onHide?: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   // 발주처마다 택배사가 다름(쥬얼리·제주다팜 기본 롯데, CJ대한통운인 곳도 있음) — 전송 시마다 선택
   const [courier, setCourier] = useState<'lotte' | 'cj' | 'custom'>('lotte');
@@ -903,15 +942,23 @@ function SabangTrackingCard({ supplierLabel }: { supplierLabel: string }) {
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-purple-200 p-6 flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-xl">📮</div>
-        <div>
-          <h3 className="text-base font-bold text-gray-900">사방넷 송장 자동전송 (orderlist)</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {supplierLabel} 거래처 회신(orderlist)을 올리면 운송장번호를 사방넷에 자동 등록합니다.
-            <b> 사방넷 수집으로 만든 발주서의 회신에만 사용하세요</b> (D열 주문번호가 사방넷 번호여야 매칭됩니다).
-          </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-xl">📮</div>
+          <div>
+            <h3 className="text-base font-bold text-gray-900">사방넷 송장 자동전송 (orderlist)</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {supplierLabel} 거래처 회신(orderlist)을 올리면 운송장번호를 사방넷에 자동 등록합니다.
+              <b> 사방넷 수집으로 만든 발주서의 회신에만 사용하세요</b> (D열 주문번호가 사방넷 번호여야 매칭됩니다).
+            </p>
+          </div>
         </div>
+        {onHide && (
+          <button onClick={onHide} title="이 카드를 숨깁니다 (언제든 보이기로 복원)"
+            className="shrink-0 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition">
+            숨기기
+          </button>
+        )}
       </div>
 
       <FileUpload
@@ -1054,10 +1101,18 @@ function UnifiedProcessPage() {
       {/* 사방넷 자동수집 — 과일(Itsoft) 주문을 API로 끌어와 발주서 생성 */}
       {(productId === 'myeongi' || productId === 'kolrabi') && (
         <div className="mb-4 animate-slide-up">
-          <SabangOrderCard
-            section={productId as 'myeongi' | 'kolrabi'}
-            supplierLabel={productId === 'kolrabi' ? '제주다팜' : '쥬얼리프룻'}
-          />
+          <SabangHideWrap
+            storageKey={`sabang-order-hidden:${productId}`}
+            title={`사방넷 주문 자동수집 → ${productId === 'kolrabi' ? '제주다팜' : '쥬얼리프룻'} 발주서`}
+          >
+            {(onHide) => (
+              <SabangOrderCard
+                section={productId as 'myeongi' | 'kolrabi'}
+                supplierLabel={productId === 'kolrabi' ? '제주다팜' : '쥬얼리프룻'}
+                onHide={onHide}
+              />
+            )}
+          </SabangHideWrap>
         </div>
       )}
 
@@ -1078,7 +1133,17 @@ function UnifiedProcessPage() {
       {/* 사방넷 송장 자동전송 — 회신(orderlist) 업로드 시 사방넷에 운송장 등록 */}
       {(productId === 'myeongi' || productId === 'kolrabi') && (
         <div className="mt-4 animate-slide-up">
-          <SabangTrackingCard supplierLabel={productId === 'kolrabi' ? '제주다팜' : '쥬얼리'} />
+          <SabangHideWrap
+            storageKey={`sabang-tracking-hidden:${productId}`}
+            title="사방넷 송장 자동전송 (orderlist)"
+          >
+            {(onHide) => (
+              <SabangTrackingCard
+                supplierLabel={productId === 'kolrabi' ? '제주다팜' : '쥬얼리'}
+                onHide={onHide}
+              />
+            )}
+          </SabangHideWrap>
         </div>
       )}
 
