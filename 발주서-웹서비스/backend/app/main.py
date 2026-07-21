@@ -58,6 +58,7 @@ from app.routes.tenant import router as tenant_router
 from app.routes.billing import router as billing_router
 from app.routes.automation import router as automation_router
 from app.routes.rules import router as rules_router
+from app.routes.cs_refund import router as cs_refund_router
 from app.middleware import IPBlockMiddleware
 from app import db as database
 from app.scheduler import start_scheduler, stop_scheduler, refresh_products, refresh_orders
@@ -161,6 +162,7 @@ app.include_router(tenant_router)
 app.include_router(billing_router)
 app.include_router(automation_router)
 app.include_router(rules_router)
+app.include_router(cs_refund_router)
 app.include_router(dashboard_router, dependencies=[Depends(require_pro)])
 app.include_router(products_router, dependencies=[Depends(require_pro)])
 app.include_router(pricing_router, dependencies=[Depends(require_pro)])
