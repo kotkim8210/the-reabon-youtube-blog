@@ -373,6 +373,40 @@ export async function processTenantTracking(replyFiles: File[], deliveryFile: Fi
   return { blob, filename, stats };
 }
 
+export async function calcMargin(file: File): Promise<ProcessResult> {
+  const formData = new FormData();
+  formData.append('margin_file', file);
+  const res = await fetch(`${BASE_URL}/tenant/margin`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      throw new Error('인증이 만료되었습니다.');
+    }
+    const data = await res.json().catch(() => ({ detail: '마진 계산 중 오류가 발생했습니다.' }));
+    throw new Error(apiErrorMessage(data.detail, '마진 계산 중 오류가 발생했습니다.'));
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get('Content-Disposition') || '';
+  let filename = 'margin.xlsx';
+  const m = cd.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
+  if (m) filename = decodeURIComponent(m[1]);
+  let stats: Record<string, unknown> | null = null;
+  const sh = res.headers.get('X-Stats');
+  if (sh) { try { stats = JSON.parse(sh); } catch { /* ignore */ } }
+  return { blob, filename, stats };
+}
+
+export async function downloadMarginTemplate(): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(`${BASE_URL}/tenant/margin/template`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('빈 양식 다운로드에 실패했습니다.');
+  return { blob: await res.blob(), filename: '소싱현황_빈양식.xlsx' };
+}
+
 export interface ProcessResult {
   blob: Blob;
   filename: string;

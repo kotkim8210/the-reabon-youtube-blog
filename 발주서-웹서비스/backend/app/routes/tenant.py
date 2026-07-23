@@ -215,6 +215,59 @@ async def process_delivery(
     )
 
 
+# --- 마진 계산기 (소싱현황) ---
+
+@router.get("/margin/template")
+async def margin_template(user: dict = Depends(verify_token)):
+    """빈 정식 양식 다운로드 — 판매가·공급가만 채워 다시 업로드하면 됩니다."""
+    del user
+    from app.processors.margin_calc import blank_template_bytes
+    data = blank_template_bytes()
+    encoded = quote("소싱현황_빈양식.xlsx", safe="")
+    return StreamingResponse(
+        BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"},
+    )
+
+
+@router.post("/margin")
+async def margin_calculate(
+    margin_file: UploadFile = File(...),
+    user: dict = Depends(verify_token),
+):
+    """판매가·공급가가 든 파일 업로드 → 정식 양식 마진 산출 파일 생성.
+
+    마진방어·쿠팡수수료·소득세16%·cs로스까지 반영(축소양식 아님).
+    """
+    del user
+    from app.processors.margin_calc import build_sourcing_sheet, parse_input_file
+
+    file_bytes = await margin_file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="빈 파일입니다.")
+    try:
+        rows = parse_input_file(file_bytes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"파일을 읽지 못했습니다: {e}")
+    if not rows:
+        raise HTTPException(status_code=400, detail="판매가·공급가가 입력된 행이 없습니다.")
+
+    title = (margin_file.filename or "소싱현황").rsplit(".", 1)[0]
+    data, filename, stats = build_sourcing_sheet(rows, title=title)
+    encoded = quote(filename, safe="")
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+    import json
+    headers["X-Stats"] = json.dumps(stats, ensure_ascii=False)
+    return StreamingResponse(
+        BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
+
+
 # --- Tracking (운송장 입력 셀프서비스) ---
 
 @router.post("/tracking")

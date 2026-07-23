@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { processTenantOrder, processTenantTracking, downloadBlob, getBillingMe, ProcessResult, BillingMe } from '../api';
+import { processTenantOrder, processTenantTracking, calcMargin, downloadMarginTemplate, downloadBlob, getBillingMe, ProcessResult, BillingMe } from '../api';
 
 function TenantOrderPage() {
   const [loading, setLoading] = useState(false);
@@ -13,6 +13,11 @@ function TenantOrderPage() {
   const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [trackingDeliveryFile, setTrackingDeliveryFile] = useState<File | null>(null);
   const [billing, setBilling] = useState<BillingMe | null>(null);
+  // 마진 계산기
+  const [marginFile, setMarginFile] = useState<File | null>(null);
+  const [marginLoading, setMarginLoading] = useState(false);
+  const [marginError, setMarginError] = useState('');
+  const [marginResult, setMarginResult] = useState<ProcessResult | null>(null);
 
   async function loadBilling() {
     try {
@@ -68,6 +73,31 @@ function TenantOrderPage() {
       setTrackingError(msg);
     } finally {
       setTrackingLoading(false);
+    }
+  };
+
+  const handleMargin = async () => {
+    if (!marginFile) { setMarginError('판매가·공급가가 든 파일을 선택하세요.'); return; }
+    setMarginLoading(true);
+    setMarginError('');
+    setMarginResult(null);
+    try {
+      const res = await calcMargin(marginFile);
+      setMarginResult(res);
+      downloadBlob(res.blob, res.filename);
+    } catch (err) {
+      setMarginError(err instanceof Error ? err.message : '마진 계산 중 오류가 발생했습니다.');
+    } finally {
+      setMarginLoading(false);
+    }
+  };
+
+  const handleMarginTemplate = async () => {
+    try {
+      const { blob, filename } = await downloadMarginTemplate();
+      downloadBlob(blob, filename);
+    } catch (err) {
+      setMarginError(err instanceof Error ? err.message : '양식 다운로드 실패');
     }
   };
 
@@ -312,6 +342,66 @@ function TenantOrderPage() {
           </button>
         </div>
       )}
+
+      {/* 마진 계산기 (소싱현황) */}
+      <div className="bg-white rounded-2xl border border-amber-200 p-6 mt-6">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xl">📊</span>
+          <h3 className="text-sm font-bold text-gray-800">마진 계산기 (소싱현황)</h3>
+        </div>
+        <p className="text-xs leading-5 text-gray-500 mb-4">
+          <b>판매가(쿠폰가)</b>와 <b>공급가(원가)</b>가 든 파일을 올리면, 쿠팡수수료·마진방어·소득세·CS로스까지 반영한
+          정식 소싱현황 파일을 만들어 드립니다. 마진이 마이너스인 상품은 빨간색으로 표시됩니다.
+          <button onClick={handleMarginTemplate} className="ml-1 text-amber-700 font-semibold underline hover:text-amber-800">
+            빈 양식 내려받기
+          </button>
+        </p>
+
+        {marginError && (
+          <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">{marginError}</div>
+        )}
+
+        <div className="mb-4">
+          <label className="block text-xs text-gray-500 mb-2">파일 선택 (상품명·옵션·판매가·공급가 열 포함)</label>
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) { setMarginFile(f); setMarginResult(null); setMarginError(''); } }}
+            className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4
+                       file:rounded-lg file:border-0 file:text-sm file:font-medium
+                       file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100"
+          />
+          {marginFile && <p className="text-xs text-gray-400 mt-1">{marginFile.name}</p>}
+        </div>
+
+        <button
+          onClick={handleMargin}
+          disabled={marginLoading || !marginFile}
+          className="w-full py-3 bg-amber-500 text-white rounded-xl font-semibold text-sm hover:bg-amber-600
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        >
+          {marginLoading ? '계산 중...' : '마진 계산하기'}
+        </button>
+
+        {marginResult && (
+          <div className="mt-4 bg-amber-50 border border-amber-200 rounded-2xl p-4 animate-fade-in">
+            <h4 className="text-sm font-bold text-amber-800 mb-2">계산 완료 (자동 다운로드됨)</h4>
+            {marginResult.stats && (
+              <div className="text-xs text-amber-700 mb-3">
+                {Object.entries(marginResult.stats).map(([k, v]) => (
+                  <span key={k} className="mr-3">{k.replace(/_/g, ' ')}: {String(v)}</span>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => downloadBlob(marginResult.blob, marginResult.filename)}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700"
+            >
+              다시 다운로드
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
