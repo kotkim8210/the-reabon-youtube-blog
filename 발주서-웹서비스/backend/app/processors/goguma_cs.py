@@ -105,24 +105,62 @@ def suggest_reply(content: str) -> tuple[str, str]:
     return DEFAULT_TEMPLATE
 
 
-def _normalize_inquiry(item: dict) -> dict:
+def _normalize_inquiry(item: dict, unanswered_ids: set) -> dict:
     order_ids = item.get("orderIds") or []
     if not isinstance(order_ids, list):
         order_ids = [order_ids]
     content = str(item.get("content") or "")
     category, reply = suggest_reply(content)
+    # commentDtoList = 지금까지의 답변/대화 (최상위 content=고객 질문)
+    comments = []
+    for cm in item.get("commentDtoList") or []:
+        if isinstance(cm, dict):
+            comments.append({
+                "content": str(cm.get("content") or ""),
+                "at": str(cm.get("inquiryCommentAt") or ""),
+            })
+    inquiry_id = item.get("inquiryId")
     return {
-        "inquiry_id": item.get("inquiryId"),
+        "inquiry_id": inquiry_id,
         "content": content,
         "inquiry_at": str(item.get("inquiryAt") or ""),
         "order_ids": [str(o) for o in order_ids if o],
+        "answered": inquiry_id not in unanswered_ids,
+        "comments": comments,
         "category": category,
         "suggested_reply": reply,
     }
 
 
-async def list_unanswered_inquiries(days: int = 7) -> dict:
-    """최근 N일간 미답변 온라인문의를 수집하고 추천 답변을 붙인다."""
+async def _fetch_all(answered_type: str, window_start, window_end) -> list[dict]:
+    """한 조회구간(≤7일)의 모든 페이지를 answered_type별로 수집."""
+    items: list[dict] = []
+    page = 1
+    while page <= _MAX_PAGES:
+        res = await coupang_goguma_client.get_online_inquiries(
+            inquiry_start_at=window_start.isoformat(),
+            inquiry_end_at=window_end.isoformat(),
+            answered_type=answered_type,
+            page_num=page,
+            page_size=50,
+        )
+        data = (res or {}).get("data") or {}
+        page_items = data.get("content") or []
+        items.extend(i for i in page_items if isinstance(i, dict))
+        total_pages = int((data.get("pagination") or {}).get("totalPages") or 1)
+        if page >= total_pages or not page_items:
+            break
+        page += 1
+    return items
+
+
+async def list_inquiries(days: int = 7) -> dict:
+    """최근 N일간 온라인문의 전체를 상태(답변완료/미답변)·대화와 함께 수집.
+
+    쿠팡 answeredType=NOANSWER가 답변완료를 걸러버려 화면이 늘 비었던 문제 해결:
+    ALL로 전체를 가져오고 NOANSWER로 미답변 ID를 따로 받아 각 문의에 표시한다.
+    미답변을 위로 정렬해 확인·전송하기 쉽게 한다.
+    """
     days = max(1, min(int(days or 7), 30))
     today = datetime.now(KST).date()
     start = today - timedelta(days=days - 1)
@@ -133,40 +171,38 @@ async def list_unanswered_inquiries(days: int = 7) -> dict:
     window_start = start
     while window_start <= today:
         window_end = min(window_start + timedelta(days=_MAX_WINDOW_DAYS - 1), today)
-        page = 1
-        while page <= _MAX_PAGES:
-            res = await coupang_goguma_client.get_online_inquiries(
-                inquiry_start_at=window_start.isoformat(),
-                inquiry_end_at=window_end.isoformat(),
-                answered_type="NOANSWER",
-                page_num=page,
-                page_size=50,
-            )
-            data = (res or {}).get("data") or {}
-            items = data.get("content") or []
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                normalized = _normalize_inquiry(item)
-                if normalized["inquiry_id"] in seen_ids:
-                    continue
-                seen_ids.add(normalized["inquiry_id"])
-                inquiries.append(normalized)
-
-            pagination = data.get("pagination") or {}
-            total_pages = int(pagination.get("totalPages") or 1)
-            if page >= total_pages or not items:
-                break
-            page += 1
+        unanswered = await _fetch_all("NOANSWER", window_start, window_end)
+        unanswered_ids = {u.get("inquiryId") for u in unanswered}
+        all_items = await _fetch_all("ALL", window_start, window_end)
+        for item in all_items:
+            inquiry_id = item.get("inquiryId")
+            if inquiry_id in seen_ids:
+                continue
+            seen_ids.add(inquiry_id)
+            inquiries.append(_normalize_inquiry(item, unanswered_ids))
         window_start = window_end + timedelta(days=1)
 
-    inquiries.sort(key=lambda x: x["inquiry_at"], reverse=True)
+    # 미답변 먼저, 그 다음 최신순
+    inquiries.sort(key=lambda x: (x["answered"], _neg_key(x["inquiry_at"])))
+    unanswered_count = sum(1 for x in inquiries if not x["answered"])
     return {
         "total": len(inquiries),
+        "unanswered": unanswered_count,
+        "answered": len(inquiries) - unanswered_count,
         "days": days,
         "period": f"{start.isoformat()} ~ {today.isoformat()}",
         "inquiries": inquiries,
     }
+
+
+def _neg_key(s: str) -> str:
+    """문자열 날짜 내림차순 정렬용(각 문자를 반전)."""
+    return "".join(chr(0x10FFFF - ord(ch)) for ch in s)
+
+
+# 하위호환: 기존 엔드포인트가 부르던 이름 유지
+async def list_unanswered_inquiries(days: int = 7) -> dict:
+    return await list_inquiries(days)
 
 
 async def send_reply(inquiry_id: int, content: str) -> dict:

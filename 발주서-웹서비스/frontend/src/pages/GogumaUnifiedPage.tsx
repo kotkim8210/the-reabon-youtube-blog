@@ -806,9 +806,11 @@ function CoupangInquiryTab() {
   const [error, setError] = useState('');
   const [period, setPeriod] = useState('');
   const [inquiries, setInquiries] = useState<GogumaCsInquiry[]>([]);
+  const [counts, setCounts] = useState({ total: 0, unanswered: 0, answered: 0 });
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [sentIds, setSentIds] = useState<number[]>([]);
+  const [onlyUnanswered, setOnlyUnanswered] = useState(false);
   const [fetched, setFetched] = useState(false);
 
   const handleFetch = useCallback(async (d: number) => {
@@ -817,7 +819,9 @@ function CoupangInquiryTab() {
     try {
       const res = await fetchGogumaCsInquiries(d);
       setInquiries(res.inquiries);
+      setCounts({ total: res.total, unanswered: res.unanswered, answered: res.answered });
       setPeriod(res.period);
+      setSentIds([]);
       // 추천 답변을 편집 가능한 초안으로 미리 채움 (이미 수정 중인 초안은 유지)
       setDrafts((prev) => {
         const next: Record<number, string> = {};
@@ -853,7 +857,8 @@ function CoupangInquiryTab() {
     }
   };
 
-  const pending = inquiries.filter((i) => !sentIds.includes(i.inquiry_id));
+  const isAnswered = (inq: GogumaCsInquiry) => inq.answered || sentIds.includes(inq.inquiry_id);
+  const visible = onlyUnanswered ? inquiries.filter((i) => !isAnswered(i)) : inquiries;
 
   return (
     <div className="space-y-4">
@@ -861,15 +866,15 @@ function CoupangInquiryTab() {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center gap-2 mb-4">
           <PlatformBadge platform="coupang" />
-          <span className="text-sm font-bold text-gray-900">미답변 고객 문의</span>
+          <span className="text-sm font-bold text-gray-900">고객 문의 (온라인문의)</span>
           {period && <span className="text-xs text-gray-400">({period})</span>}
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          쿠팡 고구마 계정의 미답변 온라인문의를 불러와 추천 답변을 보여줍니다.
-          내용을 확인·수정한 뒤 <b>답변 전송</b>을 누르면 쿠팡에 바로 등록됩니다.
+          쿠팡 고구마 계정의 온라인문의를 불러옵니다. <b className="text-rose-600">미답변</b>은 위로 정렬되며,
+          추천 답변을 확인·수정한 뒤 <b>답변 전송</b>을 누르면 쿠팡에 바로 등록됩니다.
           (24시간 내 미답변은 판매자점수에 영향)
         </p>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}
             className="px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-orange-300 outline-none">
             <option value={3}>최근 3일</option>
@@ -881,51 +886,92 @@ function CoupangInquiryTab() {
             className="bg-orange-500 text-white px-6 py-2.5 rounded-xl font-semibold text-sm hover:bg-orange-600 disabled:opacity-50 transition-all shadow-md shadow-orange-200">
             {loading ? '조회 중...' : '문의 조회'}
           </button>
+          {fetched && !loading && (
+            <>
+              <span className="text-xs text-gray-500">전체 {counts.total}건</span>
+              <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700">미답변 {counts.unanswered}</span>
+              <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">답변완료 {counts.answered}</span>
+              <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={onlyUnanswered} onChange={(e) => setOnlyUnanswered(e.target.checked)} className="w-4 h-4 accent-rose-500" />
+                미답변만 보기
+              </label>
+            </>
+          )}
         </div>
       </div>
 
       {error && <ErrorBanner message={error} />}
-      {loading && <Spinner text="쿠팡 미답변 문의를 불러오고 있습니다..." color="orange" />}
+      {loading && <Spinner text="쿠팡 고객 문의를 불러오고 있습니다..." color="orange" />}
 
-      {/* 결과: 문의별 카드 (문의내용 → 추천 답변 → 전송 버튼) */}
-      {!loading && fetched && pending.length === 0 && (
+      {!loading && fetched && visible.length === 0 && (
         <div className="bg-green-50 border border-green-200 rounded-2xl p-6 text-center animate-fade-in">
           <p className="text-sm font-bold text-green-700">
-            {sentIds.length > 0 ? `답변 ${sentIds.length}건 전송 완료 — 남은 미답변 문의가 없습니다. 🎉` : '미답변 문의가 없습니다. 🎉'}
+            {onlyUnanswered ? '미답변 문의가 없습니다. 🎉'
+              : counts.total === 0 ? '해당 기간에 문의가 없습니다.' : '표시할 문의가 없습니다.'}
           </p>
         </div>
       )}
-      {pending.map((inq) => (
-        <div key={inq.inquiry_id} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 animate-fade-in">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
-                {inq.category}
-              </span>
-              <span className="text-xs text-gray-400">{inq.inquiry_at}</span>
+
+      {/* 결과: 문의별 카드 (상태 → 문의내용 → 대화 → 추천 답변 → 전송) */}
+      {visible.map((inq) => {
+        const answered = isAnswered(inq);
+        return (
+          <div key={inq.inquiry_id}
+            className={`bg-white rounded-2xl shadow-sm border p-5 animate-fade-in ${answered ? 'border-gray-200' : 'border-rose-200'}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${answered ? 'bg-gray-100 text-gray-500' : 'bg-rose-100 text-rose-700'}`}>
+                  {answered ? '답변완료' : '미답변'}
+                </span>
+                <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+                  {inq.category}
+                </span>
+                <span className="text-xs text-gray-400">{inq.inquiry_at}</span>
+              </div>
+              {inq.order_ids.length > 0 && (
+                <span className="text-xs text-gray-500 font-mono">주문 {inq.order_ids.join(', ')}</span>
+              )}
             </div>
-            {inq.order_ids.length > 0 && (
-              <span className="text-xs text-gray-500 font-mono">주문 {inq.order_ids.join(', ')}</span>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-3">
+              <p className="text-xs font-semibold text-gray-500 mb-1">고객 문의</p>
+              <p className="text-sm text-gray-900 whitespace-pre-wrap">{inq.content || '(내용 없음)'}</p>
+            </div>
+
+            {inq.comments.length > 0 && (
+              <div className="mb-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-500">지금까지 답변 ({inq.comments.length})</p>
+                {inq.comments.map((cm, i) => (
+                  <div key={i} className="bg-blue-50/60 border border-blue-100 rounded-xl p-3">
+                    <p className="text-[11px] text-blue-400 mb-0.5">{cm.at}</p>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{cm.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {answered ? (
+              <p className="text-xs text-gray-400">✓ 이미 답변된 문의입니다.
+                {sentIds.includes(inq.inquiry_id) && ' (방금 전송됨)'}
+              </p>
+            ) : (
+              <>
+                <p className="text-xs font-semibold text-gray-500 mb-1">추천 답변 (수정 가능)</p>
+                <textarea
+                  value={drafts[inq.inquiry_id] ?? inq.suggested_reply}
+                  onChange={(e) => setDrafts((prev) => ({ ...prev, [inq.inquiry_id]: e.target.value }))}
+                  rows={6}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-orange-300 focus:border-orange-400 outline-none transition-all mb-3"
+                />
+                <button onClick={() => handleSend(inq)}
+                  disabled={sendingId !== null || !(drafts[inq.inquiry_id] ?? inq.suggested_reply).trim()}
+                  className="bg-orange-500 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-orange-600 disabled:opacity-50 transition-all shadow-md shadow-orange-200">
+                  {sendingId === inq.inquiry_id ? '전송 중...' : '✅ 확인 — 답변 전송'}
+                </button>
+              </>
             )}
           </div>
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-3">
-            <p className="text-xs font-semibold text-gray-500 mb-1">문의 내용</p>
-            <p className="text-sm text-gray-900 whitespace-pre-wrap">{inq.content || '(내용 없음)'}</p>
-          </div>
-          <p className="text-xs font-semibold text-gray-500 mb-1">추천 답변 (수정 가능)</p>
-          <textarea
-            value={drafts[inq.inquiry_id] ?? inq.suggested_reply}
-            onChange={(e) => setDrafts((prev) => ({ ...prev, [inq.inquiry_id]: e.target.value }))}
-            rows={6}
-            className="w-full px-4 py-3 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-orange-300 focus:border-orange-400 outline-none transition-all mb-3"
-          />
-          <button onClick={() => handleSend(inq)}
-            disabled={sendingId !== null || !(drafts[inq.inquiry_id] ?? inq.suggested_reply).trim()}
-            className="bg-orange-500 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-orange-600 disabled:opacity-50 transition-all shadow-md shadow-orange-200">
-            {sendingId === inq.inquiry_id ? '전송 중...' : '✅ 확인 — 답변 전송'}
-          </button>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

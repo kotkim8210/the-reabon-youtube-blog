@@ -756,17 +756,26 @@ export async function processGogumaTrackingApi(
 
 // --- Goguma Coupang CS (온라인 문의) ---
 
+export interface GogumaCsComment {
+  content: string;
+  at: string;
+}
+
 export interface GogumaCsInquiry {
   inquiry_id: number;
   content: string;
   inquiry_at: string;
   order_ids: string[];
+  answered: boolean;
+  comments: GogumaCsComment[];
   category: string;
   suggested_reply: string;
 }
 
 export interface GogumaCsInquiriesResult {
   total: number;
+  unanswered: number;
+  answered: number;
   days: number;
   period: string;
   inquiries: GogumaCsInquiry[];
