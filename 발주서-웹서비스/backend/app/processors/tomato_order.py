@@ -337,6 +337,10 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
         if ("복숭아" in text and not _non_shinbi_peach(text, option)
                 and peach_kg(text, option) not in JEWELRY_PEACH_KGS):
             continue
+        # 백도 딱딱이복숭아 2·4kg은 제주다팜 이관 → 쥬얼리 토스 수집 제외(1kg만 쥬얼리).
+        from app.processors.myeongi_order import _is_baekdo, _baekdo_kg
+        if _is_baekdo(text, option) and _baekdo_kg(text, option) != "1":
+            continue
         # 품목명/무게 매칭은 상품명(K)을 우선으로 본다. 옵션(L)이 비거나 잘못 적혀도
         # 상품명에서 무게·종류를 읽도록 깨끗한 productName을 넘긴다. (없을 때만 전체 text)
         product_name = normalize(item.get("productName") or "") or text
@@ -452,6 +456,7 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     from app.toss.client import toss_client
     from app.processors.kolrabi_order import (
         convert_bamhobak_option,
+        convert_jeju_baekdo_option,
         convert_potato_option,
         convert_quantity,
     )
@@ -461,10 +466,12 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     colrabi: list[dict] = []
     bamhobak: list[dict] = []
     potato: list[dict] = []
+    baekdo: list[dict] = []
     for item in orders:
         text = _toss_item_text(item)
         compact = text.replace(" ", "")
-        if "콜라비" not in compact and "밤호박" not in compact and "홍감자" not in compact:
+        if ("콜라비" not in compact and "밤호박" not in compact
+                and "홍감자" not in compact and "백도" not in compact):
             continue
         order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
         if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
@@ -510,8 +517,12 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
             product = convert_potato_option(product_name, option)  # 중1→중2, 대3→특3, 대5→특5
             if product:
                 potato.append(_entry(product, "toss-potato"))
+        elif "백도" in compact:
+            product = convert_jeju_baekdo_option(product_name, option)  # 2·4kg만(1kg은 쥬얼리)
+            if product:
+                baekdo.append(_entry(product, "toss-baekdo"))
 
-    return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato}
+    return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato, "baekdo": baekdo}
 
 
 def parse_alwayz_jbt_rows(alwayz_bytes: bytes) -> tuple[list, dict]:

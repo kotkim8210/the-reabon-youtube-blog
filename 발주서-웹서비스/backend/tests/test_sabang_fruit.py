@@ -22,7 +22,7 @@ SAMPLE_ORDER_RESPONSE = (
     "<RECEIVE_ADDR>서울시 강남구 테스트로 1</RECEIVE_ADDR>"
     "<DELV_MSG>문앞에 놔주세요</DELV_MSG>"
     "<PRODUCT_NAME>고당도 햇 백도 딱딱이복숭아 국내산 산지직송</PRODUCT_NAME>"
-    "<SKU_VALUE>2kg, 1박스, 중과</SKU_VALUE>"
+    "<SKU_VALUE>1kg, 1박스, 중과</SKU_VALUE>"
     "<SALE_CNT>2</SALE_CNT>"
     "</DATA>\n"
     "<DATA>"
@@ -88,7 +88,7 @@ def test_orders_to_delivery_xlsx_columns():
     row = rows[0]
     assert row[2].value == "20260718-0000001"          # C 주문번호 = 사방넷 IDX
     assert "백도 딱딱이복숭아" in row[10].value          # K 상품명
-    assert row[11].value == "2kg, 1박스, 중과"          # L 옵션
+    assert row[11].value == "1kg, 1박스, 중과"          # L 옵션
     assert str(row[22].value) == "2"                    # W 수량
     assert row[26].value == "김테스트"                   # AA 수취인
     assert row[27].value == "010-1111-2222"             # AB 전화

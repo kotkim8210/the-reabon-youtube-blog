@@ -216,8 +216,15 @@ def _is_baekdo(product_name: object, option_text: object) -> bool:
     return "백도" in _combined_text(product_name, option_text).replace(" ", "")
 
 
+def _baekdo_kg(product_name: object, option_text: object) -> str:
+    text = _combined_text(product_name, option_text)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
+    return _fmt_kg(m.group(1)) if m else ""
+
+
 def is_jewelry_baekdo_order(product_name: object, option_text: object) -> bool:
-    return _is_baekdo(product_name, option_text)
+    # 2026-07 백도 2·4kg은 제주다팜(kolrabi) 이관 → 쥬얼리는 1kg(중과·대과)만 발주.
+    return _is_baekdo(product_name, option_text) and _baekdo_kg(product_name, option_text) == "1"
 
 
 # 쿠팡 백도 (등급, kg) → 발주 품목 과수 표기 (마진 소싱현황 기준 2026-07)
@@ -237,6 +244,9 @@ def _jewelry_baekdo_option(product_name: object, option_text: object) -> str | N
     text = _combined_text(product_name, option_text)
     m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
     kg = _fmt_kg(m.group(1)) if m else ""
+    if kg != "1":
+        # 2·4kg은 제주다팜(kolrabi) 발주로 이관됨 — 쥬얼리에서는 1kg만 출력.
+        return None
     grade = "대과" if "대과" in text else "중과"  # 기본 중과
     count = _BAEKDO_COUNTS.get((grade, kg), "")
     base = "백도 딱딱이 복숭아"

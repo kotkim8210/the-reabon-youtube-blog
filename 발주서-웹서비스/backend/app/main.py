@@ -409,10 +409,11 @@ async def process_kolrabi_order(
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
             delivery_bytes, issued_excluded, skipped_names=dup_names
         )
-        # 토스 제주다팜 주문(콜라비 + 미니밤호박 1kg + 홍감자)을 토스 API로 수집해 각 발주서에 합친다.
+        # 토스 제주다팜 주문(콜라비 + 미니밤호박 1kg + 홍감자 + 백도 2·4kg)을 토스 API로 수집해 각 발주서에 합친다.
         toss_colrabi_entries = []
         toss_bamhobak_entries = []
         toss_potato_entries = []
+        toss_baekdo_entries = []
         toss_error = ""
         collect_dates = None
         if toss_from_date and toss_to_date:
@@ -435,7 +436,11 @@ async def process_kolrabi_order(
                 toss_potato_entries, _dup_p = issued_orders.filter_entries_by_issued(
                     toss_potato_entries, issued_excluded, skipped_names=dup_names
                 )
-                dup_skipped += _dup_c + _dup_b + _dup_p
+                toss_baekdo_entries = toss_jeju.get("baekdo", [])
+                toss_baekdo_entries, _dup_bd = issued_orders.filter_entries_by_issued(
+                    toss_baekdo_entries, issued_excluded, skipped_names=dup_names
+                )
+                dup_skipped += _dup_c + _dup_b + _dup_p + _dup_bd
             except Exception as toss_exc:
                 toss_error = str(toss_exc)
                 logger.warning(f"토스 제주다팜(콜라비·미니밤호박) 수집 실패(발주는 계속): {toss_exc}")
@@ -445,12 +450,13 @@ async def process_kolrabi_order(
             toss_colrabi_entries=toss_colrabi_entries,
             toss_bamhobak_entries=toss_bamhobak_entries,
             toss_potato_entries=toss_potato_entries,
+            toss_baekdo_entries=toss_baekdo_entries,
         )
         if not results:
             dup_note = f" (이전 발주분 {dup_skipped}건 자동 제외됨)" if dup_skipped else ""
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자 주문을 찾지 못했습니다.{dup_note}",
+                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자·백도딱딱이복숭아 주문을 찾지 못했습니다.{dup_note}",
             )
 
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)

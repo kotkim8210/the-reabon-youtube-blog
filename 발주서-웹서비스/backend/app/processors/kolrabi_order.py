@@ -134,6 +134,32 @@ def convert_potato_option(product_name: object, option_text: object) -> str | No
     return f"홍감자 {grade} {kg}kg"
 
 
+# 백도 딱딱이복숭아 — 2026-07 중과/대과 2·4kg만 쥬얼리프룻→제주다팜 발주 이관.
+# 1kg(중과·대과)은 쥬얼리프룻 잔류(명이나물 메뉴). 제주다팜 발주명은 '딱딱이 복숭아 {등급} {kg}kg'
+# (등급 대과/중과, kg 2/4 — 제주다팜 판매옵션 그대로, 과수 표기 없음).
+_BAEKDO_JEJU_KGS = ("2", "4")
+
+
+def is_jeju_baekdo_order(product_name: object, option_text: object) -> bool:
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    if "백도" not in text:
+        return False
+    m = re.search(r"(\d+)kg", text, re.IGNORECASE)
+    kg = m.group(1) if m else ""
+    return kg in _BAEKDO_JEJU_KGS
+
+
+def convert_jeju_baekdo_option(product_name: object, option_text: object) -> str | None:
+    """백도 딱딱이복숭아 2·4kg DeliveryList → 제주다팜 발주명 '딱딱이 복숭아 {등급} {kg}kg'."""
+    if not is_jeju_baekdo_order(product_name, option_text):
+        return None
+    text = _combined_text(product_name, option_text)
+    m = re.search(r"(\d+)\s*kg", text, re.IGNORECASE)
+    kg = m.group(1) if m else ""
+    grade = "대과" if "대과" in text else "중과"
+    return f"딱딱이 복숭아 {grade} {kg}kg"
+
+
 def clear_stray_header_numbers(ws) -> None:
     for col in range(14, ws.max_column + 1):
         cell = ws.cell(row=1, column=col)
@@ -582,14 +608,17 @@ def process_bamhobak(
     return output.read(), filename, stats
 
 
-def process_potato(
+def _build_jejudapam_order(
     delivery_file_bytes: bytes,
+    converter,
+    product_label: str,
+    filename: str,
     toss_entries: list[dict] | None = None,
 ) -> tuple[bytes, str, dict] | None:
-    """Process DeliveryList rows for 제주다팜 홍감자 발주 (2026-07 쥬얼리 품절로 이관).
+    """제주다팜 단일품목 발주서 생성 코어 (홍감자·백도 공용).
 
-    쿠팡 옵션 매칭: 중 1kg→중 2kg, 대 3kg→특 3kg, 대 5kg→특 5kg (그 외 등급·kg 그대로).
-    toss_entries: 토스 API에서 수집한 홍감자 주문(선택) — product 확정 상태로 행 추가.
+    converter(product_name, option)이 발주명을 돌려주면(None이면 제외) 콜라비_제주다팜_원본
+    템플릿에 채운다. toss_entries는 product 확정 상태로 행 추가.
     """
     dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes), data_only=True)
     dl_ws = dl_wb.active
@@ -598,7 +627,7 @@ def process_potato(
     for row in dl_ws.iter_rows(min_row=2):
         product_name = normalize(row[10].value) if len(row) > 10 else ""
         option = normalize(row[11].value) if len(row) > 11 else ""
-        converted = convert_potato_option(product_name, option)
+        converted = converter(product_name, option)
         if converted:
             filtered_rows.append((row, converted))
 
@@ -732,14 +761,42 @@ def process_potato(
     tmpl_wb.save(output)
     output.seek(0)
 
-    now = datetime.now(KST)
-    filename = f"제주다팜_아이티소프트_홍감자발주({now.strftime('%Y%m%d')}).xlsx"
     stats = {
         "total": len(filtered_rows) + len(toss_entries or []),
-        "product": "홍감자(제주다팜)",
+        "product": product_label,
         "options": list(option_totals.values()),
     }
     return output.read(), filename, stats
+
+
+def process_potato(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """홍감자 제주다팜 발주 (2026-07 쥬얼리 품절 이관, 중1→중2·대3→특3·대5→특5)."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_potato_option,
+        "홍감자(제주다팜)",
+        f"제주다팜_아이티소프트_홍감자발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+    )
+
+
+def process_baekdo(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """백도 딱딱이복숭아 2·4kg 제주다팜 발주 (2026-07 쥬얼리→제주다팜, 1kg은 쥬얼리 잔류)."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_jeju_baekdo_option,
+        "백도딱딱이복숭아(제주다팜)",
+        f"제주다팜_아이티소프트_백도딱딱이복숭아발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+    )
 
 
 def process_outputs(
@@ -747,6 +804,7 @@ def process_outputs(
     toss_colrabi_entries: list[dict] | None = None,
     toss_bamhobak_entries: list[dict] | None = None,
     toss_potato_entries: list[dict] | None = None,
+    toss_baekdo_entries: list[dict] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
     """제주다팜 발주서 목록 반환 — 콜라비 + 미니밤호박 + 홍감자.
 
@@ -775,5 +833,9 @@ def process_outputs(
     potato_result = process_potato(delivery_file_bytes, toss_entries=toss_potato_entries)
     if potato_result and int((potato_result[2] or {}).get("total") or 0) > 0:
         results.append(potato_result)
+
+    baekdo_result = process_baekdo(delivery_file_bytes, toss_entries=toss_baekdo_entries)
+    if baekdo_result and int((baekdo_result[2] or {}).get("total") or 0) > 0:
+        results.append(baekdo_result)
 
     return results
