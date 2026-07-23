@@ -1472,3 +1472,39 @@ export async function simulateRules(file: File): Promise<RuleSimulateResult> {
   }
   return res.json();
 }
+
+// 파일로 규칙 초안 자동 생성: ProductRuleInput 필드 + UI 표시용 meta
+export interface RuleDraft extends ProductRuleInput {
+  order_count: number;
+  sample_options: string[];
+  warnings: string[];
+  already_matched: boolean;
+  existing_output: string;
+}
+
+export interface RuleInferResult {
+  drafts: RuleDraft[];
+  covered: RuleDraft[];
+  product_count: number;
+}
+
+export async function inferRules(file: File, supplierKey: string): Promise<RuleInferResult> {
+  const formData = new FormData();
+  formData.append('delivery_file', file);
+  formData.append('supplier_key', supplierKey);
+  const res = await fetch(`${BASE_URL}/rules/infer`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+    throw new Error('인증 만료');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: `API error: ${res.status}` }));
+    throw new Error(apiErrorMessage(data.detail, `API error: ${res.status}`));
+  }
+  return res.json();
+}

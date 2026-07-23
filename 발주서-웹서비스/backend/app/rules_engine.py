@@ -223,6 +223,171 @@ def simulate_delivery(delivery_bytes: bytes, max_rows: int = 500) -> dict:
     }
 
 
+# ── 파일로 규칙 초안 자동 생성 (Phase 2-B: 셀프서비스 온보딩) ─────────────
+# DeliveryList의 상품명(K)·옵션(L) 패턴에서 규칙 초안을 뽑아 고객이 확인·저장한다.
+# 완전 무인 자동은 위험(오매핑=오배송)하므로 '초안 제시 → 사람 확인'만 담당.
+
+_INFER_GRADE_VOCAB = [
+    "로얄대과", "로얄중과", "로얄소과", "로얄과",
+    "특대과", "중대과", "중소과", "왕대과",
+    "특상", "중상", "상특", "특대", "왕특",
+    "대과", "중과", "소과", "특품", "중품", "상품",
+    "왕", "특", "대", "중", "소", "상", "로얄", "못난이", "가정용", "실속", "정품",
+]
+_INFER_GRADES_SORTED = sorted(set(_INFER_GRADE_VOCAB), key=len, reverse=True)
+_INFER_SINGLE_GRADES = {g for g in _INFER_GRADE_VOCAB if len(g) == 1}
+
+_INFER_NAME_NOISE = {
+    "고당도", "햇", "국내산", "국산", "산지직송", "산지", "직송", "프리미엄",
+    "당일수확", "당일발송", "무료배송", "선물용", "선물세트", "세척", "손질",
+    "냉장", "냉동", "유기농", "친환경", "무농약", "특가", "정품", "실속", "가정용",
+    "새벽배송", "당일", "명품", "프레시", "주문폭주", "인기",
+}
+
+_INFER_TOKEN_RE = re.compile(r"[,/·|]+|\s+")
+
+
+def _infer_grades_in(option: str) -> list[str]:
+    """옵션 텍스트에서 등급 토큰을 뽑는다. 단일글자 등급은 독립 토큰일 때만 인정."""
+    found: list[str] = []
+    for tok in _INFER_TOKEN_RE.split(option):
+        tok = tok.strip()
+        if not tok:
+            continue
+        matched = next((g for g in _INFER_GRADES_SORTED if len(g) >= 2 and g in tok), None)
+        if matched:
+            found.append(matched)
+        elif tok in _INFER_SINGLE_GRADES:
+            found.append(tok)
+    return found
+
+
+def _infer_keyword(product: str) -> str:
+    """상품명에서 매칭 키워드 후보(첫 비노이즈 토큰)를 고른다."""
+    tokens = [t for t in re.split(r"\s+", product) if t]
+    for t in tokens:
+        if t in _INFER_NAME_NOISE:
+            continue
+        if _KG_RE.search(t) or t.isdigit():
+            continue
+        return t
+    return tokens[0] if tokens else product
+
+
+def _distinct(seq) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for x in seq:
+        if x and x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def infer_rules_from_delivery(delivery_bytes: bytes, supplier_key: str, max_products: int = 100) -> dict:
+    """DeliveryList → 규칙 초안 목록. 반환: {drafts, covered, product_count}.
+
+    drafts: 기존 규칙에 안 걸리는 신규 상품의 규칙 초안(ProductRuleInput 호환 + UI meta).
+    covered: 이미 규칙이 있는 상품(참고용).
+    """
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(filename=BytesIO(delivery_bytes), data_only=True, read_only=True)
+    ws = wb.active
+
+    groups: dict[str, dict] = {}
+    for row in ws.iter_rows(min_row=2):
+        product = _normalize(row[10].value) if len(row) > 10 else ""   # K열
+        option = _normalize(row[11].value) if len(row) > 11 else ""    # L열
+        if not product and not option:
+            continue
+        g = groups.setdefault(product, {"count": 0, "options": []})
+        g["count"] += 1
+        g["options"].append(option)
+    wb.close()
+
+    drafts: list[dict] = []
+    covered: list[dict] = []
+    for product, info in sorted(groups.items(), key=lambda kv: -kv[1]["count"]):
+        options = info["options"]
+        n = len(options)
+        sample_opt = next((o for o in options if o), "")
+        existing = resolve_any(product, sample_opt) if _loaded else None
+
+        kg_have = grade_have = count_have = 0
+        kg_values: set[str] = set()
+        grade_values: set[str] = set()
+        for opt in options:
+            kgs = _KG_RE.findall(opt)
+            grs = _infer_grades_in(opt)
+            if kgs:
+                kg_have += 1
+                kg_values.update(_fmt_kg(k) for k in kgs)
+            if grs:
+                grade_have += 1
+                grade_values.update(grs)
+            if _COUNT_RE.search(opt):
+                count_have += 1
+
+        keyword = _infer_keyword(product)
+        use_grade = grade_have == n and bool(grade_values)
+        use_kg = kg_have == n and bool(kg_values)
+        use_count = (not use_kg) and count_have == n and count_have > 0
+
+        parts = [keyword]
+        if use_grade:
+            parts.append("{grade}")
+        if use_kg:
+            parts.append("{kg}kg")
+        if use_count:
+            parts.append("{count}개")
+        template = " ".join(p for p in parts if p).strip() or keyword
+
+        warnings: list[str] = []
+        if 0 < grade_have < n:
+            warnings.append("일부 옵션만 등급 있음 — 확인 필요")
+        if 0 < kg_have < n:
+            warnings.append("일부 옵션만 kg 있음 — 확인 필요")
+        if not use_grade and not use_kg and not use_count:
+            warnings.append("등급·kg·수량 패턴 미검출 — 출력 템플릿 직접 확인")
+
+        def _kg_sort(v: str) -> float:
+            try:
+                return float(v)
+            except ValueError:
+                return 0.0
+
+        draft = {
+            "supplier_key": supplier_key,
+            "label": (product or keyword)[:100],
+            "priority": 100,
+            "name_keywords": [keyword] if keyword else [],
+            "exclude_keywords": [],
+            "grades": sorted(grade_values) if use_grade else [],
+            "kg_allow": sorted(kg_values, key=_kg_sort) if use_kg else [],
+            "pair_map": {},
+            "extra_map": {},
+            "output_template": template,
+            "require_grade": bool(use_grade),
+            "require_kg": bool(use_kg),
+            "active": True,
+            "notes": f"파일 자동초안 · 주문 {info['count']}건",
+            # ── UI 표시용 메타 (create 엔드포인트는 무시) ──
+            "order_count": info["count"],
+            "sample_options": _distinct(options)[:4],
+            "warnings": warnings,
+            "already_matched": existing is not None,
+            "existing_output": (existing or {}).get("output") or "",
+        }
+        (covered if existing is not None else drafts).append(draft)
+        if len(drafts) + len(covered) >= max_products:
+            break
+
+    return {"drafts": drafts, "covered": covered, "product_count": len(groups)}
+
+
 async def refresh_rules() -> dict:
     """DB에서 활성 규칙을 다시 읽어 캐시 교체. 반환: 상태 요약."""
     global _rules_by_supplier, _suppliers, _loaded, _refreshed_at

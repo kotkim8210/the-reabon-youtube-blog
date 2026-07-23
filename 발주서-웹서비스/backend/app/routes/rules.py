@@ -4,7 +4,7 @@
 변이 후에는 항상 인메모리 캐시를 갱신한다. 관리자 전용(운영 규칙이므로).
 """
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app import db
@@ -119,6 +119,34 @@ async def preview(data: PreviewInput, _admin: dict = Depends(require_admin)):
         await rules_engine.refresh_rules()
     result = rules_engine.resolve(data.supplier_key, data.product_name, data.option_text)
     return {"matched": result is not None, "result": result}
+
+
+@router.post("/infer")
+async def infer(
+    delivery_file: UploadFile = File(...),
+    supplier_key: str = Form(...),
+    _admin: dict = Depends(require_admin),
+):
+    """DeliveryList 업로드 → 규칙 초안 자동 생성 (저장 없음, 고객 확인용).
+
+    상품명·옵션 패턴(등급·kg·수량)에서 규칙 초안을 뽑는다. 고객이 검토·수정 후
+    /products로 저장한다. 무인 자동저장 아님 — 오매핑=오배송 방지.
+    """
+    if not rules_engine.get_status()["loaded"]:
+        await rules_engine.refresh_rules()
+    suppliers = {s["key"] for s in await db.list_rule_suppliers()}
+    if supplier_key not in suppliers:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"발주처가 없습니다: {supplier_key}")
+    delivery_bytes = await delivery_file.read()
+    if not delivery_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="빈 파일입니다.")
+    try:
+        return rules_engine.infer_rules_from_delivery(delivery_bytes, supplier_key)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"DeliveryList를 읽지 못했습니다: {exc}",
+        )
 
 
 @router.post("/simulate")

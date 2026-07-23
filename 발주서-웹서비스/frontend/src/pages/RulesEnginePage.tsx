@@ -7,6 +7,7 @@ import {
   fetchProductRules,
   fetchRuleStatus,
   fetchRuleSuppliers,
+  inferRules,
   previewRule,
   refreshRules,
   saveRuleSupplier,
@@ -14,6 +15,7 @@ import {
   updateProductRule,
   type ProductRule,
   type ProductRuleInput,
+  type RuleDraft,
   type RuleSimulateResult,
   type RuleSupplier,
 } from '../api';
@@ -123,6 +125,16 @@ function RulesEnginePage() {
   const [simLoading, setSimLoading] = useState(false);
   const [simResult, setSimResult] = useState<RuleSimulateResult | null>(null);
   const [showMatchedRows, setShowMatchedRows] = useState(false);
+
+  // 파일로 규칙 자동 생성 (초안)
+  const [inferSupplier, setInferSupplier] = useState('');
+  const [inferFile, setInferFile] = useState<File | null>(null);
+  const [inferLoading, setInferLoading] = useState(false);
+  const [inferDrafts, setInferDrafts] = useState<RuleDraft[]>([]);
+  const [inferCovered, setInferCovered] = useState<RuleDraft[]>([]);
+  const [inferProductCount, setInferProductCount] = useState<number | null>(null);
+  const [addedDrafts, setAddedDrafts] = useState<Set<number>>(new Set());
+  const [addingAll, setAddingAll] = useState(false);
 
   const loadAll = useCallback(async () => {
     setError('');
@@ -272,6 +284,76 @@ function RulesEnginePage() {
     }
   };
 
+  const handleInfer = async () => {
+    if (!inferSupplier) { setError('규칙을 붙일 발주처를 먼저 선택하세요.'); return; }
+    if (!inferFile) return;
+    setInferLoading(true);
+    setError('');
+    setInferDrafts([]);
+    setInferCovered([]);
+    setInferProductCount(null);
+    setAddedDrafts(new Set());
+    try {
+      const res = await inferRules(inferFile, inferSupplier);
+      setInferDrafts(res.drafts);
+      setInferCovered(res.covered);
+      setInferProductCount(res.product_count);
+      if (res.drafts.length === 0) {
+        flash(res.covered.length ? '새로 만들 규칙이 없습니다 — 업로드한 상품은 이미 규칙이 있어요.' : '상품을 찾지 못했습니다.');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '규칙 초안 생성 실패');
+    } finally {
+      setInferLoading(false);
+    }
+  };
+
+  const patchDraft = (idx: number, patch: Partial<RuleDraft>) =>
+    setInferDrafts((prev) => prev.map((d, i) => (i === idx ? { ...d, ...patch } : d)));
+
+  const addOneDraft = async (idx: number): Promise<boolean> => {
+    const d = inferDrafts[idx];
+    if (!d || addedDrafts.has(idx)) return false;
+    if (!d.output_template.trim() || !d.name_keywords.length) {
+      setError(`"${d.label}" — 매칭 키워드와 출력 템플릿을 채워주세요.`);
+      return false;
+    }
+    await createProductRule({
+      supplier_key: d.supplier_key, label: d.label, priority: d.priority,
+      name_keywords: d.name_keywords, exclude_keywords: d.exclude_keywords,
+      grades: d.grades, kg_allow: d.kg_allow, pair_map: d.pair_map, extra_map: d.extra_map,
+      output_template: d.output_template, require_grade: d.require_grade,
+      require_kg: d.require_kg, active: d.active, notes: d.notes,
+    });
+    setAddedDrafts((prev) => new Set(prev).add(idx));
+    return true;
+  };
+
+  const handleAddDraft = async (idx: number) => {
+    setError('');
+    try {
+      if (await addOneDraft(idx)) { await loadAll(); flash(`"${inferDrafts[idx].label}" 규칙 추가 완료`); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '규칙 추가 실패');
+    }
+  };
+
+  const handleAddAllDrafts = async () => {
+    setAddingAll(true);
+    setError('');
+    let added = 0;
+    try {
+      for (let i = 0; i < inferDrafts.length; i += 1) {
+        if (addedDrafts.has(i)) continue;
+        try { if (await addOneDraft(i)) added += 1; } catch { /* keep going */ }
+      }
+      await loadAll();
+      flash(`규칙 ${added}건 추가 완료 (캐시 갱신됨)`);
+    } finally {
+      setAddingAll(false);
+    }
+  };
+
   const visibleSimRows = useMemo(() => {
     if (!simResult) return [];
     const rows = showMatchedRows ? simResult.rows : simResult.rows.filter((r) => !r.matched);
@@ -306,6 +388,96 @@ function RulesEnginePage() {
 
       {notice && <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-semibold rounded-xl px-4 py-3">{notice}</div>}
       {error && <div className="bg-red-50 border border-red-200 text-red-600 text-sm font-semibold rounded-xl px-4 py-3">{error}</div>}
+
+      {/* ⓪ 파일로 규칙 자동 생성 (초안) */}
+      <div className="bg-gradient-to-br from-indigo-50 to-emerald-50 rounded-2xl shadow-sm border-2 border-indigo-200 p-6">
+        <h2 className="text-base font-bold text-gray-900 mb-1">🚀 파일로 규칙 자동 생성 <span className="text-indigo-600">— 추천</span></h2>
+        <p className="text-xs text-gray-600 mb-4">
+          DeliveryList를 올리면 상품·옵션 패턴(등급·kg·수량)을 분석해 <b>규칙 초안</b>을 자동으로 만들어 드립니다.
+          하나하나 손으로 입력할 필요 없이 <b>확인·수정 후 추가</b>만 하면 됩니다. (오매핑 방지를 위해 자동 저장은 안 하고 확인 단계를 둡니다.)
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,220px)_1fr_auto] gap-3 md:items-end">
+          <div>
+            <label className={labelCls}>규칙을 붙일 발주처 *</label>
+            <select className={inputCls} value={inferSupplier} onChange={(e) => setInferSupplier(e.target.value)}>
+              <option value="">선택</option>
+              {suppliers.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
+            </select>
+          </div>
+          <FileUpload label="DeliveryList 파일" file={inferFile} onFileSelect={(f) => { setInferFile(f); setInferDrafts([]); setInferCovered([]); setInferProductCount(null); }} />
+          <button onClick={handleInfer} disabled={!inferFile || !inferSupplier || inferLoading}
+            className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-semibold text-sm hover:bg-indigo-700 disabled:opacity-50">
+            {inferLoading ? '분석 중...' : '규칙 초안 만들기'}
+          </button>
+        </div>
+        {suppliers.length === 0 && (
+          <p className="mt-3 text-xs text-amber-700">먼저 아래 ① 발주처에서 거래처를 하나 등록한 뒤 다시 시도하세요.</p>
+        )}
+
+        {inferProductCount != null && (
+          <div className="mt-5 space-y-4 animate-fade-in">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="px-3 py-1.5 rounded-full bg-white border border-gray-200 font-semibold">상품 {inferProductCount}종</span>
+              <span className="px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">새 규칙 초안 {inferDrafts.length}건</span>
+              {inferCovered.length > 0 && <span className="px-3 py-1.5 rounded-full bg-gray-100 text-gray-500 font-semibold">이미 규칙 있음 {inferCovered.length}건</span>}
+              {inferDrafts.length > 0 && (
+                <button onClick={handleAddAllDrafts} disabled={addingAll || addedDrafts.size >= inferDrafts.length}
+                  className="ml-auto bg-emerald-600 text-white px-4 py-2 rounded-xl font-semibold text-xs hover:bg-emerald-700 disabled:opacity-50">
+                  {addingAll ? '추가 중...' : `전체 추가 (${inferDrafts.length - addedDrafts.size}건)`}
+                </button>
+              )}
+            </div>
+
+            {inferDrafts.map((d, idx) => {
+              const added = addedDrafts.has(idx);
+              return (
+                <div key={idx} className={`rounded-xl border p-4 ${added ? 'border-emerald-200 bg-emerald-50/60' : 'border-gray-200 bg-white'}`}>
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <span className="text-sm font-bold text-gray-900">{d.label}</span>
+                    <span className="text-xs text-gray-400">· 주문 {d.order_count}건</span>
+                    {d.warnings.map((w) => (
+                      <span key={w} className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">⚠ {w}</span>
+                    ))}
+                    {added && <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">✓ 추가됨</span>}
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3 font-mono">옵션 예: {d.sample_options.join('  /  ') || '—'}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-[minmax(0,160px)_1fr] gap-3">
+                    <div>
+                      <label className={labelCls}>매칭 키워드</label>
+                      <input className={inputCls} disabled={added} value={listToStr(d.name_keywords)}
+                        onChange={(e) => patchDraft(idx, { name_keywords: strToList(e.target.value) })} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>출력 템플릿 (발주서에 나갈 품목명) — {'{grade} {kg} {count}'}</label>
+                      <input className={inputCls} disabled={added} value={d.output_template}
+                        onChange={(e) => patchDraft(idx, { output_template: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-gray-500">
+                    {d.grades.length > 0 && <span>등급: {listToStr(d.grades)}</span>}
+                    {d.kg_allow.length > 0 && <span>허용 kg: {listToStr(d.kg_allow)}</span>}
+                    <button onClick={() => handleAddDraft(idx)} disabled={added}
+                      className="ml-auto bg-emerald-600 text-white px-4 py-1.5 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50">
+                      {added ? '추가 완료' : '+ 이 규칙 추가'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {inferCovered.length > 0 && (
+              <details className="rounded-xl border border-gray-200 bg-white/70 p-3">
+                <summary className="text-xs font-semibold text-gray-500 cursor-pointer">이미 규칙이 있는 상품 {inferCovered.length}건 (건너뜀)</summary>
+                <ul className="mt-2 space-y-1">
+                  {inferCovered.map((c, i) => (
+                    <li key={i} className="text-xs text-gray-500">{c.label} → <span className="font-mono text-gray-700">{c.existing_output || '(기존 규칙)'}</span></li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ① 발주처 */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
