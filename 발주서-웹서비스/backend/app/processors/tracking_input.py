@@ -7,6 +7,7 @@ from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
 from app.processors.tracking_match import (
+    coupang_courier_name,
     name_counts,
     normalize_courier_name,
     option_key_set,
@@ -27,7 +28,7 @@ def normalize(value) -> str:
 
 def normalize_courier(value) -> str:
     """Orderlist 택배사명을 쿠팡 DeliveryList가 인식하는 표기로 맞춘다."""
-    return normalize_courier_name(value)
+    return coupang_courier_name(value)
 
 
 def _phone_digits(value: object) -> str:

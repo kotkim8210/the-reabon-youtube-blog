@@ -15,6 +15,7 @@ from app.processors.tomato_order import (
     transform_product,
 )
 from app.processors.tracking_match import (
+    coupang_courier_name,
     name_counts,
     normalize_courier_name,
     option_key_set,
@@ -523,7 +524,7 @@ def process(
             e_cell.value = matched["tracking"]
             # D열(4) = 택배사: 회신 파일 K열 값을 무조건 DeliveryList D열에 덮어쓰기
             courier_val = matched.get("courier") or delivery_company
-            dl_ws.cell(row=row_idx, column=4).value = normalize_courier(courier_val) if courier_val else ""
+            dl_ws.cell(row=row_idx, column=4).value = coupang_courier_name(courier_val) if courier_val else ""
             used_entries.add(id(matched))
             filled += 1
 

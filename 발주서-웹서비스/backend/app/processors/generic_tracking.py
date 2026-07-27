@@ -6,6 +6,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from app.processors.tracking_match import (
+    coupang_courier_name,
     name_counts,
     normalize_courier_name,
     option_key_set,
@@ -148,7 +149,7 @@ def process(reply_bytes: bytes, delivery_bytes: bytes) -> tuple[bytes, str, dict
         address = normalize(reply_ws.cell(row=row_idx, column=cols.get("address", 4)).value)
         courier = ""
         if cols.get("courier"):
-            courier = normalize_courier_name(reply_ws.cell(row=row_idx, column=cols["courier"]).value)
+            courier = coupang_courier_name(reply_ws.cell(row=row_idx, column=cols["courier"]).value)
         entries.append(
             {
                 "name": name,

@@ -21,6 +21,21 @@ def normalize_courier_name(value: object, default: str = "") -> str:
     return courier
 
 
+def coupang_courier_name(value: object, default: str = "") -> str:
+    """쿠팡 DeliveryList(택배사 D열)에 넣을 표기.
+
+    쿠팡 송장 일괄등록은 '우체국'만 인식한다. 거래처 회신은 '우체국택배/우체국 택배/
+    우체국등기' 등으로 오는데 그대로 넣으면 업로드 시 택배사가 인식되지 않는다
+    (2026-07-27 제주다팜 백도 건). 올웨이즈·토스는 '우체국택배'를 쓰므로
+    normalize_courier_name은 그대로 두고 쿠팡 쪽에서만 변환한다.
+    """
+    courier = normalize_courier_name(value, default)
+    compact = match_key(courier)
+    if "우체국" in compact or re.fullmatch(r"(?i)epost", compact):
+        return "우체국"
+    return courier
+
+
 def option_key_set(*values: object) -> set[str]:
     keys: set[str] = set()
     for value in values:

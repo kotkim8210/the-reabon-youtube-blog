@@ -88,3 +88,33 @@ def test_namesake_unresolvable_skips_with_names():
     _, _, stats = process(ol, dl)
     assert stats["skipped"] == 2, stats
     assert "박영희" in stats.get("skipped_names", ""), stats
+
+
+# ── 택배사 표기: 쿠팡은 '우체국'만 인식 (2026-07-27 제주다팜 백도 송장 건) ──
+def test_epost_written_as_ucheguk_in_delivery_d_column():
+    ol = _orderlist([
+        ("김우체", "010-3333-4444", "서울 B", "우체국택배", "6890157378528"),
+        ("박씨제", "010-5555-6666", "서울 C", "CJ대한통운", "123456789012"),
+        ("최롯데", "010-7777-8888", "서울 D", "롯데택배", "255200000009"),
+    ])
+    dl = _delivery([
+        ("김우체", "01033334444", "서울B", "백도 딱딱이복숭아", "1박스 중과 4kg"),
+        ("박씨제", "01055556666", "서울C", "콜라비", "3kg"),
+        ("최롯데", "01077778888", "서울D", "콜라비", "3kg"),
+    ])
+    out, _fn, _stats = process(ol, dl)
+    ws = load_workbook(BytesIO(out)).active
+    couriers = [ws.cell(r, 4).value for r in range(2, ws.max_row + 1)]
+    assert couriers == ["우체국", "CJ 대한통운", "롯데택배"]
+
+
+def test_coupang_courier_name_variants():
+    from app.processors.tracking_match import coupang_courier_name, normalize_courier_name
+
+    for raw in ("우체국택배", "우체국 택배", "우체국등기", "EPOST", "epost", "우체국"):
+        assert coupang_courier_name(raw) == "우체국", raw
+    assert coupang_courier_name("CJ대한통운") == "CJ 대한통운"
+    assert coupang_courier_name("롯데택배") == "롯데택배"
+    assert coupang_courier_name(None, "롯데택배") == "롯데택배"
+    # 올웨이즈·토스용 공용 정규화는 그대로(그쪽은 '우체국택배' 표기를 씀)
+    assert normalize_courier_name("우체국택배") == "우체국택배"

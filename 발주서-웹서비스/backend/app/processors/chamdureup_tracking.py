@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 
 from app.processors.chamdureup_order import convert_option
 from app.processors.tracking_match import (
+    coupang_courier_name,
     name_counts,
     normalize_courier_name,
     option_key_set,
@@ -157,7 +158,7 @@ def process(
             e_cell.value = matched["tracking"]
             d_cell = dl_ws.cell(row=row_idx, column=4)
             if matched["courier"]:
-                d_cell.value = normalize_courier_name(matched["courier"])
+                d_cell.value = coupang_courier_name(matched["courier"])
             used_entries.add(id(matched))
             filled += 1
         else:

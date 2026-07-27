@@ -19,6 +19,7 @@ from app.processors.myeongi_order import (
     is_mango_watermelon_order,
 )
 from app.processors.tracking_match import (
+    coupang_courier_name,
     name_counts,
     normalize_courier_name,
     option_key_set,
@@ -215,7 +216,7 @@ def process(
         if matched:
             e_cell.value = matched["tracking"]
             d_cell = dl_ws.cell(row=row_idx, column=4)
-            d_cell.value = normalize_courier_name(matched.get("courier"), "롯데택배")
+            d_cell.value = coupang_courier_name(matched.get("courier"), "롯데택배")
             used_entries.add(id(matched))
             filled += 1
             if "명이나물" in str(dl_product or ""):
