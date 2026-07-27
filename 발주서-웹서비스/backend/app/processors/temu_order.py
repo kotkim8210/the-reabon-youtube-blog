@@ -562,28 +562,6 @@ def _build_jewelryfruit_workbook(entries: list[dict]) -> tuple[bytes, str, dict]
     return output.read(), filename, stats
 
 
-def _build_jbt_workbook(entries: list[dict]) -> tuple[bytes, str, dict]:
-    if not entries:
-        raise ValueError("제이비티 발주로 출력할 테무 수박 주문이 없습니다.")
-
-    output_bytes, _, stats = tomato_order.build_main_order_workbook(
-        filtered_rows=[(_virtual_row(entry), "수박") for entry in entries],
-        has_tomato=False,
-        has_chamoe=False,
-        has_ddureup=False,
-        has_watermelon=True,
-    )
-    today = datetime.now(tomato_order.KST).strftime("%Y%m%d")
-    filename = f"아이티소프트_테무수박발주({today}).xlsx"
-    stats = {
-        **(stats or {}),
-        "platform": "테무",
-        "supplier": "제이비티",
-        "quantity": sum(int(entry["qty"]) for entry in entries),
-    }
-    return output_bytes, filename, stats
-
-
 def _build_haedal_goguma_workbook(entries: list[dict]) -> tuple[bytes, str, dict]:
     """테무 고구마 주문 → 해달 발주서(한진양식). 고구마 page의 해달 양식과 동일."""
     if not entries:

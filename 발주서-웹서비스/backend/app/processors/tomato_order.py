@@ -27,10 +27,6 @@ def normalize(value) -> str:
     return re.sub(r"\s+", " ", str(value).strip())
 
 
-def is_mixed_chamoe(product_name: str, option_text: str) -> bool:
-    return "성주참외" in product_name and "가정용 혼합과" in option_text
-
-
 def delivery_watermelon_kg(product_name: str = "", option_text: str = "") -> int | None:
     text = normalize(f"{product_name} {option_text}")
     # 망고수박은 쥬얼리프룻(myeongi_order) 발주 — 일반수박(제이비티) 로직에서 제외
@@ -72,11 +68,6 @@ def is_jbt_shinbi_peach(product_name: str = "", option_text: str = "") -> bool:
     if _non_shinbi_peach(product_name, option_text):
         return False
     return peach_kg(product_name, option_text) in JBT_PEACH_KGS
-
-
-def is_jbt_corn_order(product_name: str = "", option_text: str = "") -> bool:
-    text = normalize(f"{product_name} {option_text}")
-    return "옥수수" in text and ("중품" in text or "특품" in text)
 
 
 def stable_order_id(prefix: str, *values) -> str:
@@ -178,53 +169,6 @@ def _virtual_toss_row(entry: dict) -> list[_VirtualCell]:
     row[29].value = entry.get("address", "")
     row[30].value = entry.get("memo", "")
     return row
-
-
-async def collect_toss_watermelon_orders(from_date: str, to_date: str) -> list[dict]:
-    from app.toss.client import toss_client
-
-    orders = await toss_client.get_orders(
-        start_date=from_date,
-        end_date=to_date,
-        status=None,
-    )
-
-    entries: list[dict] = []
-    for item in orders:
-        if not is_toss_watermelon_order(item):
-            continue
-        order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
-        if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
-            continue
-
-        option = _toss_watermelon_option(item)
-        if delivery_watermelon_kg(_toss_item_text(item), option) not in JBT_WATERMELON_KGS:
-            continue
-
-        address = _toss_address(item)
-        entries.append(
-            {
-                "name": item.get("receiverName") or "",
-                "phone": item.get("receiverRealPhone") or item.get("receiverPhone") or "",
-                "zipcode": _toss_zipcode(item),
-                "address": address,
-                "qty": str(item.get("quantity") or 1),
-                "product_name": item.get("productName") or "토스 수박",
-                "option": option,
-                "memo": item.get("shippingNote") or "",
-                "order_id": toss_order_id(item)
-                or stable_order_id(
-                    "toss-watermelon",
-                    item.get("receiverName"),
-                    item.get("receiverRealPhone") or item.get("receiverPhone"),
-                    address,
-                    option,
-                    item.get("quantity") or 1,
-                ),
-            }
-        )
-
-    return entries
 
 
 def _toss_order_done(item: dict) -> bool:
@@ -383,67 +327,6 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
     return entries
 
 
-async def collect_toss_bamhobak_orders(from_date: str, to_date: str) -> list[dict]:
-    """토스 API에서 제주다팜 미니밤호박(보우짱) 1kg 주문을 수집.
-
-    1kg만 제주다팜 발주 대상(3·5·10kg은 쥬얼리프룻 별도). convert_bamhobak_option이
-    1kg만 발주명을 돌려주므로 그 외 무게는 자동 제외된다.
-    각 entry에 'product'(제주다팜 발주 품목명 '제주 미니밤호박 보우짱 로얄과 1kg')를 포함.
-    """
-    from app.toss.client import toss_client
-    from app.processors.kolrabi_order import convert_bamhobak_option
-
-    orders = await toss_client.get_orders(
-        start_date=from_date,
-        end_date=to_date,
-        status=None,
-    )
-
-    entries: list[dict] = []
-    for item in orders:
-        text = _toss_item_text(item)
-        if "밤호박" not in text.replace(" ", ""):
-            continue
-        order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
-        if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
-            continue
-        # 배송중/배송완료거나 송장 입력된 건은 발주서에서 제외 → 과거 주문 재발주 방지
-        if _toss_order_done(item):
-            continue
-
-        option = normalize(item.get("optionName") or "")
-        product_name = normalize(item.get("productName") or "") or text
-        product = convert_bamhobak_option(product_name, option)
-        if not product:  # 1kg만 통과 (3·5·10kg은 쥬얼리프룻)
-            continue
-
-        address = _toss_address(item)
-        entries.append(
-            {
-                "name": item.get("receiverName") or "",
-                "phone": item.get("receiverRealPhone") or item.get("receiverPhone") or "",
-                "zipcode": _toss_zipcode(item),
-                "address": address,
-                "qty": str(item.get("quantity") or 1),
-                "product_name": item.get("productName") or "토스 미니밤호박",
-                "option": option,
-                "product": product,
-                "memo": item.get("shippingNote") or "",
-                "order_id": toss_order_id(item)
-                or stable_order_id(
-                    "toss-bamhobak",
-                    item.get("receiverName"),
-                    item.get("receiverRealPhone") or item.get("receiverPhone"),
-                    address,
-                    option,
-                    item.get("quantity") or 1,
-                ),
-            }
-        )
-
-    return entries
-
-
 async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     """토스 API에서 제주다팜 발주 대상(콜라비 + 미니밤호박 1kg + 홍감자) 주문을 수집.
 
@@ -523,57 +406,6 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
                 baekdo.append(_entry(product, "toss-baekdo"))
 
     return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato, "baekdo": baekdo}
-
-
-def parse_alwayz_jbt_rows(alwayz_bytes: bytes) -> tuple[list, dict]:
-    """올웨이즈 주문내역(.xlsx)에서 제이비티 발주 대상 행을 추출.
-
-    올웨이즈 컬럼: A=주문아이디, E=상품명, F=옵션, G=수량,
-                  O=주소, P=우편번호, S=수령인, T=수령인 연락처
-    반환: ([(virtual_row, product_type), ...], flags dict)
-    분류 기준은 process_outputs(쿠팡 DeliveryList)와 동일.
-    """
-    wb = load_workbook(filename=BytesIO(alwayz_bytes), data_only=True)
-    ws = wb.active
-
-    rows: list = []
-    flags = {
-        "tomato": False, "chamoe": False, "ddureup": False,
-        "watermelon": False, "corn": False, "peach": False,
-    }
-    for row in ws.iter_rows(min_row=2):
-        product_name = normalize(row[4].value) if len(row) > 4 else ""   # E
-        option = normalize(row[5].value) if len(row) > 5 else ""          # F
-        name = normalize(row[18].value) if len(row) > 18 else ""          # S
-        if not name or not product_name:
-            continue
-
-        ptype = None
-        if "대저토마토" in product_name:
-            ptype = "토마토"; flags["tomato"] = True
-        # ※ 성주참외는 쥬얼리팜 발주로 전환 — 제이비티 올웨이즈 파싱에서 제외
-        elif "땅두릅" in product_name:
-            ptype = "땅두릅"; flags["ddureup"] = True
-        # ※ 수박은 쥬얼리팜, 초당옥수수는 제주다팜(kolrabi) 발주로 전환 — 제이비티 올웨이즈 파싱에서 제외
-        elif is_jbt_shinbi_peach(product_name, option):
-            ptype = "복숭아"; flags["peach"] = True
-        if ptype is None:
-            continue
-
-        entry = {
-            "order_id": normalize(row[0].value) if len(row) > 0 else "",   # A
-            "product_name": product_name,
-            "option": option,
-            "qty": (normalize(row[6].value) if len(row) > 6 else "") or "1",  # G
-            "name": name,
-            "phone": normalize(row[19].value) if len(row) > 19 else "",    # T
-            "zipcode": normalize(row[15].value) if len(row) > 15 else "",  # P
-            "address": normalize(row[14].value) if len(row) > 14 else "",  # O
-            "memo": "",
-        }
-        rows.append((_virtual_toss_row(entry), ptype))
-
-    return rows, flags
 
 
 async def process_toss_watermelon_order(
@@ -848,21 +680,6 @@ def build_main_order_workbook(
         ],
     }
     return output.read(), filename, stats
-
-
-def build_jbt_peach_workbook(peach_rows: list) -> tuple[bytes, str, dict] | None:
-    """신비복숭아 3·4kg 행들[(virtual_row, '복숭아'), ...] → 제이비티 발주서. 비면 None."""
-    if not peach_rows:
-        return None
-    return build_main_order_workbook(
-        filtered_rows=peach_rows,
-        has_tomato=False,
-        has_chamoe=False,
-        has_ddureup=False,
-        has_watermelon=False,
-        has_corn=False,
-        has_peach=True,
-    )
 
 
 def process_outputs(
