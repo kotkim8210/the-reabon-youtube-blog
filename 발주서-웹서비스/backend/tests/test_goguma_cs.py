@@ -71,6 +71,41 @@ def test_normalize_inquiry_marks_status_and_thread():
     assert row2["answered"] is False
 
 
+def test_normalize_inquiry_includes_danharu_guide():
+    """단하루 CS 가이드(분류·체크리스트·긴급도)가 각 문의에 붙는다."""
+    row = _normalize_inquiry(
+        {"inquiryId": 1, "content": "배송이 안 와요 언제 오나요", "inquiryAt": "2026-07-24 10:00:00"},
+        unanswered_ids={1},
+    )
+    guide = row["guide"]
+    assert guide["category"] == "delivery_delay"
+    assert guide["urgency"] == "normal"
+    assert guide["checks"] and guide["steps"] and guide["do_not"]
+    assert row["source"] == "online" and row["reply_required"] is True
+
+    urgent = _normalize_inquiry(
+        {"inquiryId": 2, "content": "고구마 먹고 아이가 복통으로 병원 갔어요", "inquiryAt": ""},
+        unanswered_ids={2},
+    )
+    assert urgent["guide"]["urgency"] == "urgent"
+
+
+def test_normalize_call_center_no_send():
+    """고객센터 건은 가이드만 — 전송 불가(reply_required=False)."""
+    from app.processors.goguma_cs import _normalize_call_center
+    row = _normalize_call_center(
+        {"inquiryId": 9, "content": "환불 언제 되나요", "inquiryAt": "2026-07-24 09:00:00",
+         "orderId": 123, "receiptCategory": "환불문의",
+         "replies": [{"content": "확인 중입니다", "replyAt": "2026-07-24 09:30:00"}]},
+        "NO_ANSWER",
+    )
+    assert row["source"] == "call_center"
+    assert row["reply_required"] is False
+    assert row["answered"] is False
+    assert row["comments"][0]["content"] == "확인 중입니다"
+    assert row["guide"]["category_label"]
+
+
 def test_normalize_inquiry_missing_fields():
     row = _normalize_inquiry({}, unanswered_ids=set())
     assert row["inquiry_id"] is None

@@ -761,8 +761,25 @@ export interface GogumaCsComment {
   at: string;
 }
 
+export interface GogumaCsGuide {
+  category?: string;
+  category_label?: string;
+  urgency?: 'urgent' | 'attention' | 'normal';
+  summary?: string;
+  checks?: string[];
+  steps?: string[];
+  do_not?: string[];
+  reply_draft?: string;
+  supplier_message?: string;
+  decision_points?: string[];
+  privacy_warning?: boolean;
+}
+
 export interface GogumaCsInquiry {
   inquiry_id: number;
+  source?: 'online' | 'call_center';
+  source_label?: string;
+  reply_required?: boolean;
   content: string;
   inquiry_at: string;
   order_ids: string[];
@@ -770,6 +787,7 @@ export interface GogumaCsInquiry {
   comments: GogumaCsComment[];
   category: string;
   suggested_reply: string;
+  guide?: GogumaCsGuide;
 }
 
 export interface GogumaCsInquiriesResult {

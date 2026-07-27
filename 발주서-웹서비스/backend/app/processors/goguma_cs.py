@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from app import config
 from app.coupang.client import coupang_goguma_client
+from app.processors.coupang_cs_guide import CsGuideInput, build_cs_guide
 
 logger = logging.getLogger(__name__)
 
@@ -120,8 +121,12 @@ def _normalize_inquiry(item: dict, unanswered_ids: set) -> dict:
                 "at": str(cm.get("inquiryCommentAt") or ""),
             })
     inquiry_id = item.get("inquiryId")
+    guide = _safe_guide(content, str(item.get("itemName") or ""))
     return {
         "inquiry_id": inquiry_id,
+        "source": "online",
+        "source_label": "상품 문의",
+        "reply_required": True,
         "content": content,
         "inquiry_at": str(item.get("inquiryAt") or ""),
         "order_ids": [str(o) for o in order_ids if o],
@@ -129,6 +134,51 @@ def _normalize_inquiry(item: dict, unanswered_ids: set) -> dict:
         "comments": comments,
         "category": category,
         "suggested_reply": reply,
+        "guide": guide,
+    }
+
+
+def _safe_guide(content: str, product_name: str = "") -> dict:
+    """단하루 CS 가이드(분류·체크리스트·긴급도·개인정보 경고) 생성. 실패해도 CS 목록은 유지."""
+    try:
+        return build_cs_guide(CsGuideInput(
+            inquiry_text=(content or "").strip() or "일반 문의",
+            product_name=product_name,
+        ))
+    except Exception:  # 가이드는 보조 정보 — 실패가 목록을 막으면 안 됨
+        logger.exception("CS 가이드 생성 실패")
+        return {}
+
+
+def _normalize_call_center(item: dict, status: str) -> dict:
+    """고객센터 문의(v5) → 목록 항목. 답변 전송 API가 없어 가이드·확인용으로만 표시."""
+    replies = []
+    for rp in item.get("replies") or []:
+        if isinstance(rp, dict) and str(rp.get("content") or "").strip():
+            replies.append({
+                "content": str(rp.get("content") or ""),
+                "at": str(rp.get("replyAt") or ""),
+            })
+    content = str(item.get("content") or "")
+    receipt = str(item.get("receiptCategory") or "")
+    item_name = str(item.get("itemName") or "")
+    guide = _safe_guide("\n".join(p for p in (receipt, content) if p), item_name)
+    if status != "NO_ANSWER":
+        guide = dict(guide or {})
+        guide["reply_draft"] = ""
+    return {
+        "inquiry_id": item.get("inquiryId"),
+        "source": "call_center",
+        "source_label": "고객센터" + (" 답변필요" if status == "NO_ANSWER" else " 확인필요"),
+        "reply_required": False,  # 고객센터 답변은 WING에서 직접 (전송 API 미배선)
+        "content": content,
+        "inquiry_at": str(item.get("inquiryAt") or ""),
+        "order_ids": [str(item.get("orderId") or "")] if item.get("orderId") else [],
+        "answered": status != "NO_ANSWER",
+        "comments": replies,
+        "category": receipt or "고객센터",
+        "suggested_reply": "",
+        "guide": guide,
     }
 
 
@@ -180,10 +230,40 @@ async def list_inquiries(days: int = 7) -> dict:
                 continue
             seen_ids.add(inquiry_id)
             inquiries.append(_normalize_inquiry(item, unanswered_ids))
+
+        # 고객센터 문의(v5) — 답변필요(NO_ANSWER)/확인필요(TRANSFER). 실패해도 상품문의 목록은 유지.
+        for cc_status in ("NO_ANSWER", "TRANSFER"):
+            try:
+                page = 1
+                while page <= _MAX_PAGES:
+                    res = await coupang_goguma_client.get_call_center_inquiries(
+                        window_start.isoformat(), window_end.isoformat(),
+                        partner_counseling_status=cc_status, page_num=page,
+                    )
+                    data = (res or {}).get("data") or {}
+                    items = data.get("content") or []
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        key = ("cc", item.get("inquiryId"))
+                        if key in seen_ids:
+                            continue
+                        seen_ids.add(key)
+                        inquiries.append(_normalize_call_center(item, cc_status))
+                    total_pages = int((data.get("pagination") or {}).get("totalPages") or 1)
+                    if page >= total_pages or not items:
+                        break
+                    page += 1
+            except Exception:
+                logger.exception("고객센터 문의(%s) 조회 실패 — 상품문의만 표시", cc_status)
         window_start = window_end + timedelta(days=1)
 
-    # 미답변 먼저, 그 다음 최신순
-    inquiries.sort(key=lambda x: (x["answered"], _neg_key(x["inquiry_at"])))
+    # 긴급 먼저 → 미답변 → 최신순
+    def _sort_key(x: dict):
+        urgent = (x.get("guide") or {}).get("urgency") == "urgent"
+        return (not urgent, x["answered"], _neg_key(x["inquiry_at"]))
+
+    inquiries.sort(key=_sort_key)
     unanswered_count = sum(1 for x in inquiries if not x["answered"])
     return {
         "total": len(inquiries),

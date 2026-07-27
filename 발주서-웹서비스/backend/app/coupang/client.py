@@ -223,6 +223,29 @@ class CoupangClient:
 
     # --- Online Inquiry (고객 문의) APIs ---
 
+    async def get_call_center_inquiries(
+        self,
+        inquiry_start_at: str,
+        inquiry_end_at: str,
+        partner_counseling_status: str = "NO_ANSWER",
+        page_num: int = 1,
+        page_size: int = 30,
+    ) -> dict:
+        """고객센터 문의 조회 (v5). 상태: NO_ANSWER(답변필요)/TRANSFER(확인필요)."""
+        path = (
+            f"/v2/providers/openapi/apis/api/v5/vendors/{self.vendor_id}"
+            "/callCenterInquiries"
+        )
+        params = {
+            "vendorId": self.vendor_id,
+            "partnerCounselingStatus": partner_counseling_status,
+            "inquiryStartAt": inquiry_start_at,
+            "inquiryEndAt": inquiry_end_at,
+            "pageNum": str(max(1, page_num)),
+            "pageSize": str(max(1, min(page_size, 30))),
+        }
+        return await self._request("GET", path, query_params=params)
+
     async def get_online_inquiries(
         self,
         inquiry_start_at: str,

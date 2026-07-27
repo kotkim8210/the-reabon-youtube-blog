@@ -915,14 +915,25 @@ function CoupangInquiryTab() {
       {/* 결과: 문의별 카드 (상태 → 문의내용 → 대화 → 추천 답변 → 전송) */}
       {visible.map((inq) => {
         const answered = isAnswered(inq);
+        const guide = inq.guide;
+        const urgent = guide?.urgency === 'urgent';
         return (
-          <div key={inq.inquiry_id}
-            className={`bg-white rounded-2xl shadow-sm border p-5 animate-fade-in ${answered ? 'border-gray-200' : 'border-rose-200'}`}>
+          <div key={`${inq.source || 'online'}-${inq.inquiry_id}`}
+            className={`bg-white rounded-2xl shadow-sm border p-5 animate-fade-in ${
+              urgent ? 'border-rose-400 ring-1 ring-rose-200' : answered ? 'border-gray-200' : 'border-rose-200'}`}>
             <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {urgent && (
+                  <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-black bg-rose-600 text-white">🚨 긴급</span>
+                )}
                 <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${answered ? 'bg-gray-100 text-gray-500' : 'bg-rose-100 text-rose-700'}`}>
                   {answered ? '답변완료' : '미답변'}
                 </span>
+                {inq.source === 'call_center' && (
+                  <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+                    {inq.source_label || '고객센터'}
+                  </span>
+                )}
                 <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
                   {inq.category}
                 </span>
@@ -937,6 +948,36 @@ function CoupangInquiryTab() {
               <p className="text-sm text-gray-900 whitespace-pre-wrap">{inq.content || '(내용 없음)'}</p>
             </div>
 
+            {guide && (guide.checks?.length || guide.steps?.length) ? (
+              <details className={`mb-3 rounded-xl border p-3 ${urgent ? 'border-rose-200 bg-rose-50/50' : 'border-emerald-200 bg-emerald-50/50'}`} open={urgent}>
+                <summary className="cursor-pointer text-xs font-bold text-gray-700">
+                  📋 CS 처리 가이드 — {guide.category_label || inq.category}
+                  {guide.privacy_warning && <span className="ml-2 text-[11px] font-semibold text-amber-700">⚠ 개인정보 포함 주의</span>}
+                </summary>
+                <div className="mt-2 space-y-2 text-xs text-gray-700">
+                  {guide.summary && <p className="font-semibold">{guide.summary}</p>}
+                  {guide.checks && guide.checks.length > 0 && (
+                    <div><p className="font-bold text-emerald-800">✅ 확인할 것</p>
+                      <ul className="ml-4 list-disc space-y-0.5">{guide.checks.map((c, i) => <li key={i}>{c}</li>)}</ul></div>
+                  )}
+                  {guide.steps && guide.steps.length > 0 && (
+                    <div><p className="font-bold text-gray-800">▶ 처리 순서</p>
+                      <ol className="ml-4 list-decimal space-y-0.5">{guide.steps.map((s, i) => <li key={i}>{s}</li>)}</ol></div>
+                  )}
+                  {guide.do_not && guide.do_not.length > 0 && (
+                    <div><p className="font-bold text-rose-700">⛔ 하지 말 것</p>
+                      <ul className="ml-4 list-disc space-y-0.5">{guide.do_not.map((d, i) => <li key={i}>{d}</li>)}</ul></div>
+                  )}
+                  {guide.supplier_message && (
+                    <div className="rounded-lg bg-white border border-gray-200 p-2">
+                      <p className="font-bold text-indigo-700">📨 거래처 전달문</p>
+                      <p className="whitespace-pre-wrap">{guide.supplier_message}</p>
+                    </div>
+                  )}
+                </div>
+              </details>
+            ) : null}
+
             {inq.comments.length > 0 && (
               <div className="mb-3 space-y-2">
                 <p className="text-xs font-semibold text-gray-500">지금까지 답변 ({inq.comments.length})</p>
@@ -949,7 +990,11 @@ function CoupangInquiryTab() {
               </div>
             )}
 
-            {answered ? (
+            {inq.source === 'call_center' ? (
+              <p className="text-xs text-indigo-600 font-semibold">
+                ℹ️ 고객센터 문의는 여기서 전송할 수 없습니다 — 위 가이드 확인 후 쿠팡 WING에서 직접 처리하세요.
+              </p>
+            ) : answered ? (
               <p className="text-xs text-gray-400">✓ 이미 답변된 문의입니다.
                 {sentIds.includes(inq.inquiry_id) && ' (방금 전송됨)'}
               </p>
