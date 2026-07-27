@@ -57,3 +57,24 @@ def test_process_mixed_returns_two_workbooks():
     assert set(by_supplier) == {"쥬얼리프룻", "제주다팜"}
     assert by_supplier["쥬얼리프룻"][2]["winners"] == 2   # 참외 + 백도 1kg
     assert by_supplier["제주다팜"][2]["winners"] == 1     # 백도 4kg
+
+
+# ── 발주 칸에 당첨자 CSV를 올렸을 때: openpyxl 원본오류 대신 안내 (2026-07-27 실제 사고) ──
+def test_delivery_slot_rejects_winners_csv_with_guidance():
+    import pytest
+    from fastapi import HTTPException
+
+    from app.main import _require_xlsx
+
+    csv_bytes = _csv([_row("백도 딱딱이복숭아 대과 2kg", "당첨자")])
+    with pytest.raises(HTTPException) as exc:
+        _require_xlsx(csv_bytes)
+    assert exc.value.status_code == 400
+    assert "이벤트 당첨자" in exc.value.detail
+    assert "zip" not in exc.value.detail
+
+    # 정상 xlsx는 통과
+    from openpyxl import Workbook
+    buf = BytesIO()
+    Workbook().save(buf)
+    assert _require_xlsx(buf.getvalue()) is None

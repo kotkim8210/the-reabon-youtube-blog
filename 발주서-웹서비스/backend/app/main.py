@@ -231,6 +231,30 @@ async def _issued_exclusions(section: str, flag: str) -> set[str]:
         return set()
 
 
+def _require_xlsx(data: bytes, field_label: str = "DeliveryList") -> None:
+    """발주 칸에 엑셀이 아닌 파일이 올라오면 원인을 알려준다.
+
+    openpyxl 원본 오류가 'File is not a zip file'이라 화면만 보고는 원인을 알 수 없다.
+    실제 사례: 이벤트 당첨자 CSV(winners_raw)를 DeliveryList 칸에 업로드(2026-07-27).
+    """
+    if data[:2] == b"PK":  # xlsx = zip
+        return
+    first_line = data[:512].lstrip(b"\xef\xbb\xbf").split(b"\n", 1)[0]
+    if b"," in first_line:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{field_label} 칸에는 쿠팡 엑셀(.xlsx) 파일만 올릴 수 있습니다. "
+                "라이브 이벤트 당첨자 CSV(winners_raw)라면 아래 "
+                "'🎉 라이브 이벤트 당첨자 발주서 생성' 카드에 올려주세요."
+            ),
+        )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{field_label} 파일이 엑셀(.xlsx)이 아닙니다. 쿠팡에서 받은 .xlsx 파일을 그대로 올려주세요.",
+    )
+
+
 # 발주 마감(KST). 거래처 오전 마감(~10시) 이후 생성한 발주서는 실제 발주가 아니라
 # 조회·테스트·미리보기일 가능성이 높아 발주 이력에 기록하지 않는다.
 # (마감 후 생성분을 기록하면 다음 영업일 자동제외가 그 주문들을 '이미 발주됨'으로
@@ -404,6 +428,7 @@ async def process_kolrabi_order(
 ):
     try:
         delivery_bytes = await delivery_file.read()
+        _require_xlsx(delivery_bytes)
         issued_excluded = await _issued_exclusions("kolrabi", exclude_issued)
         dup_names: list[str] = []
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
@@ -601,6 +626,7 @@ async def process_myeongi_order(
 ):
     try:
         delivery_bytes = await delivery_file.read()
+        _require_xlsx(delivery_bytes)
         issued_excluded = await _issued_exclusions("myeongi", exclude_issued)
         dup_names: list[str] = []
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(

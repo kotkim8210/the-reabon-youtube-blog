@@ -151,6 +151,15 @@ const productConfigs: Record<string, ProductConfig> = {
       ],
       buttonLabel: '운송장 입력',
     },
+    event: {
+      title: '라이브 이벤트 당첨자 발주서 생성 (백도딱딱이 2·4kg → 제주다팜 발주서)',
+      icon: '🎉',
+      apiToolId: 'event-winner-order',
+      files: [
+        { key: 'winners', label: '라이브 이벤트 당첨자 CSV (winners_raw)', accept: '.csv', acceptLabel: '.csv 파일' },
+      ],
+      buttonLabel: '이벤트 발주서 생성',
+    },
   },
   myeongi: {
     title: '명이나물+애플초당옥수수+초당옥수수+망고수박+수박+성주참외+신비복숭아+미니밤호박+거반도납작복숭아+대극천복숭아+백도딱딱이복숭아',
