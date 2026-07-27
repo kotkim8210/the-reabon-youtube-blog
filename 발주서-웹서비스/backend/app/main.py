@@ -657,12 +657,38 @@ async def process_event_winner_order(
     winners_file: UploadFile = File(...),
     user: dict = Depends(verify_token),
 ):
-    """라이브 이벤트 당첨자 CSV → 쥬얼리프룻 발주서 (가성비 랜덤과)."""
+    """라이브 이벤트 당첨자 CSV → 발주서 (쥬얼리프룻 + 백도 2·4kg는 제주다팜 분리)."""
     try:
         csv_bytes = await winners_file.read()
-        output_bytes, filename, stats = event_order.process(csv_bytes)
-        logger.info(f"이벤트 당첨자 발주 처리 완료: {stats}")
-        return make_excel_response(output_bytes, filename, stats)
+        results = event_order.process(csv_bytes)
+        if len(results) == 1:
+            output_bytes, filename, stats = results[0]
+            logger.info(f"이벤트 당첨자 발주 처리 완료: {stats}")
+            return make_excel_response(output_bytes, filename, stats)
+
+        # 쥬얼리 + 제주다팜 두 발주서 → zip
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_bytes, fname, _ in results:
+                zf.writestr(fname, file_bytes)
+        zip_buffer.seek(0)
+        kst_now = datetime.now(KST)
+        zip_name = f"이벤트당첨_발주묶음({kst_now.strftime('%Y%m%d')}).zip"
+        stats = {
+            "files": len(results),
+            "winners": sum(int((s or {}).get("winners", 0)) for _, _, s in results),
+            "suppliers": ", ".join((s or {}).get("supplier", "") for _, _, s in results),
+        }
+        logger.info(f"이벤트 당첨자 발주 처리 완료(2개 발주처): {stats}")
+        encoded_zip = quote(zip_name, safe="")
+        return StreamingResponse(
+            BytesIO(zip_buffer.read()),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_zip}",
+                "X-Stats": json.dumps(stats, ensure_ascii=False),
+            },
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:

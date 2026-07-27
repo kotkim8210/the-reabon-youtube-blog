@@ -43,15 +43,18 @@ def _prize_kg(prize: str) -> str:
 
 
 def event_product_name(prize: str) -> str:
-    """경품명 → 쥬얼리 발주 품목명.
+    """경품명 → 발주 품목명 (발주처는 event_supplier로 판정).
 
-    - 복숭아: 거반도·대극천·백도딱딱이는 각 전용 품목명(신비 아님!), 신비복숭아만
+    - 백도딱딱이 2·4kg: 제주다팜 발주명 '딱딱이 복숭아 {등급} {kg}kg'
+      (2026-07-24 쥬얼리→제주다팜 이관 — 1kg만 쥬얼리 잔류).
+    - 복숭아: 거반도·대극천·백도딱딱이(1kg)는 각 전용 품목명(신비 아님!), 신비복숭아만
       거래처 SKU명(_PEACH_COUPANG_SKU, 1·2kg) 또는 '신비복숭아 {kg}kg' 라벨.
       ※ 전용 분기 없이 _peach_label로 폴백하면 백도/대극천 당첨자가 신비로 둔갑함.
     - 그 외(성주참외) → '성주참외 가성비 랜덤과 {kg}kg (R)' (등급 무관)
     """
     text = str(prize or "")
     if "복숭아" in text:
+        from app.processors.kolrabi_order import convert_jeju_baekdo_option
         from app.processors.myeongi_order import (
             _jewelry_baekdo_option,
             _jewelry_daegeukcheon_option,
@@ -59,6 +62,9 @@ def event_product_name(prize: str) -> str:
             _jewelry_peach_option,
             _peach_label,
         )
+        jeju_baekdo = convert_jeju_baekdo_option(text, "")
+        if jeju_baekdo:
+            return jeju_baekdo
         return (
             _jewelry_geobando_option(text, "")
             or _jewelry_daegeukcheon_option(text, "")
@@ -70,6 +76,16 @@ def event_product_name(prize: str) -> str:
     if not kg:
         return "성주참외 가성비 랜덤과 (R)"
     return f"성주참외 가성비 랜덤과 {kg}kg (R)"
+
+
+def event_supplier(prize: str) -> str:
+    """경품의 발주처: 백도딱딱이 2·4kg만 제주다팜, 나머지는 쥬얼리프룻."""
+    text = str(prize or "")
+    if "복숭아" in text:
+        from app.processors.kolrabi_order import convert_jeju_baekdo_option
+        if convert_jeju_baekdo_option(text, ""):
+            return "jejudapam"
+    return "jewelryfruit"
 
 
 def _find_col(headers: list[str], *needles_groups) -> int | None:
@@ -134,6 +150,7 @@ def parse_winners(csv_bytes: bytes) -> list[dict]:
             "qty": "1",
             "memo": "문 앞",
             "order_id": _norm(cell(row, c_order)),
+            "supplier": event_supplier(prize),
         })
 
     # 환불 제외 수는 루프 종료 후 최종값으로 기록 (append 시점 스냅샷이면
@@ -143,7 +160,36 @@ def parse_winners(csv_bytes: bytes) -> list[dict]:
     return entries
 
 
-def process(csv_bytes: bytes) -> tuple[bytes, str, dict]:
+def _labels_for(products: list[str]) -> list[str]:
+    labels = []
+    if any("참외" in p for p in products):
+        labels.append("참외")
+    if any("거반도" in p for p in products):
+        labels.append("거반도복숭아")
+    if any("대극천" in p for p in products):
+        labels.append("대극천복숭아")
+    if any(("백도" in p) or ("딱딱이" in p) for p in products):
+        labels.append("백도딱딱이복숭아")
+    if any("신비" in p for p in products):
+        labels.append("신비복숭아")
+    return labels
+
+
+def _empty_delivery_bytes() -> bytes:
+    """제주다팜 워크북 코어(toss_entries 전용 사용)를 위한 빈 DeliveryList."""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
+    """당첨자 CSV → 발주서 목록. 쥬얼리프룻 + (백도 2·4kg 있으면) 제주다팜 분리 출력."""
+    from app.processors.kolrabi_order import process_baekdo
     from app.processors.myeongi_order import _build_jewelry_order_workbook
 
     entries = parse_winners(csv_bytes)
@@ -154,28 +200,38 @@ def process(csv_bytes: bytes) -> tuple[bytes, str, dict]:
     if not entries:
         raise ValueError("발주할 이벤트 당첨자가 없습니다. (환불/취소 건만 있거나 빈 파일)")
 
-    output_bytes, _filename, stats = _build_jewelry_order_workbook(entries)
-
-    products = [e.get("product", "") for e in entries]
-    labels = []
-    if any("참외" in p for p in products):
-        labels.append("참외")
-    if any("거반도" in p for p in products):
-        labels.append("거반도복숭아")
-    if any("대극천" in p for p in products):
-        labels.append("대극천복숭아")
-    if any("백도" in p for p in products):
-        labels.append("백도딱딱이복숭아")
-    if any("신비" in p for p in products):
-        labels.append("신비복숭아")
-    label = "_".join(labels) if labels else "발주"
+    jewelry_entries = [e for e in entries if e.get("supplier") != "jejudapam"]
+    jeju_entries = [e for e in entries if e.get("supplier") == "jejudapam"]
     today = datetime.now(KST).strftime("%Y%m%d")
-    filename = f"이벤트당첨_쥬얼리프룻_{label}_발주({today}).xlsx"
-    stats = {
-        **stats,
-        "supplier": "쥬얼리프룻",
-        "product": ("이벤트 " + "·".join(labels)) if labels else "이벤트",
-        "winners": len(entries),
-        "skipped_refund": skipped_refund,
-    }
-    return output_bytes, filename, stats
+    results: list[tuple[bytes, str, dict]] = []
+
+    if jewelry_entries:
+        output_bytes, _filename, stats = _build_jewelry_order_workbook(jewelry_entries)
+        labels = _labels_for([e.get("product", "") for e in jewelry_entries])
+        label = "_".join(labels) if labels else "발주"
+        filename = f"이벤트당첨_쥬얼리프룻_{label}_발주({today}).xlsx"
+        results.append((output_bytes, filename, {
+            **stats,
+            "supplier": "쥬얼리프룻",
+            "product": ("이벤트 " + "·".join(labels)) if labels else "이벤트",
+            "winners": len(jewelry_entries),
+            "skipped_refund": skipped_refund,
+        }))
+
+    if jeju_entries:
+        # 백도 2·4kg 당첨자 → 제주다팜 발주서 (2026-07-24 이관과 동일 경로)
+        jeju_result = process_baekdo(_empty_delivery_bytes(), toss_entries=jeju_entries)
+        if jeju_result:
+            jeju_bytes, _fn, jeju_stats = jeju_result
+            filename = f"이벤트당첨_제주다팜_백도딱딱이복숭아_발주({today}).xlsx"
+            results.append((jeju_bytes, filename, {
+                **jeju_stats,
+                "supplier": "제주다팜",
+                "product": "이벤트 백도딱딱이복숭아(제주다팜)",
+                "winners": len(jeju_entries),
+                "skipped_refund": 0 if jewelry_entries else skipped_refund,
+            }))
+
+    if not results:
+        raise ValueError("발주할 이벤트 당첨자가 없습니다.")
+    return results
