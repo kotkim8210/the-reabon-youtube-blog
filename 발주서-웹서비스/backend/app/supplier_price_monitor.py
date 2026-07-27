@@ -61,12 +61,65 @@ PRICE_SIGNAL_STYLE = {
 
 
 @dataclass(frozen=True)
+class SupplierSource:
+    """옵션 일부를 다른 발주처에서 수집할 때 쓰는 보조 소스.
+
+    발주처가 옵션별로 갈리는 상품(미니밤호박 1kg=제주다팜·3~10kg=쥬얼리,
+    백도 딱딱이복숭아 1kg=쥬얼리·2·4kg=제주다팜)을 **한 파일**로 뽑기 위해
+    모니터 하나가 여러 발주처를 조회한다. None인 필드는 모니터 기본값을 그대로 쓴다.
+    """
+
+    supplier_name: str
+    source_type: Literal["adminplus", "google_sheet", "manual"] = "adminplus"
+    base_url: str | None = None
+    search_value: str | None = None
+    product_code: str | None = None
+    product_name: str | None = None
+    sheet_csv_url: str | None = None
+    sheet_product_name: str | None = None
+    sheet_product_exclude: tuple[str, ...] | None = None
+    sheet_product_column: str | None = None
+    sheet_option_column: str | None = None
+    sheet_quantity_column: str | None = None
+    sheet_vip_column: str | None = None
+    sheet_price_fallback_column: str | None = None
+    sheet_previous_column: str | None = None
+
+    _OVERRIDABLE = (
+        "base_url", "search_value", "product_code", "product_name",
+        "sheet_csv_url", "sheet_product_name", "sheet_product_exclude",
+        "sheet_product_column", "sheet_option_column", "sheet_quantity_column",
+        "sheet_vip_column", "sheet_price_fallback_column", "sheet_previous_column",
+    )
+
+    def as_config(self, base: "SupplierMonitorConfig") -> "SupplierMonitorConfig":
+        """수집 함수들이 그대로 쓸 수 있도록 모니터 설정에 이 소스를 덮어쓴 사본을 만든다."""
+        overrides: dict[str, object] = {
+            "supplier_name": self.supplier_name,
+            "source_type": self.source_type,
+        }
+        for field_name in self._OVERRIDABLE:
+            value = getattr(self, field_name)
+            if value is not None:
+                overrides[field_name] = value
+        return replace(base, **overrides)
+
+
+@dataclass(frozen=True)
 class SupplierOptionConfig:
     label: str
     supplier_option_name: str
     row: int
     sheet_name: str | None = None
     cell: str = "I"
+    # 이 옵션만 다른 발주처에서 수집(None이면 모니터 기본 발주처)
+    source: SupplierSource | None = None
+    # 기본 발주처를 쓰는 옵션의 발주처 이름(발주처 혼합 모니터에서 행별 표기·검증용)
+    supplier_name: str = ""
+    # 쿠팡 상품명·옵션 원문. 채워두면 발주 라우팅(order_routing)과 발주처가 일치하는지
+    # 테스트가 검증한다 → 발주처가 바뀌면 마진방어 설정도 같이 고치게 강제된다.
+    coupang_product: str = ""
+    coupang_option: str = ""
 
 
 @dataclass(frozen=True)
@@ -120,6 +173,24 @@ class SupplierMonitorConfig:
             return self.output_name_pattern.format(date=now.strftime("%y%m%d"))
         return f"{self.output_prefix}_{now.strftime('%y%m%d')}{self.output_suffix}.xlsx"
 
+
+# ── 발주처가 옵션별로 갈리는 상품의 보조 소스(제주다팜 adminplus) ──
+# 미니밤호박 1kg: pcode 10000015 '제주 미니밤호박 보우짱 로얄과'
+JEJU_BAMHOBAK_SOURCE = SupplierSource(
+    supplier_name="제주다팜",
+    source_type="adminplus",
+    base_url="https://kkangta55.adminplus.co.kr",
+    product_code="10000015",
+    product_name="제주 미니밤호박 보우짱 로얄과",
+)
+# 백도 딱딱이복숭아 2·4kg: pcode 10001059 '딱딱이복숭아' (옵션명 '딱딱이 복숭아 {등급} {kg}kg', 2026-07-27 실측)
+JEJU_BAEKDO_SOURCE = SupplierSource(
+    supplier_name="제주다팜",
+    source_type="adminplus",
+    base_url="https://kkangta55.adminplus.co.kr",
+    product_code="10001059",
+    product_name="딱딱이복숭아",
+)
 
 MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
     "myeongi": SupplierMonitorConfig(
@@ -186,10 +257,12 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("홍감자 5kg 특대", "특대 5kg", 12, sheet_name="쥬얼리프룻"),
         ),
     ),
+    # 미니밤호박 — 발주처가 옵션별로 갈린다(1kg 제주다팜 / 3·5·10kg 쥬얼리프룻).
+    # 2026-07-27부터 한 파일로 통합(발주처별 따로 받으면 마진 비교가 안 됨). C열=발주처.
     "bamhobak-jewelry": SupplierMonitorConfig(
         key="bamhobak-jewelry",
         source_type="google_sheet",
-        supplier_name="쥬얼리프룻",
+        supplier_name="제주다팜·쥬얼리프룻",
         product_name="미니밤호박(보우짱)",
         sheet_csv_url=GOOGLE_SHEET_JEWELRYFRUIT_KG_CSV,
         sheet_product_name="미니 밤호박",
@@ -198,15 +271,29 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
         sheet_vip_column="I",
         sheet_price_fallback_column="G",
         sheet_previous_column="G",
-        template_path=TEMPLATE_DIR / "밤호박_쥬얼리프룻_소싱현황_원본.xlsx",
-        output_prefix="밤호박_쥬얼리프룻_V1",
+        template_path=TEMPLATE_DIR / "밤호박_통합_소싱현황_원본.xlsx",
+        output_prefix="밤호박_통합_V1",
         output_name_pattern="미니밤호박 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
         skip_missing_options=True,
         options=(
-            # 2026-06 제주다팜→쥬얼리프룻 발주 전환분(3·5·10kg). 1kg은 제주다팜(쥬얼리 시트 미수록).
-            SupplierOptionConfig("미니밤호박 로얄과 3kg", "로얄과 3kg", 8, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("미니밤호박 로얄과 5kg", "로얄과 5kg", 9, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("미니밤호박 로얄과 10kg", "로얄과 10kg", 10, sheet_name="쥬얼리프룻"),
+            SupplierOptionConfig(
+                "미니밤호박 로얄과 1kg", "로얄과 1kg", 8, sheet_name="쥬얼리프룻",
+                source=JEJU_BAMHOBAK_SOURCE,
+                coupang_product="제주 미니밤호박 보우짱", coupang_option="1박스 로얄 정품 1kg",
+            ),
+            # 2026-06 제주다팜→쥬얼리프룻 발주 전환분(3·5·10kg)
+            SupplierOptionConfig(
+                "미니밤호박 로얄과 3kg", "로얄과 3kg", 9, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                coupang_product="제주 미니밤호박 보우짱", coupang_option="1박스 로얄 정품 3kg",
+            ),
+            SupplierOptionConfig(
+                "미니밤호박 로얄과 5kg", "로얄과 5kg", 10, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                coupang_product="제주 미니밤호박 보우짱", coupang_option="1박스 로얄 정품 5kg",
+            ),
+            SupplierOptionConfig(
+                "미니밤호박 로얄과 10kg", "로얄과 10kg", 11, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                coupang_product="제주 미니밤호박 보우짱", coupang_option="1박스 로얄 정품 10kg",
+            ),
         ),
     ),
     "chamoe-jewelry": SupplierMonitorConfig(
@@ -246,23 +333,7 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("콜라비 정품 10kg", "콜라비(정품 300~750g) 10kg", 10),
         ),
     ),
-    # 제주다팜 미니밤호박 1kg (3/5/10kg는 쥬얼리프룻=bamhobak-jewelry). pcode 10000015='제주 미니밤호박 보우짱 로얄과'.
-    # adminplus 상세 popup(mod= 라우터, product_detail_url)로 자동 스크랩. 옵션 '로얄과 1kg'만 대상.
-    "bamhobak-jeju": SupplierMonitorConfig(
-        key="bamhobak-jeju",
-        source_type="adminplus",
-        base_url="https://kkangta55.adminplus.co.kr",
-        supplier_name="제주다팜",
-        product_name="제주 미니밤호박 보우짱 로얄과",
-        product_code="10000015",
-        template_path=TEMPLATE_DIR / "밤호박_제주다팜_소싱현황_원본.xlsx",
-        output_prefix="밤호박_제주다팜_V1",
-        output_name_pattern="미니밤호박 소싱현황관리(제주다팜)_V1_{date}.xlsx",
-        skip_missing_options=True,
-        options=(
-            SupplierOptionConfig("미니밤호박 로얄과 1kg", "로얄과 1kg", 8),
-        ),
-    ),
+    # (2026-07-27) 제주다팜 미니밤호박 1kg 단독 모니터는 bamhobak-jewelry로 통합 — 한 파일에서 비교.
     # 홍감자 (2026-07-14 쥬얼리 품절 → 제주다팜 이관). kkangta55 pcode=10001051 '국산 홍감자',
     # popup 옵션명 '홍감자 {등급}_{KG}KG' (라이브 확인). 소싱시트(V3.0)는 쿠팡 판매옵션 기준 행이고
     # 공급가(J열)는 발주 매핑된 옵션 단가: 중1kg→중_2KG, 대3kg→특_3KG, 대5kg→특_5KG.
@@ -386,28 +457,52 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("망고수박 가정용 6kg", "수박 가정용 5~6kg내외(6kg)", 11, sheet_name="제이비티"),
         ),
     ),
-    # 백도 딱딱이복숭아 (2026-07~). pbfcompany adminplus pcode=10000549 '백도 딱딱이 복숭아'
-    # 상세 popup 옵션 공급가(vip). supplier_option_name은 라이브 popup 실제 옵션명(2026-07 확인).
+    # 백도 딱딱이복숭아 (2026-07~). 발주처가 옵션별로 갈린다:
+    #  - 중과·대과 1kg → 쥬얼리프룻 (pbfcompany adminplus pcode=10000549)
+    #  - 중과·대과 2·4kg → 제주다팜 (2026-07-24 이관, kkangta55 pcode=10001059)
+    # 두 발주처를 한 파일로 뽑는다(C열=발주처). 발주 라우팅과의 정합은 coupang_* 로 테스트가 검증.
     "baekdo-jewelry": SupplierMonitorConfig(
         key="baekdo-jewelry",
         source_type="adminplus",
         base_url="https://pbfcompany.adminplus.co.kr",
-        supplier_name="쥬얼리프룻",
+        supplier_name="쥬얼리프룻·제주다팜",
         product_name="백도 딱딱이 복숭아",
         search_value="딱딱이",
         product_code="10000549",  # 동명이상품 오매칭 방지 (직접 지정)
         template_path=TEMPLATE_DIR / "백도복숭아_쥬얼리프룻_소싱현황_원본.xlsx",
-        output_prefix="백도복숭아_쥬얼리프룻_V1",
-        output_name_pattern="백도복숭아 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
+        output_prefix="백도복숭아_통합_V1",
+        output_name_pattern="백도복숭아 소싱현황관리_V1_{date}.xlsx",
         skip_missing_options=True,
         options=(
-            # 소싱현황 시트 행8~13 ↔ pbfcompany adminplus popup 실제 옵션명(과수는 물결'~' 구분)
-            SupplierOptionConfig("백도 딱딱이복숭아 중과 1kg", "딱딱이 백도복숭아 중과 1kg (5~6과 내외)", 8, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("백도 딱딱이복숭아 중과 2kg", "딱딱이 백도복숭아 중과 2kg (11~14과 내외)", 9, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("백도 딱딱이복숭아 중과 4kg", "딱딱이 백도복숭아 중과 4kg (20~26과 내외)", 10, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("백도 딱딱이복숭아 대과 1kg", "딱딱이 백도복숭아 대과 1kg (3~4과 내외)", 11, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("백도 딱딱이복숭아 대과 2kg", "딱딱이 백도복숭아 대과 2kg (6~8과 내외)", 12, sheet_name="쥬얼리프룻"),
-            SupplierOptionConfig("백도 딱딱이복숭아 대과 4kg", "딱딱이 백도복숭아 대과 4kg (12~17과 내외)", 13, sheet_name="쥬얼리프룻"),
+            # 행8~13 ↔ 발주처 popup 실제 옵션명(쥬얼리는 과수 물결'~' 표기, 제주다팜은 '딱딱이 복숭아 {등급} {kg}kg')
+            SupplierOptionConfig(
+                "백도 딱딱이복숭아 중과 1kg", "딱딱이 백도복숭아 중과 1kg (5~6과 내외)", 8, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 중과 1kg",
+            ),
+            SupplierOptionConfig(
+                "백도 딱딱이복숭아 중과 2kg", "딱딱이 복숭아 중과 2kg", 9, sheet_name="쥬얼리프룻",
+                source=JEJU_BAEKDO_SOURCE,
+                coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 중과 2kg",
+            ),
+            SupplierOptionConfig(
+                "백도 딱딱이복숭아 중과 4kg", "딱딱이 복숭아 중과 4kg", 10, sheet_name="쥬얼리프룻",
+                source=JEJU_BAEKDO_SOURCE,
+                coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 중과 4kg",
+            ),
+            SupplierOptionConfig(
+                "백도 딱딱이복숭아 대과 1kg", "딱딱이 백도복숭아 대과 1kg (3~4과 내외)", 11, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 대과 1kg",
+            ),
+            SupplierOptionConfig(
+                "백도 딱딱이복숭아 대과 2kg", "딱딱이 복숭아 대과 2kg", 12, sheet_name="쥬얼리프룻",
+                source=JEJU_BAEKDO_SOURCE,
+                coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 대과 2kg",
+            ),
+            SupplierOptionConfig(
+                "백도 딱딱이복숭아 대과 4kg", "딱딱이 복숭아 대과 4kg", 13, sheet_name="쥬얼리프룻",
+                source=JEJU_BAEKDO_SOURCE,
+                coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 대과 4kg",
+            ),
         ),
     ),
     # ── 신비복숭아 한시 모니터 (2026-06-15 ~ 2026-06-29, 2주) — 2026-07 품절로 마진방어 UI에서 제외 ──
@@ -543,6 +638,13 @@ MONITOR_CONFIGS["dureup-jbt"] = replace(
 
 class SupplierMonitorError(RuntimeError):
     pass
+
+
+def option_supplier_name(option: SupplierOptionConfig, config: SupplierMonitorConfig) -> str:
+    """옵션 한 줄의 실제 발주처 (보조 소스 > 옵션 지정 > 모니터 기본)."""
+    if option.source:
+        return option.source.supplier_name
+    return option.supplier_name or config.supplier_name
 
 
 def _normalize_option_name(raw: str) -> str:
@@ -964,11 +1066,6 @@ def _worksheet_xml_paths_from_zip(workbook_zip: ZipFile) -> dict[str, str]:
     return paths
 
 
-def _worksheet_xml_paths(template_path: Path) -> dict[str, str]:
-    with ZipFile(template_path, "r") as workbook_zip:
-        return _worksheet_xml_paths_from_zip(workbook_zip)
-
-
 def _excel_number(value: int | float) -> str:
     if isinstance(value, float):
         return f"{value:.12g}"
@@ -976,29 +1073,6 @@ def _excel_number(value: int | float) -> str:
 
 
 _CELL_VALUE_RE = re.compile(r"<v\b[^>]*/>|<v>.*?</v>", flags=re.DOTALL)
-
-
-def _replace_numeric_cell_value(sheet_xml: bytes, cell_ref: str, value: int) -> bytes:
-    xml_text = sheet_xml.decode("utf-8")
-    pattern = re.compile(
-        rf'(<c\b(?=[^>]*\br="{re.escape(cell_ref)}")[^>]*>)(.*?)(</c>)',
-        flags=re.DOTALL,
-    )
-
-    def replace_cell(match: re.Match[str]) -> str:
-        opening_tag = re.sub(r'\s+t="[^"]*"', "", match.group(1))
-        body = match.group(2)
-        body = re.sub(r"<is\b[^>]*>.*?</is>", "", body, flags=re.DOTALL)
-        body = re.sub(r"<f\b[^>]*>.*?</f>", "", body, flags=re.DOTALL)
-        value_text = _excel_number(value)
-        body = _CELL_VALUE_RE.sub("", body)
-        body = f"{body}<v>{value_text}</v>"
-        return f"{opening_tag}{body}{match.group(3)}"
-
-    updated_xml, changed_count = pattern.subn(replace_cell, xml_text, count=1)
-    if changed_count != 1:
-        raise SupplierMonitorError(f"엑셀 템플릿에서 {cell_ref} 셀을 찾지 못했습니다.")
-    return updated_xml.encode("utf-8")
 
 
 def _replace_formula_cell_value(
@@ -1129,6 +1203,21 @@ def _patch_workbook_values(
     return output_buffer.getvalue()
 
 
+async def _collect_all_supplier_prices(
+    config: SupplierMonitorConfig,
+) -> dict[SupplierSource | None, tuple[dict[str, int], dict[str, int]]]:
+    """옵션들이 참조하는 발주처별로 공급가를 수집한다(기본 발주처 = None 키)."""
+    sources: list[SupplierSource | None] = []
+    for option in config.options:
+        if option.source not in sources:
+            sources.append(option.source)
+    collected: dict[SupplierSource | None, tuple[dict[str, int], dict[str, int]]] = {}
+    for source in sources:
+        target = source.as_config(config) if source else config
+        collected[source] = await _collect_supplier_prices(target)
+    return collected
+
+
 async def _collect_supplier_prices(config: SupplierMonitorConfig) -> tuple[dict[str, int], dict[str, int]]:
     if config.source_type == "manual":
         return {}, {}
@@ -1185,7 +1274,7 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
     if is_supplier_monitor_paused(config.key):
         raise SupplierMonitorError(f"{config.product_name} 공급가 모니터링은 품절로 일시중지 중입니다.")
 
-    supplier_prices, source_previous_prices = await _collect_supplier_prices(config)
+    price_sets = await _collect_all_supplier_prices(config)
     editable_wb, data_wb = _load_workbooks(config)
     now = datetime.now(KST)
     run_date = now.date().isoformat()
@@ -1224,9 +1313,11 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
                 )
                 continue
             raise
+        supplier_prices, source_previous_prices = price_sets.get(option.source, ({}, {}))
+        option_source_type = option.source.source_type if option.source else config.source_type
         supplier_price = _supplier_price_lookup(supplier_prices, option.supplier_option_name)
         # manual 모니터: 외부 수집값이 없으므로 템플릿에 적힌 공급가를 그대로 사용
-        if supplier_price is None and config.source_type == "manual":
+        if supplier_price is None and option_source_type == "manual":
             supplier_price = workbook_price
         if supplier_price is None:
             if config.skip_missing_options:
@@ -1266,6 +1357,7 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
             {
                 "option_name": option.label,
                 "supplier_option_name": option.supplier_option_name,
+                "supplier_name": option_supplier_name(option, config),
                 "sheet_name": option.sheet_name or editable_ws.title,
                 "sheet_row": option.row,
                 "cell": cell_ref,
