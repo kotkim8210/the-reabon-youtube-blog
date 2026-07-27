@@ -123,3 +123,33 @@ def test_run_monitor_writes_both_suppliers_into_one_workbook(monkeypatch):
     assert "미니밤호박" in filename
     ws = load_workbook(BytesIO(output_bytes))["쥬얼리프룻"]
     assert [ws.cell(r, 9).value for r in range(8, 12)] == [5200, 8100, 11700, 19300]
+
+
+def test_missing_supplier_option_is_reported_not_silent(monkeypatch):
+    """옵션명이 바뀌어 공급가를 못 찾으면 조용히 빠지지 말고 summary에 남긴다.
+
+    (백도 쥬얼리 1kg 2종이 과수 표기 변경으로 조용히 누락돼 있던 2026-07-27 사고)
+    """
+    async def fake_collect(config):
+        if config.supplier_name == "제주다팜":
+            return {}, {}   # 수집 실패(옵션명 불일치) 재현
+        return {"로얄과 3kg": 8100, "로얄과 5kg": 11700, "로얄과 10kg": 19300}, {}
+
+    monkeypatch.setattr(spm, "_collect_supplier_prices", fake_collect)
+
+    from app import db as database
+
+    async def no_snapshots(*_a, **_k):
+        return []
+
+    async def noop(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(database, "latest_supplier_price_snapshots_before_run_date", no_snapshots)
+    monkeypatch.setattr(database, "save_supplier_price_snapshot", noop)
+    monkeypatch.setattr(database, "save_supplier_price_monitor_run", noop)
+
+    summary, _bytes, _name = asyncio.run(spm.run_supplier_monitor("bamhobak-jewelry"))
+
+    assert summary["total_items"] == 3
+    assert summary["missing_options"] == ["미니밤호박 로얄과 1kg(제주다팜 공급가 없음)"]

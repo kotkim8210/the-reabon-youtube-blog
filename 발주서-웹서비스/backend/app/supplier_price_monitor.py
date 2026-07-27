@@ -474,9 +474,11 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
         output_name_pattern="백도복숭아 소싱현황관리_V1_{date}.xlsx",
         skip_missing_options=True,
         options=(
-            # 행8~13 ↔ 발주처 popup 실제 옵션명(쥬얼리는 과수 물결'~' 표기, 제주다팜은 '딱딱이 복숭아 {등급} {kg}kg')
+            # 행8~13 ↔ 발주처 popup 실제 옵션명.
+            # 쥬얼리는 과수 표기(6-7과 등)가 시즌마다 바뀌어 조용히 매칭 실패했었다(2026-07-27 발견) →
+            # 과수 없는 짧은 이름으로 부분매칭. 제주다팜은 '딱딱이 복숭아 {등급} {kg}kg'.
             SupplierOptionConfig(
-                "백도 딱딱이복숭아 중과 1kg", "딱딱이 백도복숭아 중과 1kg (5~6과 내외)", 8, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                "백도 딱딱이복숭아 중과 1kg", "딱딱이 백도 복숭아 중과 1kg", 8, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
                 coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 중과 1kg",
             ),
             SupplierOptionConfig(
@@ -490,7 +492,7 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
                 coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 중과 4kg",
             ),
             SupplierOptionConfig(
-                "백도 딱딱이복숭아 대과 1kg", "딱딱이 백도복숭아 대과 1kg (3~4과 내외)", 11, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                "백도 딱딱이복숭아 대과 1kg", "딱딱이 백도 복숭아 대과 1kg", 11, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
                 coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 대과 1kg",
             ),
             SupplierOptionConfig(
@@ -1296,6 +1298,7 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
             previous_price_map.setdefault(lookup_key, supplier_price)
 
     rows: list[dict] = []
+    missing_options: list[str] = []  # 공급가를 못 찾아 빠진 옵션(조용한 누락 방지)
     workbook_updates: list[tuple[str, str, int]] = []
     formula_updates: list[tuple[str, str, str, int | float | None]] = []
     for option in config.options:
@@ -1311,6 +1314,7 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
                     "Skip non-numeric workbook price for %s: %s (%r)",
                     config.key, option.supplier_option_name, data_ws[cell_ref].value,
                 )
+                missing_options.append(f"{option.label}(양식 공급가 비숫자)")
                 continue
             raise
         supplier_prices, source_previous_prices = price_sets.get(option.source, ({}, {}))
@@ -1321,11 +1325,13 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
             supplier_price = workbook_price
         if supplier_price is None:
             if config.skip_missing_options:
-                logger.info(
-                    "Skip missing supplier option for %s: %s",
+                logger.warning(
+                    "Skip missing supplier option for %s: %s (%s)",
                     config.key,
                     option.supplier_option_name,
+                    option_supplier_name(option, config),
                 )
+                missing_options.append(f"{option.label}({option_supplier_name(option, config)} 공급가 없음)")
                 continue
             raise SupplierMonitorError(f"옵션 공급가를 찾지 못했습니다: {option.supplier_option_name}")
 
@@ -1391,6 +1397,7 @@ async def run_supplier_monitor(key: str) -> tuple[dict, bytes, str]:
         "red_count": sum(1 for row in rows if row["signal"] == "red"),
         "same_count": sum(1 for row in rows if row["signal"] == "same"),
         "negative_margin_count": sum(1 for row in rows if row.get("margin_negative")),
+        "missing_options": missing_options,
         "rows": rows,
     }
     await database.save_supplier_price_snapshot(summary)
