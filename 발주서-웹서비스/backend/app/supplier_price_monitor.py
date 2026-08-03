@@ -951,11 +951,21 @@ def _parse_adminplus_popup_prices(html: str) -> dict[str, int]:
     (헤더 순서: 제품명·재고·공급가·판매가·과세·배송비 — 첫 col_price가 공급가).
     구 마크업(<td style='border-left:0px'>…)은 폴백으로 유지.
     """
+    # 클래스는 부분일치로 본다 — 실제 셀은 class="col_price set_meta_value is_price"처럼
+    # 보조 클래스가 붙는다(정확일치 정규식이 0건 매칭하던 원인, 2026-08-03 실측).
     prices: dict[str, int] = {}
-    for row in re.findall(r"<tr class=[\"']product_set_row[\"']>(.*?)</tr>", html, flags=re.DOTALL):
-        name_match = re.search(r"class=[\"']set_item_name[\"'][^>]*>(.*?)</p>", row, flags=re.DOTALL)
-        price_match = re.search(r"<td class=[\"']col_price[\"'][^>]*>(.*?)</td>", row, flags=re.DOTALL)
-        if not name_match or not price_match:
+    row_re = re.compile(r"<tr[^>]*class=[\"'][^\"']*product_set_row[^\"']*[\"'][^>]*>(.*?)</tr>", flags=re.DOTALL)
+    name_re = re.compile(r"<p[^>]*class=[\"'][^\"']*set_item_name[^\"']*[\"'][^>]*>(.*?)</p>", flags=re.DOTALL)
+    price_re = re.compile(r"<td[^>]*class=[\"'][^\"']*col_price[^\"']*[\"'][^>]*>(.*?)</td>", flags=re.DOTALL)
+    supply_re = re.compile(r"<td[^>]*class=[\"'][^\"']*is_price[^\"']*[\"'][^>]*>(.*?)</td>", flags=re.DOTALL)
+    for row in row_re.findall(html):
+        name_match = name_re.search(row)
+        if not name_match:
+            continue
+        # 공급가 셀: is_price 표시가 있으면 그것, 없으면 첫 col_price(헤더 순서: 공급가→판매가)
+        supply_match = supply_re.search(row)
+        price_match = supply_match or price_re.search(row)
+        if not price_match:
             continue
         normalized_name = _normalize_option_name(name_match.group(1))
         if not normalized_name:

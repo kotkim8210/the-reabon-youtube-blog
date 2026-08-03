@@ -134,5 +134,23 @@ def test_parse_new_adminplus_popup():
     assert prices == {"콜라비(정품 300~750g) 3kg": 8100, "딱딱이 복숭아 중과 2kg": 9400}
 
 
+# 실서버 마크업(2026-08-03 kkangta55 실측): 셀에 보조 클래스가 붙고 공급가에 ￦, 판매가는 '자율'
+_LIVE_POPUP = """
+<tr class="product_set_row">
+  <td class="col_name"><div class="set_item_name_cell"><div class="set_item_info">
+    <p class="set_item_name">콜라비(정품 소과 150~270g) 2kg</p></div></div></td>
+  <td class="col_stock"><span class='set_stock_badge is_unlimited'><img alt='무제한' src='/x.svg' /></span></td>
+  <td class="col_price set_meta_value is_price">￦6,200</td>
+  <td class="col_price set_meta_value">자율</td>
+  <td class="col_tax"><span class="tax_badge is_free">비과세</span></td>
+</tr>
+"""
+
+
+def test_parse_live_adminplus_popup_with_extra_classes():
+    # class 정확일치 정규식이 0건 매칭하던 실사고 회귀 — 보조 클래스·￦ 포함 마크업
+    assert _parse_adminplus_popup_prices(_LIVE_POPUP) == {"콜라비(정품 소과 150~270g) 2kg": 6200}
+
+
 def test_parse_old_adminplus_popup_fallback():
     assert _parse_adminplus_popup_prices(_OLD_POPUP) == {"명이나물(대명이) 3kg": 21000}
