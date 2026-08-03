@@ -942,6 +942,43 @@ async def _find_product_code(client: httpx.AsyncClient, config: SupplierMonitorC
     raise SupplierMonitorError(f"{config.product_name} 상품 코드를 찾지 못했습니다.")
 
 
+def _parse_adminplus_popup_prices(html: str) -> dict[str, int]:
+    """adminplus 상세 popup에서 옵션명→공급가를 뽑는다 (신·구 마크업 모두).
+
+    2026-08 adminplus가 popup을 리뉴얼함: 구성상품 테이블이
+    <tr class="product_set_row"> / <p class="set_item_name">옵션명</p> /
+    <td class="col_price">공급가</td><td class="col_price">판매가</td> 구조로 변경
+    (헤더 순서: 제품명·재고·공급가·판매가·과세·배송비 — 첫 col_price가 공급가).
+    구 마크업(<td style='border-left:0px'>…)은 폴백으로 유지.
+    """
+    prices: dict[str, int] = {}
+    for row in re.findall(r"<tr class=[\"']product_set_row[\"']>(.*?)</tr>", html, flags=re.DOTALL):
+        name_match = re.search(r"class=[\"']set_item_name[\"'][^>]*>(.*?)</p>", row, flags=re.DOTALL)
+        price_match = re.search(r"<td class=[\"']col_price[\"'][^>]*>(.*?)</td>", row, flags=re.DOTALL)
+        if not name_match or not price_match:
+            continue
+        normalized_name = _normalize_option_name(name_match.group(1))
+        if not normalized_name:
+            continue
+        try:
+            prices[normalized_name] = _parse_price(price_match.group(1))
+        except SupplierMonitorError:
+            continue  # 품절 등 비숫자 공급가 옵션은 건너뜀
+    if prices:
+        return prices
+
+    matches = re.findall(
+        r"""<tr[^>]*>\s*<td style='border-left:0px'>(?P<option>.*?)</td>.*?<td style='text-align:right;color:black;font-weight:bold'>(?P<price>.*?)</td>""",
+        html,
+        flags=re.DOTALL,
+    )
+    for option_name, price in matches:
+        normalized_name = _normalize_option_name(option_name)
+        if normalized_name:
+            prices[normalized_name] = _parse_price(price)
+    return prices
+
+
 async def _fetch_adminplus_prices(client: httpx.AsyncClient, config: SupplierMonitorConfig, product_code: str) -> dict[str, int]:
     response = await client.get(
         config.product_detail_url,
@@ -949,17 +986,7 @@ async def _fetch_adminplus_prices(client: httpx.AsyncClient, config: SupplierMon
     )
     response.raise_for_status()
 
-    matches = re.findall(
-        r"""<tr[^>]*>\s*<td style='border-left:0px'>(?P<option>.*?)</td>.*?<td style='text-align:right;color:black;font-weight:bold'>(?P<price>.*?)</td>""",
-        response.text,
-        flags=re.DOTALL,
-    )
-
-    prices: dict[str, int] = {}
-    for option_name, price in matches:
-        normalized_name = _normalize_option_name(option_name)
-        if normalized_name:
-            prices[normalized_name] = _parse_price(price)
+    prices = _parse_adminplus_popup_prices(response.text)
     if not prices:
         raise SupplierMonitorError(f"{config.product_name} 옵션 공급가를 읽지 못했습니다.")
     return prices

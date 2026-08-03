@@ -114,14 +114,37 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
 
     # 헤더가 일부라도 있으면 데이터 시작은 다음 행. 아니면 기존 방식 유지.
     if best:
+        tracking_col = best.get("tracking")
+        courier_col = best.get("courier")
+        if tracking_col:
+            # 헤더로 찾은 송장 열을 실제 데이터로 검증한다. 해달이 '출고번호' 칸에
+            # 택배사(CJ대한통운)를 적고 송장은 옆 칸(특기사항)에 넣어 보낸 사례(2026-08-03):
+            # 열 전체에 유효 송장이 하나도 없으면 열 감지를 버리고 행 스캔 폴백을 쓴다.
+            valid = 0
+            nonempty = 0
+            courier_like = 0
+            for row_idx in range(best_row + 1, min(getattr(ws, "max_row", 1), best_row + 200) + 1):
+                value = ws.cell(row=row_idx, column=tracking_col).value
+                text = str(value).strip() if value is not None else ""
+                if not text:
+                    continue
+                nonempty += 1
+                if _valid_tracking(value):
+                    valid += 1
+                elif any(hint in re.sub(r"\s+", "", text).lower() for hint in _COURIER_HINTS):
+                    courier_like += 1
+            if nonempty and not valid:
+                if courier_like and not courier_col:
+                    courier_col = tracking_col  # 그 칸이 사실상 택배사 열
+                tracking_col = None
         return HaedalColumns(
             start_row=best_row + 1,
             name=best.get("name", 1),
             phone=best.get("phone", 2),
             address=best.get("address", 6),
             product=best.get("product", 14),
-            tracking=best.get("tracking"),
-            courier=best.get("courier"),
+            tracking=tracking_col,
+            courier=courier_col,
         )
 
     a1 = _key(ws.cell(row=1, column=1).value)
