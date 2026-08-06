@@ -262,15 +262,22 @@ def _infer_grades_in(option: str) -> list[str]:
 
 
 def _infer_keyword(product: str) -> str:
-    """상품명에서 매칭 키워드 후보(첫 비노이즈 토큰)를 고른다."""
+    """상품명에서 매칭 키워드 후보를 고른다.
+
+    비노이즈 토큰 중 **가장 긴 것**(동률이면 앞쪽). 앞쪽 토큰을 그냥 쓰면
+    '국내산 김천 피자두…'→'김천', '제주 하우스 애플망고…'→'제주'처럼 지역명이
+    잡혀 발주명까지 틀어진다(2026-08-06 실측). 긴 토큰이 상품 고유명일 확률이
+    높고, 더 구체적이라 다른 상품에 잘못 매칭될 위험도 작다.
+    """
     tokens = [t for t in re.split(r"\s+", product) if t]
-    for t in tokens:
-        if t in _INFER_NAME_NOISE:
-            continue
-        if _KG_RE.search(t) or t.isdigit():
-            continue
-        return t
-    return tokens[0] if tokens else product
+    candidates = [
+        t for t in tokens
+        if t not in _INFER_NAME_NOISE and not _KG_RE.search(t) and not t.isdigit()
+    ]
+    if not candidates:
+        return tokens[0] if tokens else product
+    best = max(candidates, key=lambda t: (len(t), -candidates.index(t)))
+    return best
 
 
 def _distinct(seq) -> list[str]:

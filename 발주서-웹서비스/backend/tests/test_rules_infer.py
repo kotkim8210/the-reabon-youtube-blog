@@ -38,8 +38,8 @@ def test_infer_grade_and_kg_template():
     assert len(res["drafts"]) == 1
     d = res["drafts"][0]
     assert d["supplier_key"] == "jewelryfruit"
-    assert d["name_keywords"] == ["백도"]           # 첫 비노이즈 토큰
-    assert d["output_template"] == "백도 {grade} {kg}kg"
+    assert d["name_keywords"] == ["딱딱이복숭아"]     # 비노이즈 토큰 중 가장 긴 것(지역명 회피)
+    assert d["output_template"] == "딱딱이복숭아 {grade} {kg}kg"
     assert d["require_grade"] is True
     assert d["require_kg"] is True
     assert set(d["grades"]) == {"중과", "대과"}
@@ -103,3 +103,16 @@ def test_infer_empty_rows_ignored():
     res = rules_engine.infer_rules_from_delivery(data, "jewelryfruit")
     assert res["product_count"] == 1
     assert res["drafts"][0]["name_keywords"] == ["수박"]
+
+
+def test_infer_keyword_skips_region_and_marketing_tokens():
+    """'국내산 김천 피자두…'→'김천', '제주 하우스 애플망고…'→'제주'로 잡히던 문제(2026-08-06)."""
+    data = _delivery([
+        ("국내산 김천 피자두 특품 프리미엄 제철 자두", "1박스 3kg"),
+        ("제주 하우스 애플망고 고당도 산지직송", "1박스 특 2kg"),
+    ])
+    res = rules_engine.infer_rules_from_delivery(data, "jewelryfruit")
+    by_kw = {d["name_keywords"][0]: d for d in res["drafts"]}
+    assert "피자두" in by_kw and "애플망고" in by_kw
+    assert by_kw["피자두"]["output_template"] == "피자두 {kg}kg"
+    assert by_kw["애플망고"]["output_template"] == "애플망고 {grade} {kg}kg"
