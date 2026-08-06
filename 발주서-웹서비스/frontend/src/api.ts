@@ -1524,3 +1524,157 @@ export const loginWithKakao = (accessToken: string) =>
 /** Google GSI credential (ID Token) → app JWT */
 export const loginWithGoogle = (credential: string) =>
   _oauthExchange('/auth/google/token', { credential });
+
+async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+    throw new Error('인증 만료');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: `API error: ${res.status}` }));
+    throw new Error(apiErrorMessage(data.detail, `API error: ${res.status}`));
+  }
+  return res.json();
+}
+
+
+// ── 상품 매칭 규칙 엔진 (어드민: 파일 업로드 자동초안 / 수동 규칙 추가) ─────────
+export interface RuleSupplier {
+  key: string;
+  name: string;
+  courier: string;
+  order_cutoff: string;
+  delivery_method: string;
+  active: number | boolean;
+}
+
+export interface ProductRule {
+  id: number;
+  supplier_key: string;
+  label: string;
+  priority: number;
+  name_keywords: string[];
+  exclude_keywords: string[];
+  grades: string[];
+  kg_allow: string[];
+  pair_map: Record<string, string>;
+  extra_map: Record<string, string>;
+  output_template: string;
+  require_grade: number | boolean;
+  require_kg: number | boolean;
+  active: number | boolean;
+  notes: string;
+}
+
+export type ProductRuleInput = Omit<ProductRule, 'id'>;
+
+export interface RulePreviewResult {
+  matched: boolean;
+  result: {
+    rule_id: number;
+    label: string;
+    output: string;
+    grade: string;
+    kg: string;
+  } | null;
+}
+
+export interface RuleSimulateRow {
+  row_no: number;
+  product_name: string;
+  option: string;
+  matched: boolean;
+  supplier_name: string;
+  label: string;
+  output: string;
+}
+
+export interface RuleSimulateResult {
+  total: number;
+  matched: number;
+  unmatched: number;
+  truncated: boolean;
+  rows: RuleSimulateRow[];
+  unmatched_options: { text: string; count: number }[];
+}
+
+export const fetchRuleStatus = () =>
+  apiGet<{ loaded: boolean; suppliers: number; rules: number; refreshed_at: string | null }>('/rules/status');
+export const refreshRules = () => apiPost<{ loaded: boolean }>('/rules/refresh');
+export const fetchRuleSuppliers = () => apiGet<{ suppliers: RuleSupplier[] }>('/rules/suppliers');
+export const saveRuleSupplier = (data: Omit<RuleSupplier, 'active'> & { active?: boolean }) =>
+  apiPost<{ status: string; key: string }>('/rules/suppliers', data);
+export const deleteRuleSupplier = (key: string) =>
+  apiDelete<{ status: string }>(`/rules/suppliers/${encodeURIComponent(key)}`);
+export const fetchProductRules = (supplier?: string) =>
+  apiGet<{ rules: ProductRule[] }>(`/rules/products${supplier ? `?supplier=${encodeURIComponent(supplier)}` : ''}`);
+export const createProductRule = (data: ProductRuleInput) =>
+  apiPost<{ status: string; id: number }>('/rules/products', data);
+export const updateProductRule = (id: number, data: ProductRuleInput) =>
+  apiPut<{ status: string }>(`/rules/products/${id}`, data);
+export const deleteProductRule = (id: number) =>
+  apiDelete<{ status: string }>(`/rules/products/${id}`);
+export const previewRule = (supplier_key: string, product_name: string, option_text: string) =>
+  apiPost<RulePreviewResult>('/rules/preview', { supplier_key, product_name, option_text });
+
+export async function simulateRules(file: File): Promise<RuleSimulateResult> {
+  const formData = new FormData();
+  formData.append('delivery_file', file);
+  const res = await fetch(`${BASE_URL}/rules/simulate`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+    throw new Error('인증 만료');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: `API error: ${res.status}` }));
+    throw new Error(apiErrorMessage(data.detail, `API error: ${res.status}`));
+  }
+  return res.json();
+}
+
+// 파일로 규칙 초안 자동 생성: ProductRuleInput 필드 + UI 표시용 meta
+export interface RuleDraft extends ProductRuleInput {
+  order_count: number;
+  sample_options: string[];
+  warnings: string[];
+  already_matched: boolean;
+  existing_output: string;
+}
+
+export interface RuleInferResult {
+  drafts: RuleDraft[];
+  covered: RuleDraft[];
+  product_count: number;
+}
+
+export async function inferRules(file: File, supplierKey: string): Promise<RuleInferResult> {
+  const formData = new FormData();
+  formData.append('delivery_file', file);
+  formData.append('supplier_key', supplierKey);
+  const res = await fetch(`${BASE_URL}/rules/infer`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+    throw new Error('인증 만료');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: `API error: ${res.status}` }));
+    throw new Error(apiErrorMessage(data.detail, `API error: ${res.status}`));
+  }
+  return res.json();
+}

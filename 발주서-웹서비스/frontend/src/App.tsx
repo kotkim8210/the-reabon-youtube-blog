@@ -16,6 +16,7 @@ import OrderTools from './pages/OrderTools';
 import PricingDashboard from './pages/PricingDashboard';
 import PricingPage from './pages/PricingPage';
 import ProcessPage from './pages/ProcessPage';
+import RulesEnginePage from './pages/RulesEnginePage';
 import SignupPage from './pages/SignupPage';
 import TenantOrderPage from './pages/TenantOrderPage';
 import TenantProductConfig from './pages/TenantProductConfig';
@@ -147,6 +148,15 @@ export default function App() {
             element={
               <AdminRoute>
                 <AdminPanel />
+              </AdminRoute>
+            }
+          />
+          {/* 상품 매칭 규칙: 파일 업로드 자동초안 / 수동 규칙 추가 (관리자) */}
+          <Route
+            path="admin/rules"
+            element={
+              <AdminRoute>
+                <RulesEnginePage />
               </AdminRoute>
             }
           />

@@ -1,4 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { isAuthDisabled, useUser } from '../App';
 import {
   fetchUsers, createUser, toggleUserActive,
@@ -111,7 +112,16 @@ function AdminPanel() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">사용자 관리</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">사용자 관리</h1>
+        {/* 상품 추가(발주 매칭 규칙): 파일 업로드 자동초안 / 수동 등록 */}
+        <Link
+          to="/admin/rules"
+          className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
+        >
+          🧩 상품 매칭 규칙 (발주 상품 추가)
+        </Link>
+      </div>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">
