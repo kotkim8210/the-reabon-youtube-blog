@@ -23,6 +23,21 @@ def _combined_text(product_name: object, option_text: object) -> str:
     return normalize(f"{product_name or ''} {option_text or ''}")
 
 
+# 어드민 규칙 엔진(product_rules)의 쥬얼리프룻 발주처 키.
+# 코드에 없는 신규 상품은 관리자가 /rules 화면에서 규칙만 추가하면 발주·송장이 동작한다.
+JEWELRY_SUPPLIER_KEY = "jewelryfruit"
+
+
+def jewelry_rule_match(product_name: object, option_text: object) -> dict | None:
+    """어드민에서 등록한 규칙으로 매칭되는 쥬얼리프룻 상품인지. 미매칭이면 None.
+
+    하드코딩 분기(명이나물·참외·백도 등)가 항상 우선이고, 여기는 그 뒤 폴백이다.
+    """
+    from app import rules_engine
+
+    return rules_engine.resolve(JEWELRY_SUPPLIER_KEY, product_name, option_text)
+
+
 def is_apple_corn_order(product_name: object, option_text: object) -> bool:
     text = _combined_text(product_name, option_text)
     return "애플초당옥수수" in text or ("애플" in text and "초당옥수수" in text)
@@ -99,6 +114,26 @@ def _jewelry_bamhobak_option(product_name: object, option_text: object) -> str |
     kg = m.group(1) if m else ""
     grade = "못난이" if "못난이" in text else "로얄과"
     return f"미니 밤호박 보우짱 {grade} {kg}kg"
+
+
+# 피자두 (2026-08 신규) — 쥬얼리프룻 발주. pbfcompany 옵션 '피자두 {kg}kg' (1·2·3kg, 실측 2026-08-06).
+# '노지 자두'는 별도 상품(발주 대상 아님)이라 '피자두'가 든 건만 잡는다.
+PIJADU_JEWELRY_WEIGHTS = {"1", "2", "3"}
+
+
+def is_jewelry_pijadu_order(product_name: object, option_text: object) -> bool:
+    """피자두 쥬얼리프룻 발주 여부 (1·2·3kg). 노지자두·기타 자두는 제외."""
+    text = _combined_text(product_name, option_text).replace(" ", "")
+    if "피자두" not in text:
+        return False
+    return _extract_kg(text) in PIJADU_JEWELRY_WEIGHTS
+
+
+def _jewelry_pijadu_option(product_name: object, option_text: object) -> str | None:
+    """피자두 DeliveryList → 쥬얼리프룻 발주 품목 '피자두 {kg}kg'."""
+    if not is_jewelry_pijadu_order(product_name, option_text):
+        return None
+    return f"피자두 {_extract_kg(_combined_text(product_name, option_text))}kg"
 
 
 # 일반 수박 6/7/8kg — 2026-06부터 제이비티가 아닌 쥬얼리팜(쥬얼리프룻) 발주.
@@ -477,6 +512,15 @@ def convert_option(option_text: str, product_name: str = "") -> str | None:
     if bamhobak:
         return bamhobak
 
+    pijadu = _jewelry_pijadu_option(product_name, option_text)
+    if pijadu:
+        return pijadu
+
+    # 어드민 규칙(코드 배포 없이 추가한 신규 상품)
+    rule = jewelry_rule_match(product_name, option_text)
+    if rule and rule.get("output"):
+        return rule["output"]
+
     text = str(option_text).strip()
     if not text:
         # 옵션(L)이 비면 상품명(K)으로 폴백 — 품목명 공란 방지(명이나물 행 전용 분기).
@@ -522,6 +566,8 @@ def process(
     has_daegeukcheon = False
     has_baekdo = False
     has_bamhobak = False
+    has_pijadu = False
+    custom_labels: list[str] = []   # 어드민 규칙으로 잡힌 신규 상품 라벨
     for row in dl_ws.iter_rows(min_row=2):
         k_val = normalize(row[10].value) if len(row) > 10 else ""
         option = normalize(row[11].value) if len(row) > 11 else ""
@@ -566,6 +612,18 @@ def process(
             # 미니밤호박 3·5·10kg → 쥬얼리프룻 발주 (1kg은 제주다팜)
             filtered_rows.append(row)
             has_bamhobak = True
+        elif is_jewelry_pijadu_order(k_val, option):
+            # 피자두 1·2·3kg → 쥬얼리프룻 (2026-08 신규)
+            filtered_rows.append(row)
+            has_pijadu = True
+        else:
+            # 어드민에서 규칙만 추가한 신규 상품 (코드 배포 불필요)
+            rule = jewelry_rule_match(k_val, option)
+            if rule:
+                filtered_rows.append(row)
+                label = str(rule.get("label") or "").strip()
+                if label and label not in custom_labels:
+                    custom_labels.append(label)
 
     template_path = TEMPLATE_DIR / "명이나물_pbfcompany_원본.xlsx"
     if not template_path.exists():
@@ -671,7 +729,9 @@ def process(
             cell = ws.cell(row=out_row, column=col, value=value)
             cell.font = font11
 
-        if "거반도" in product:
+        if "피자두" in product:
+            has_pijadu = True
+        elif "거반도" in product:
             has_geobando = True
         elif "대극천" in product:
             has_daegeukcheon = True
@@ -726,6 +786,12 @@ def process(
         product_parts.append("백도딱딱이복숭아")
     if has_bamhobak:
         product_parts.append("미니밤호박")
+    if has_pijadu:
+        product_parts.append("피자두")
+    for label in custom_labels:
+        # 파일명에 못 쓰는 문자 제거(규칙 라벨은 관리자가 자유 입력)
+        safe = "".join(ch for ch in label if ch not in '\\/:*?"<>|_').strip()
+        product_parts.append(safe or "규칙상품")
     product_label = "_".join(product_parts)
     product_name = "+".join(product_parts) if product_parts else "쥬얼리프룻"
     if product_label:
