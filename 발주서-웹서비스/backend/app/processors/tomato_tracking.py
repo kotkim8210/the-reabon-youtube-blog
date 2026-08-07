@@ -22,6 +22,7 @@ from app.processors.tracking_match import (
     options_match,
     requires_option_guard,
 )
+from app.processors.tracking_input import _semantic_option_keys
 from app.toss.client import toss_client
 
 
@@ -30,6 +31,12 @@ KST = timezone(timedelta(hours=9))
 # (구)TOSS_DELIVERY_COMPANY="한진택배" 상수는 제거 — 쥬얼리·제주다팜 품목은 롯데 발송이라
 # 토스 등록 기본값은 normalize_toss_courier(courier, default="롯데택배")로 지정한다.
 TRACKABLE_TOSS_STATUSES = {"PAID", "PREPARING_PRODUCT", "DELIVERING"}
+
+
+def phone_digits(value: object) -> str:
+    """전화번호 숫자만. 회신은 '0508-7759-7034', 토스 API는 '050877597034'로 내려와
+    문자열 그대로 비교하면 같은 주문인데도 절대 안 맞는다(2026-08-07 윤석찬 건)."""
+    return re.sub(r"\D", "", str(value or ""))
 
 
 def normalize(value) -> str:
@@ -204,7 +211,12 @@ def parse_reply_file(tomato_reply_bytes: bytes) -> list[dict]:
             "address": address,
             "tracking": tracking,
             "courier": courier,
-            "option_keys": option_key_set(product, option_extra) | corn_option_keys(product, option_extra),
+            "phone_digits": phone_digits(phone),
+            # 등급·kg 의미키(백도·콜라비·밤호박·홍감자 등)까지 넣어야 회신 발주명과
+            # 토스 옵션 표기('2kg, 1박스, 중과')가 서로 매칭된다.
+            "option_keys": option_key_set(product, option_extra)
+            | corn_option_keys(product, option_extra)
+            | _semantic_option_keys(product, option_extra),
         })
 
     return entries
@@ -280,13 +292,15 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
             "order_id": order_id,
             "name": normalize(receiver_name),
             "phone": normalize(receiver_phone),
+            "phone_digits": phone_digits(receiver_phone),
             "address": normalize(full_address),
             "name_display": receiver_name,
             "option_keys": option_key_set(
                 option,
                 label,
                 item.get("productName"),
-            ),
+            )
+            | _semantic_option_keys(item.get("productName"), option),
         })
 
     entry_by_name = defaultdict(list)
@@ -294,8 +308,8 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
     entry_by_address = defaultdict(list)
     for entry in reply_entries:
         entry_by_name[entry["name"]].append(entry)
-        if entry["phone"]:
-            entry_by_phone[entry["phone"]].append(entry)
+        if entry.get("phone_digits"):
+            entry_by_phone[entry["phone_digits"]].append(entry)
         if entry["address"]:
             entry_by_address[entry["address"]].append(entry)
 
@@ -305,8 +319,8 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
 
     for order in toss_orders:
         candidates = entry_by_name.get(order["name"], [])
-        if not candidates and order["phone"]:
-            candidates = entry_by_phone.get(order["phone"], [])
+        if not candidates and order["phone_digits"]:
+            candidates = entry_by_phone.get(order["phone_digits"], [])
         if not candidates and order["address"]:
             candidates = entry_by_address.get(order["address"], [])
         available = [entry for entry in candidates if id(entry) not in used_entries]
@@ -315,22 +329,26 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
             continue
 
         if requires_option_guard(order["name"], toss_name_counts, len(candidates)):
-            available = [
+            # 동명이인·동일인 다건: 옵션(등급·kg) 또는 주문별 안심번호가 일치해야 그 건으로 확정.
+            # 안심번호는 주문마다 달라 사실상 주문 고유키다(2026-08-07 윤석찬 2건 회귀).
+            guarded = [
                 entry for entry in available
                 if options_match(entry.get("option_keys"), order.get("option_keys"))
+                or (order["phone_digits"] and entry.get("phone_digits") == order["phone_digits"])
             ]
-            if not available:
+            if not guarded:
                 skip_count += 1
                 continue
+            available = guarded
 
         matched = None
         for entry in available:
-            if entry["phone"] == order["phone"] and entry["address"] == order["address"]:
+            if entry.get("phone_digits") == order["phone_digits"] and entry["address"] == order["address"]:
                 matched = entry
                 break
         if matched is None:
             for entry in available:
-                if entry["phone"] == order["phone"]:
+                if order["phone_digits"] and entry.get("phone_digits") == order["phone_digits"]:
                     matched = entry
                     break
         if matched is None:
