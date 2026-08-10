@@ -118,7 +118,20 @@ def convert_potato_option(product_name: object, option_text: object) -> str | No
 _BAEKDO_JEJU_KGS = ("2", "4")
 
 
+# 백도 제주다팜 발주 시즌아웃: 2026-08-10을 마지막으로 종료(2026-08-11부터 발주 미출력).
+# 송장입력(tracking_input의 baekdo 의미키)은 이 컷오프와 무관하게 계속 동작한다.
+# 이벤트 당첨자 발주(event_order._event_baekdo_product)도 별도 경로라 영향 없음.
+# 내년 시즌 재개 시 이 컷오프 상수만 지우면 된다.
+_BAEKDO_JEJU_LAST_ORDER_DATE = "2026-08-10"
+
+
+def _baekdo_jeju_season_open() -> bool:
+    return datetime.now(KST).strftime("%Y-%m-%d") <= _BAEKDO_JEJU_LAST_ORDER_DATE
+
+
 def is_jeju_baekdo_order(product_name: object, option_text: object) -> bool:
+    # 매칭 로직은 시즌과 무관하게 순수 유지(송장 의미키·이벤트·테스트가 의존).
+    # 발주서 출력 차단은 process_outputs에서 _baekdo_jeju_season_open()으로만 적용한다.
     text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
     if "백도" not in text:
         return False
@@ -136,6 +149,45 @@ def convert_jeju_baekdo_option(product_name: object, option_text: object) -> str
     kg = m.group(1) if m else ""
     grade = "대과" if "대과" in text else "중과"
     return f"딱딱이 복숭아 {grade} {kg}kg"
+
+
+# 청사과(아오리사과) — 2026-08 제주다팜 신규 발주. 쿠팡 옵션의 등급(소과/중소과/대과)+kg를
+# 제주다팜 판매옵션 전체 문자열로 변환해 발주명으로 쓴다(마진방어 supplier_option_name과 동일).
+# 실측 제주다팜 옵션(pcode 10001098, 2026-08-10): 소과·중소과·대과 × 2·3·4·5kg.
+_APPLE_JEJU_OPTIONS = {
+    ("소과", "2"): "청사과 소과(가정용) 포장재포함 2kg(10-13과내외)",
+    ("소과", "3"): "청사과 소과(가정용) 포장재포함 3kg(15-22과내외)",
+    ("소과", "4"): "청사과 소과(가정용) 포장재포함 4kg(19-27과내외)",
+    ("소과", "5"): "청사과 소과(가정용) 포장재포함 5kg(25-40과내외)",
+    ("중소과", "2"): "청사과 중소과(가정용) 포장재포함 2kg(7-9과내외)",
+    ("중소과", "3"): "청사과 중소과(가정용) 포장재포함 3kg(13-15과내외)",
+    ("중소과", "4"): "청사과 중소과(가정용) 포장재포함 4kg(15-19과내외)",
+    ("중소과", "5"): "청사과 중소과(가정용) 포장재포함 5kg(20-25과내외)",
+    ("대과", "2"): "청사과 대과(가정용) 포장재포함 2kg(6과내)",
+    ("대과", "3"): "청사과 대과(가정용) 포장재포함 3kg(8-10과내)",
+    ("대과", "4"): "청사과 대과(가정용) 포장재포함 4kg(10-12과내)",
+    ("대과", "5"): "청사과 대과(가정용) 포장재포함 5kg(12-16과내)",
+}
+# 등급 판정 순서: '중소과'가 '소과'를 포함하므로 긴 것 먼저.
+_APPLE_GRADES = ("중소과", "소과", "대과")
+
+
+def is_jeju_apple_order(product_name: object, option_text: object) -> bool:
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    return "청사과" in text or "아오리" in text
+
+
+def convert_apple_option(product_name: object, option_text: object) -> str | None:
+    """청사과 DeliveryList → 제주다팜 발주명(판매옵션 전체 문자열). 미매칭이면 None."""
+    if not is_jeju_apple_order(product_name, option_text):
+        return None
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    grade = next((g for g in _APPLE_GRADES if g in text), "")
+    m = re.search(r"(\d+)kg", text, re.IGNORECASE)
+    kg = m.group(1) if m else ""
+    if not grade or not kg:
+        return None
+    return _APPLE_JEJU_OPTIONS.get((grade, kg))
 
 
 def clear_stray_header_numbers(ws) -> None:
@@ -672,6 +724,21 @@ def process_baekdo(
     )
 
 
+def process_apple(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """청사과(아오리사과) 제주다팜 발주 (2026-08 신규). 발주명=제주다팜 판매옵션."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_apple_option,
+        "청사과(제주다팜)",
+        f"제주다팜_아이티소프트_청사과발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+    )
+
+
 def process_outputs(
     delivery_file_bytes: bytes,
     toss_colrabi_entries: list[dict] | None = None,
@@ -706,8 +773,15 @@ def process_outputs(
     if potato_result and int((potato_result[2] or {}).get("total") or 0) > 0:
         results.append(potato_result)
 
-    baekdo_result = process_baekdo(delivery_file_bytes, toss_entries=toss_baekdo_entries)
-    if baekdo_result and int((baekdo_result[2] or {}).get("total") or 0) > 0:
-        results.append(baekdo_result)
+    # 백도 제주다팜 발주는 2026-08-10을 마지막으로 시즌아웃 → 이후엔 발주서 미출력
+    # (송장입력·이벤트·마진방어(pause)와 무관하게 발주 출력만 차단).
+    if _baekdo_jeju_season_open():
+        baekdo_result = process_baekdo(delivery_file_bytes, toss_entries=toss_baekdo_entries)
+        if baekdo_result and int((baekdo_result[2] or {}).get("total") or 0) > 0:
+            results.append(baekdo_result)
+
+    apple_result = process_apple(delivery_file_bytes)
+    if apple_result and int((apple_result[2] or {}).get("total") or 0) > 0:
+        results.append(apple_result)
 
     return results
