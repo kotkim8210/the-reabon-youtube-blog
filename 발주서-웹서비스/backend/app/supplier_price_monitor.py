@@ -357,6 +357,55 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("홍감자 대 5kg(발주 특 5kg)", "홍감자 특_5KG", 12, cell="J"),
         ),
     ),
+    # 청사과(아오리사과) — 2026-08 제주다팜 신규. adminplus pcode=10001098.
+    # 쿠팡 판매는 소과·대과 2·3·4·5kg 8종(중소과는 미판매 — 판매 시작하면 소싱현황 행 추가 후 여기에도 추가).
+    # supplier_option_name은 제주다팜 판매옵션 전체 문자열 = kolrabi_order._APPLE_JEJU_OPTIONS와 동일해야 한다.
+    "apple-jeju": SupplierMonitorConfig(
+        key="apple-jeju",
+        source_type="adminplus",
+        base_url="https://kkangta55.adminplus.co.kr",
+        supplier_name="제주다팜",
+        product_name="청사과",
+        product_code="10001098",
+        template_path=TEMPLATE_DIR / "청사과_제주다팜_소싱현황_원본.xlsx",
+        output_prefix="청사과_제주다팜_V1",
+        output_name_pattern="청사과(아오리)_제주다팜 소싱현황관리_V1_{date}.xlsx",
+        skip_missing_options=True,
+        options=(
+            SupplierOptionConfig(
+                "청사과 소과 2kg", "청사과 소과(가정용) 포장재포함 2kg(10-13과내외)", 8, sheet_name="쥬얼리프룻",
+                coupang_product="청사과(아오리사과)", coupang_option="1박스 소과 2kg",
+            ),
+            SupplierOptionConfig(
+                "청사과 소과 3kg", "청사과 소과(가정용) 포장재포함 3kg(15-22과내외)", 9, sheet_name="쥬얼리프룻",
+                coupang_product="청사과(아오리사과)", coupang_option="1박스 소과 3kg",
+            ),
+            SupplierOptionConfig(
+                "청사과 소과 4kg", "청사과 소과(가정용) 포장재포함 4kg(19-27과내외)", 10, sheet_name="쥬얼리프룻",
+                coupang_product="청사과(아오리사과)", coupang_option="1박스 소과 4kg",
+            ),
+            SupplierOptionConfig(
+                "청사과 소과 5kg", "청사과 소과(가정용) 포장재포함 5kg(25-40과내외)", 11, sheet_name="쥬얼리프룻",
+                coupang_product="청사과(아오리사과)", coupang_option="1박스 소과 5kg",
+            ),
+            SupplierOptionConfig(
+                "청사과 대과 2kg", "청사과 대과(가정용) 포장재포함 2kg(6과내)", 12, sheet_name="쥬얼리프룻",
+                coupang_product="청사과(아오리사과)", coupang_option="1박스 대과 2kg",
+            ),
+            SupplierOptionConfig(
+                "청사과 대과 3kg", "청사과 대과(가정용) 포장재포함 3kg(8-10과내)", 13, sheet_name="쥬얼리프룻",
+                coupang_product="청사과(아오리사과)", coupang_option="1박스 대과 3kg",
+            ),
+            SupplierOptionConfig(
+                "청사과 대과 4kg", "청사과 대과(가정용) 포장재포함 4kg(10-12과내)", 14, sheet_name="쥬얼리프룻",
+                coupang_product="청사과(아오리사과)", coupang_option="1박스 대과 4kg",
+            ),
+            SupplierOptionConfig(
+                "청사과 대과 5kg", "청사과 대과(가정용) 포장재포함 5kg(12-16과내)", 15, sheet_name="쥬얼리프룻",
+                coupang_product="청사과(아오리사과)", coupang_option="1박스 대과 5kg",
+            ),
+        ),
+    ),
     "corn-jbt": SupplierMonitorConfig(
         key="corn-jbt",
         source_type="google_sheet",

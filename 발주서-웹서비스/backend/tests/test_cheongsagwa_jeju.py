@@ -98,3 +98,34 @@ def test_baekdo_jeju_order_output_gated_by_season(monkeypatch):
     assert "백도딱딱이복숭아(제주다팜)" not in labels_closed
     # is_jeju_baekdo_order는 시즌과 무관(송장 의미키가 의존)
     assert kolrabi_order.is_jeju_baekdo_order("햇 백도 딱딱이복숭아", "1박스 중과 2kg") is True
+
+
+# ── 마진방어(apple-jeju) 연동 ──
+def test_apple_margin_monitor_matches_order_mapping():
+    """마진방어 옵션명 = 발주명(제주다팜 판매옵션)이어야 공급가가 붙는다."""
+    from app import supplier_price_monitor as spm
+
+    config = spm.MONITOR_CONFIGS["apple-jeju"]
+    assert config.template_path.exists()
+    assert config.product_code == "10001098"
+    # 8종(소과·대과 2·3·4·5kg), 행 8~15
+    assert [o.row for o in config.options] == [8, 9, 10, 11, 12, 13, 14, 15]
+    for o in config.options:
+        assert spm.option_supplier_name(o, config) == "제주다팜"
+        # 발주 변환 결과와 문자열이 정확히 같아야 함(공급가 매칭 키)
+        converted = kolrabi_order.convert_apple_option(o.coupang_product, o.coupang_option)
+        assert converted == o.supplier_option_name, (o.label, converted, o.supplier_option_name)
+
+
+def test_apple_template_rows_align_with_options():
+    """템플릿 E열(옵션)·C열(발주처)이 설정 행과 맞는지 — 행 밀림 방지."""
+    from app import supplier_price_monitor as spm
+
+    config = spm.MONITOR_CONFIGS["apple-jeju"]
+    ws = load_workbook(config.template_path)["쥬얼리프룻"]
+    expected = ["소과 2kg", "소과 3kg", "소과 4kg", "소과 5kg", "대과 2kg", "대과 3kg", "대과 4kg", "대과 5kg"]
+    assert [str(ws.cell(r, 5).value or "").strip() for r in range(8, 16)] == expected
+    assert {str(ws.cell(r, 3).value or "") for r in range(8, 16)} == {"제주다팜"}
+    # 공급가(I열)·쿠폰가(H열)가 채워져 있어야 마진 계산 가능
+    assert all(isinstance(ws.cell(r, 8).value, (int, float)) for r in range(8, 16))
+    assert all(isinstance(ws.cell(r, 9).value, (int, float)) for r in range(8, 16))
