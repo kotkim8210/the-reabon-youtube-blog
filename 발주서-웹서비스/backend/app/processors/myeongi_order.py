@@ -244,11 +244,15 @@ def _jewelry_daegeukcheon_option(product_name: object, option_text: object) -> s
     return f"{base} {kg}kg" if kg else base
 
 
-# 백도 딱딱이복숭아 → 쥬얼리프룻 발주. 쿠팡 '햇 백도 딱딱이복숭아 …' 옵션 '1박스 중과 1kg'
-# → '백도 딱딱이 복숭아 중과 1kg (5-6과 내외)'. '복숭아' 포함이라 신비복숭아보다 먼저 분기하고
-# peach에서 제외. 전 kg(1·2·4)·전 등급(중과/대과) 모두 쥬얼리(신비처럼 3·4kg 제이비티 분리 없음).
+# 백도 딱딱이복숭아는 명이(쥬얼리) 발주에서 전량 제외한다.
 def _is_baekdo(product_name: object, option_text: object) -> bool:
     return "백도" in _combined_text(product_name, option_text).replace(" ", "")
+
+
+def is_myeongi_baekdo_excluded(product_name: object, option_text: object) -> bool:
+    """명이 발주에서 제외할 딱복 계열인지 판별한다."""
+    text = _combined_text(product_name, option_text).replace(" ", "")
+    return any(keyword in text for keyword in ("백도", "딱딱이복숭아", "딱복"))
 
 
 def _baekdo_kg(product_name: object, option_text: object) -> str:
@@ -258,7 +262,7 @@ def _baekdo_kg(product_name: object, option_text: object) -> str:
 
 
 def is_jewelry_baekdo_order(product_name: object, option_text: object) -> bool:
-    # 2026-07 백도 2·4kg은 제주다팜(kolrabi) 이관 → 쥬얼리는 1kg(중과·대과)만 발주.
+    # 공급가/이벤트 기준은 유지한다. 명이 발주 출력 제외는 process()에서 별도로 적용한다.
     return _is_baekdo(product_name, option_text) and _baekdo_kg(product_name, option_text) == "1"
 
 
@@ -280,9 +284,8 @@ def _jewelry_baekdo_option(product_name: object, option_text: object) -> str | N
     m = re.search(r"(\d+(?:\.\d+)?)\s*kg", text, re.IGNORECASE)
     kg = _fmt_kg(m.group(1)) if m else ""
     if kg != "1":
-        # 2·4kg은 제주다팜(kolrabi) 발주로 이관됨 — 쥬얼리에서는 1kg만 출력.
         return None
-    grade = "대과" if "대과" in text else "중과"  # 기본 중과
+    grade = "대과" if "대과" in text else "중과"
     count = _BAEKDO_COUNTS.get((grade, kg), "")
     base = "백도 딱딱이 복숭아"
     if kg and count:
@@ -401,6 +404,9 @@ def jewelry_passthrough_product(
     '블랙망고수박 {kg}kg', 수박·성주참외는 정규화(jewelry_external_product).
     """
     text = _combined_text(product_name, option_text)
+
+    if is_myeongi_baekdo_excluded(product_name, option_text):
+        return None
 
     # 거반도·대극천은 '복숭아' 포함이지만 신비복숭아 아님 → 먼저 전용 품목명으로 (토스 경로 오분류 방지)
     geobando = _jewelry_geobando_option(product_name, option_text)
@@ -564,13 +570,14 @@ def process(
     has_peach = False
     has_geobando = False
     has_daegeukcheon = False
-    has_baekdo = False
     has_bamhobak = False
     has_pijadu = False
     custom_labels: list[str] = []   # 어드민 규칙으로 잡힌 신규 상품 라벨
     for row in dl_ws.iter_rows(min_row=2):
         k_val = normalize(row[10].value) if len(row) > 10 else ""
         option = normalize(row[11].value) if len(row) > 11 else ""
+        if is_myeongi_baekdo_excluded(k_val, option):
+            continue
         if "명이나물" in k_val:
             filtered_rows.append(row)
             has_myeongi = True
@@ -600,10 +607,6 @@ def process(
             # 대극천 복숭아 → 쥬얼리프룻 (신비복숭아 아님)
             filtered_rows.append(row)
             has_daegeukcheon = True
-        elif is_jewelry_baekdo_order(k_val, option):
-            # 백도 딱딱이복숭아 → 쥬얼리프룻 (신비복숭아 아님, 중과/대과 1·2·4kg)
-            filtered_rows.append(row)
-            has_baekdo = True
         elif is_jewelry_peach_order(k_val, option):
             # 신비복숭아 1·2kg → 쥬얼리프룻 (3·4kg은 제이비티)
             filtered_rows.append(row)
@@ -702,9 +705,14 @@ def process(
         if order_no:
             bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
 
-    # 토스 entry는 품목명(product)이 확정돼 있어 그대로 기록 (등급/블랙망고수박/전 kg 보존)
+    # 토스 entry도 딱복 계열은 최종 출력 직전에 한 번 더 제외한다.
+    eligible_toss_entries = [
+        entry
+        for entry in (toss_entries or [])
+        if not is_myeongi_baekdo_excluded(entry.get("product"), entry.get("option"))
+    ]
     base_row = start_row + len(filtered_rows)
-    for j, entry in enumerate(toss_entries or []):
+    for j, entry in enumerate(eligible_toss_entries):
         out_row = base_row + j
         product = entry.get("product") or ""
         try:
@@ -735,8 +743,6 @@ def process(
             has_geobando = True
         elif "대극천" in product:
             has_daegeukcheon = True
-        elif "백도" in product:
-            has_baekdo = True
         elif "복숭아" in product:
             has_peach = True
         elif "망고수박" in product:
@@ -782,8 +788,6 @@ def process(
         product_parts.append("거반도복숭아")
     if has_daegeukcheon:
         product_parts.append("대극천복숭아")
-    if has_baekdo:
-        product_parts.append("백도딱딱이복숭아")
     if has_bamhobak:
         product_parts.append("미니밤호박")
     if has_pijadu:
@@ -799,9 +803,9 @@ def process(
     else:
         filename = f"쥬얼리프룻_발주({now.strftime('%Y%m%d')}).xlsx"
     stats = {
-        "total": len(filtered_rows) + len(toss_entries or []),
+        "total": len(filtered_rows) + len(eligible_toss_entries),
         "coupang": len(filtered_rows),
-        "toss": len(toss_entries or []),
+        "toss": len(eligible_toss_entries),
         "product": product_name,
         "options": list(option_totals.values()),
     }
@@ -852,6 +856,11 @@ parse_alwayz_watermelon_entries = parse_alwayz_jewelry_entries
 
 def _build_jewelry_order_workbook(entries: list[dict]) -> tuple[bytes, str, dict]:
     """쥬얼리팜 발주 entries(각 entry에 'product' 품목명 포함) → pbfcompany 발주서."""
+    entries = [
+        entry
+        for entry in entries
+        if not is_myeongi_baekdo_excluded(entry.get("product"), entry.get("option"))
+    ]
     template_path = TEMPLATE_DIR / "명이나물_pbfcompany_원본.xlsx"
     if not template_path.exists():
         raise FileNotFoundError(f"Template not found: {template_path}")
@@ -915,16 +924,13 @@ def _build_jewelry_order_workbook(entries: list[dict]) -> tuple[bytes, str, dict
 
     products = [e["product"] for e in entries]
     has_watermelon = any("수박" in p for p in products)
-    has_baekdo = any("백도" in p for p in products)
-    has_peach = any("복숭아" in p and "백도" not in p for p in products)
+    has_peach = any("복숭아" in p for p in products)
     has_chamoe = any("과" in p and "수박" not in p and "복숭아" not in p for p in products)
     label_parts = []
     if has_watermelon:
         label_parts.append("수박")
     if has_chamoe:
         label_parts.append("성주참외")
-    if has_baekdo:
-        label_parts.append("백도딱딱이복숭아")
     if has_peach:
         label_parts.append("신비복숭아")
     label = "_".join(label_parts) if label_parts else "발주"

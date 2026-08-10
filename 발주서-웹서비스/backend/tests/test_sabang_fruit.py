@@ -108,13 +108,14 @@ def test_sabang_orders_flow_into_myeongi_process():
     for r in range(2, ws.max_row + 1):
         product = str(ws.cell(row=r, column=7).value or "")
         order_no = str(ws.cell(row=r, column=13).value or "")
-        if "백도" in product:
+        if "백도" in product or "딱딱이" in product:
             found_baekdo = True
-            if order_no == "20260718-0000001":
-                idx_in_order_no = True
         if "명이나물" in product:
             found_myeongi = True
-    assert found_baekdo, "백도 주문이 발주서에 없음"
+            if order_no:
+                idx_in_order_no = True
+    # 백도(딱복)는 쥬얼리 발주 중단 — 명이 발주서에 나오면 안 된다(제주다팜 메뉴에서 발주)
+    assert not found_baekdo, "쥬얼리 발주 중단된 백도가 발주서에 출력됨"
     assert found_myeongi, "명이나물 주문이 발주서에 없음"
     assert idx_in_order_no, "사방넷 IDX가 발주서 M열 주문번호로 전달되지 않음"
 
