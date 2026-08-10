@@ -19,8 +19,8 @@ def test_resolve_order_supplier_split_products():
     assert resolve_order_supplier("제주 미니밤호박 보우짱", "1박스 로얄 정품 1kg") == JEJUDAPAM
     assert resolve_order_supplier("제주 미니밤호박 보우짱", "1박스 로얄 정품 3kg") == JEWELRYFRUIT
     assert resolve_order_supplier("제주 미니밤호박 보우짱", "1박스 로얄 정품 10kg") == JEWELRYFRUIT
-    # 백도: 1kg 쥬얼리 / 2·4kg 제주다팜
-    assert resolve_order_supplier("햇 백도 딱딱이복숭아", "1박스 중과 1kg") == JEWELRYFRUIT
+    # 백도: 2·4kg 제주다팜. 1kg은 쥬얼리 시즌 종료로 발주처 없음(2026-08-10)
+    assert resolve_order_supplier("햇 백도 딱딱이복숭아", "1박스 중과 1kg") is None
     assert resolve_order_supplier("햇 백도 딱딱이복숭아", "1박스 중과 2kg") == JEJUDAPAM
     assert resolve_order_supplier("햇 백도 딱딱이복숭아", "1박스 대과 4kg") == JEJUDAPAM
     # 홍감자는 제주다팜 이관분
@@ -44,7 +44,7 @@ def test_margin_options_match_order_routing():
                 f"{spm.option_supplier_name(option, config)}"
             )
             checked += 1
-    assert checked >= 10  # 밤호박 4 + 백도 6
+    assert checked >= 8  # 밤호박 4 + 백도 4(2·4kg만; 1kg은 시즌아웃)
 
 
 # ── 통합 파일 구성 ──
@@ -64,22 +64,26 @@ def test_bamhobak_monitor_is_single_merged_file():
     assert [ws.cell(r, 3).value for r in range(8, 12)] == ["제주다팜", "쥬얼리프룻", "쥬얼리프룻", "쥬얼리프룻"]
 
 
-def test_baekdo_monitor_splits_supplier_by_kg():
+def test_baekdo_monitor_is_jejudapam_only_after_jewelry_season_end():
+    """쥬얼리 백도 시즌 종료(2026-08-10) → 1kg 2행 제거, 제주다팜 4옵션만 추적.
+
+    쥬얼리 옵션을 남겨두면 공급가를 못 읽어 매일 오전 알림이 오류로 뜬다.
+    """
     config = spm.MONITOR_CONFIGS["baekdo-jewelry"]
     by_row = {o.row: spm.option_supplier_name(o, config) for o in config.options}
-    assert by_row == {8: "쥬얼리프룻", 9: "제주다팜", 10: "제주다팜", 11: "쥬얼리프룻", 12: "제주다팜", 13: "제주다팜"}
-    # 제주다팜 옵션명은 제주다팜 popup 표기('딱딱이 복숭아 {등급} {kg}kg')여야 매칭된다
-    jeju = [o.supplier_option_name for o in config.options if o.source]
-    assert jeju == [
+    assert by_row == {8: "제주다팜", 9: "제주다팜", 10: "제주다팜", 11: "제주다팜"}
+    assert [o.supplier_option_name for o in config.options] == [
         "딱딱이 복숭아 중과 2kg",
         "딱딱이 복숭아 중과 4kg",
         "딱딱이 복숭아 대과 2kg",
         "딱딱이 복숭아 대과 4kg",
     ]
     ws = load_workbook(config.template_path)["쥬얼리프룻"]
-    assert [ws.cell(r, 3).value for r in range(8, 14)] == [
-        "쥬얼리프룻", "제주다팜", "제주다팜", "쥬얼리프룻", "제주다팜", "제주다팜",
-    ]
+    assert [ws.cell(r, 3).value for r in range(8, 12)] == ["제주다팜"] * 4
+    assert ws.cell(12, 3).value is None  # 옛 쥬얼리 행은 비워짐
+    # 템플릿 수식이 자기 행을 참조하도록 재매핑됐는지(마진 계산 정확도)
+    assert ws["G8"].value == "=H8+500"
+    assert ws["U11"].value.startswith("=H11-I11")
 
 
 def test_supplier_source_as_config_overrides_only_given_fields():

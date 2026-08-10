@@ -72,7 +72,7 @@ const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   // 발주처가 옵션별로 갈리는 상품은 한 파일에 모아서 받는다(1kg 제주다팜 + 3·5·10kg 쥬얼리 등)
   'bamhobak-jewelry': '미니밤호박 1·3·5·10kg(제주다팜+쥬얼리)',
   'potato-jeju': '홍감자(제주다팜)',
-  'baekdo-jewelry': '백도 딱딱이복숭아 1kg 쥬얼리·2·4kg 제주다팜',
+  'baekdo-jewelry': '백도 딱딱이복숭아 2·4kg(제주다팜)',
 };
 
 /** 한시 모니터 만료 필터: 오늘이 expiresOn(YYYY-MM-DD)을 지나면 제외 */

@@ -30,9 +30,11 @@ def resolve_order_supplier(product_name: object, option_text: object) -> str | N
         return JEJUDAPAM
 
     # 쥬얼리프룻(명이 메뉴)
+    if myeongi_order.is_myeongi_baekdo_excluded(product_name, option_text):
+        # 백도(딱복)는 쥬얼리 시즌 종료로 발주 중단(2026-08-10). 2·4kg은 위에서 제주다팜으로
+        # 잡히고, 그 밖(1kg 등)은 발주처 없음 → None. 시즌 재개 시 이 분기를 되돌린다.
+        return None
     if myeongi_order.is_jewelry_bamhobak_order(product_name, option_text):
-        return JEWELRYFRUIT
-    if myeongi_order.is_jewelry_baekdo_order(product_name, option_text):
         return JEWELRYFRUIT
 
     return None

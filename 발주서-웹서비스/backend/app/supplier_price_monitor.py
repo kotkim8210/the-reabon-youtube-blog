@@ -457,54 +457,44 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("망고수박 가정용 6kg", "수박 가정용 5~6kg내외(6kg)", 11, sheet_name="제이비티"),
         ),
     ),
-    # 백도 딱딱이복숭아 (2026-07~). 발주처가 옵션별로 갈린다:
-    #  - 중과·대과 1kg → 쥬얼리프룻 (pbfcompany adminplus pcode=10000549)
-    #  - 중과·대과 2·4kg → 제주다팜 (2026-07-24 이관, kkangta55 pcode=10001059)
-    # 두 발주처를 한 파일로 뽑는다(C열=발주처). 발주 라우팅과의 정합은 coupang_* 로 테스트가 검증.
+    # 백도 딱딱이복숭아 — 전량 제주다팜 발주(kkangta55 pcode=10001059, '딱딱이 복숭아 {등급} {kg}kg').
+    # 2026-08-10: 쥬얼리프룻 백도가 시즌 종료(어드민 옵션 0개)로 발주 중단 → 쥬얼리 1kg 2행을
+    #   설정·템플릿에서 제거(안 빼면 공급가를 못 읽어 매일 오전 알림이 오류로 뜬다).
+    #   내년 시즌 재개 시: 아래 JEWELRY 주석의 옵션 2개(중과/대과 1kg)와 템플릿 행을 되살리면 된다.
+    #   (쥬얼리 옵션명은 과수 표기가 시즌마다 바뀌므로 과수 없는 짧은 이름으로 부분매칭할 것)
     "baekdo-jewelry": SupplierMonitorConfig(
         key="baekdo-jewelry",
         source_type="adminplus",
-        base_url="https://pbfcompany.adminplus.co.kr",
-        supplier_name="쥬얼리프룻·제주다팜",
-        product_name="백도 딱딱이 복숭아",
-        search_value="딱딱이",
-        product_code="10000549",  # 동명이상품 오매칭 방지 (직접 지정)
+        base_url="https://kkangta55.adminplus.co.kr",
+        supplier_name="제주다팜",
+        product_name="딱딱이복숭아",
+        product_code="10001059",
         template_path=TEMPLATE_DIR / "백도복숭아_쥬얼리프룻_소싱현황_원본.xlsx",
-        output_prefix="백도복숭아_통합_V1",
+        output_prefix="백도복숭아_제주다팜_V1",
         output_name_pattern="백도복숭아 소싱현황관리_V1_{date}.xlsx",
         skip_missing_options=True,
         options=(
-            # 행8~13 ↔ 발주처 popup 실제 옵션명.
-            # 쥬얼리는 과수 표기(6-7과 등)가 시즌마다 바뀌어 조용히 매칭 실패했었다(2026-07-27 발견) →
-            # 과수 없는 짧은 이름으로 부분매칭. 제주다팜은 '딱딱이 복숭아 {등급} {kg}kg'.
+            # 템플릿 행8~11 = 제주다팜 4옵션 (쥬얼리 1kg 시즌아웃으로 행 정리됨)
             SupplierOptionConfig(
-                "백도 딱딱이복숭아 중과 1kg", "딱딱이 백도 복숭아 중과 1kg", 8, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
-                coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 중과 1kg",
-            ),
-            SupplierOptionConfig(
-                "백도 딱딱이복숭아 중과 2kg", "딱딱이 복숭아 중과 2kg", 9, sheet_name="쥬얼리프룻",
-                source=JEJU_BAEKDO_SOURCE,
+                "백도 딱딱이복숭아 중과 2kg", "딱딱이 복숭아 중과 2kg", 8, sheet_name="쥬얼리프룻",
                 coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 중과 2kg",
             ),
             SupplierOptionConfig(
-                "백도 딱딱이복숭아 중과 4kg", "딱딱이 복숭아 중과 4kg", 10, sheet_name="쥬얼리프룻",
-                source=JEJU_BAEKDO_SOURCE,
+                "백도 딱딱이복숭아 중과 4kg", "딱딱이 복숭아 중과 4kg", 9, sheet_name="쥬얼리프룻",
                 coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 중과 4kg",
             ),
             SupplierOptionConfig(
-                "백도 딱딱이복숭아 대과 1kg", "딱딱이 백도 복숭아 대과 1kg", 11, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
-                coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 대과 1kg",
-            ),
-            SupplierOptionConfig(
-                "백도 딱딱이복숭아 대과 2kg", "딱딱이 복숭아 대과 2kg", 12, sheet_name="쥬얼리프룻",
-                source=JEJU_BAEKDO_SOURCE,
+                "백도 딱딱이복숭아 대과 2kg", "딱딱이 복숭아 대과 2kg", 10, sheet_name="쥬얼리프룻",
                 coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 대과 2kg",
             ),
             SupplierOptionConfig(
-                "백도 딱딱이복숭아 대과 4kg", "딱딱이 복숭아 대과 4kg", 13, sheet_name="쥬얼리프룻",
-                source=JEJU_BAEKDO_SOURCE,
+                "백도 딱딱이복숭아 대과 4kg", "딱딱이 복숭아 대과 4kg", 11, sheet_name="쥬얼리프룻",
                 coupang_product="햇 백도 딱딱이복숭아", coupang_option="1박스 대과 4kg",
             ),
+            # JEWELRY(시즌 재개 시 복구): pbfcompany pcode=10000549, source=SupplierSource(
+            #   supplier_name="쥬얼리프룻", base_url="https://pbfcompany.adminplus.co.kr",
+            #   product_code="10000549", product_name="백도 딱딱이 복숭아")
+            #   옵션: "딱딱이 백도 복숭아 중과 1kg" / "딱딱이 백도 복숭아 대과 1kg"
         ),
     ),
     # ── 신비복숭아 한시 모니터 (2026-06-15 ~ 2026-06-29, 2주) — 2026-07 품절로 마진방어 UI에서 제외 ──
