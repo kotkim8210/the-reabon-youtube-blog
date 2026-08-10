@@ -42,6 +42,24 @@ def _prize_kg(prize: str) -> str:
         return m.group(1)
 
 
+def _event_baekdo_product(prize: str) -> str | None:
+    """이벤트 당첨 백도(딱복) 경품 → 제주다팜 발주명 '딱딱이 복숭아 {등급} {kg}kg'.
+
+    쥬얼리프룻 백도 발주는 중단(is_myeongi_baekdo_excluded)이라 당첨자도 전량 제주다팜에서
+    발주한다. 제주다팜 취급 규격은 2·4kg뿐이라 **1kg 경품은 2kg로 올려서** 발주한다
+    (2026-08-10 사용자 확정 — 이벤트 당첨자에만 적용, 일반 쿠팡 주문 경로는 그대로).
+    """
+    text = str(prize or "")
+    compact = text.replace(" ", "")
+    if "백도" not in compact and "딱딱이" not in compact:
+        return None
+    grade = "대과" if "대과" in compact else "중과"
+    kg = _prize_kg(text)
+    if kg not in ("2", "4"):
+        kg = "2"  # 1kg 경품·무표기 → 제주다팜 최소 규격 2kg
+    return f"딱딱이 복숭아 {grade} {kg}kg"
+
+
 def event_product_name(prize: str) -> str:
     """경품명 → 발주 품목명 (발주처는 event_supplier로 판정).
 
@@ -53,6 +71,9 @@ def event_product_name(prize: str) -> str:
     - 그 외(성주참외) → '성주참외 가성비 랜덤과 {kg}kg (R)' (등급 무관)
     """
     text = str(prize or "")
+    baekdo = _event_baekdo_product(text)
+    if baekdo:
+        return baekdo
     if "복숭아" in text:
         from app.processors.kolrabi_order import convert_jeju_baekdo_option
         from app.processors.myeongi_order import (
@@ -79,12 +100,12 @@ def event_product_name(prize: str) -> str:
 
 
 def event_supplier(prize: str) -> str:
-    """경품의 발주처: 백도딱딱이 2·4kg만 제주다팜, 나머지는 쥬얼리프룻."""
-    text = str(prize or "")
-    if "복숭아" in text:
-        from app.processors.kolrabi_order import convert_jeju_baekdo_option
-        if convert_jeju_baekdo_option(text, ""):
-            return "jejudapam"
+    """경품의 발주처: 백도딱딱이는 kg 무관 전량 제주다팜, 나머지는 쥬얼리프룻.
+
+    (2026-08-10) 쥬얼리 백도 발주 중단으로 1kg 당첨자도 제주다팜 2kg 발주.
+    """
+    if _event_baekdo_product(prize):
+        return "jejudapam"
     return "jewelryfruit"
 
 
