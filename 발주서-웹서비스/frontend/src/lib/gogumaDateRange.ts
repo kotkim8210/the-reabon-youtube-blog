@@ -74,5 +74,8 @@ export function getDefaultGogumaDateRange(referenceDate = new Date()): GogumaDat
     return getGogumaDateRangeForDays(3, today);
   }
 
-  return getGogumaDateRangeForDays(1, today);
+  // 평일 기본은 2일(어제~오늘). 발주 마감(오전 10시) 이후 들어온 어제 주문까지 챙겨야
+  // 누락이 없다. 이미 발주한 건은 '이전 발주분 자동 제외'가 걸러주므로 중복 위험 없음.
+  // (2026-08-11 사용자 요청 — 종전 '오늘만'은 어제 10시 이후 주문을 놓쳤다)
+  return getGogumaDateRangeForDays(2, today);
 }
