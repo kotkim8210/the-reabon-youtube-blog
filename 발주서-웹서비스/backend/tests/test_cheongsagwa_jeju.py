@@ -82,7 +82,22 @@ def test_apple_tracking_semantic_key_matches_both_sides():
     assert "apple:소과:5kg" not in js
 
 
-# ── 백도 제주다팜 시즌아웃 (2026-08-10 발주 마지막) ──
+# ── 백도 제주다팜 시즌 컷오프 (2026-08-10 시즌아웃 → 2026-08-12 재입고로 해제) ──
+def test_baekdo_jeju_currently_orderable():
+    """현재 설정(컷오프 None = 재입고)에서 백도 발주서가 실제로 나온다."""
+    assert kolrabi_order._BAEKDO_JEJU_LAST_ORDER_DATE is None
+    assert kolrabi_order._baekdo_jeju_season_open() is True
+    data = _delivery([
+        {"product": "햇 백도 딱딱이복숭아", "option": "1박스 중과 2kg", "name": "백도씨"},
+        {"product": "햇 백도 딱딱이복숭아", "option": "1박스 대과 4kg", "name": "대과씨"},
+    ])
+    results = kolrabi_order.process_outputs(data)
+    baekdo = [st for _, _, st in results if st.get("product") == "백도딱딱이복숭아(제주다팜)"]
+    assert baekdo and baekdo[0]["total"] == 2
+    names = {o["vendor_option_name"] for o in baekdo[0]["options"]}
+    assert names == {"딱딱이 복숭아 중과 2kg", "딱딱이 복숭아 대과 4kg"}
+
+
 def test_baekdo_jeju_order_output_gated_by_season(monkeypatch):
     data = _delivery([
         {"product": "햇 백도 딱딱이복숭아", "option": "1박스 중과 2kg", "name": "백도씨"},

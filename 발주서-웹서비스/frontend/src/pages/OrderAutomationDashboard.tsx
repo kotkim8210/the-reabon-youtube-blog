@@ -51,6 +51,7 @@ const SUPPLIER_MONITOR_KEYS = [
   { key: 'bamhobak-jewelry', accent: 'emerald' },
   { key: 'potato-jeju', accent: 'sky' },
   { key: 'apple-jeju', accent: 'emerald' },
+  { key: 'baekdo-jewelry', accent: 'sky' },
 ] as const;
 
 // 한시 모니터: 해당 날짜(YYYY-MM-DD)가 지나면 화면에서 자동 숨김
@@ -73,6 +74,7 @@ const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   'bamhobak-jewelry': '미니밤호박 1·3·5·10kg(제주다팜+쥬얼리)',
   'potato-jeju': '홍감자(제주다팜)',
   'apple-jeju': '청사과·아오리사과(제주다팜)',
+  'baekdo-jewelry': '백도 딱딱이복숭아 2·4kg(제주다팜)',
 };
 
 /** 한시 모니터 만료 필터: 오늘이 expiresOn(YYYY-MM-DD)을 지나면 제외 */

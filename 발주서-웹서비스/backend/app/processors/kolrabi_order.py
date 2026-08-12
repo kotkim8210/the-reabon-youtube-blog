@@ -118,14 +118,16 @@ def convert_potato_option(product_name: object, option_text: object) -> str | No
 _BAEKDO_JEJU_KGS = ("2", "4")
 
 
-# 백도 제주다팜 발주 시즌아웃: 2026-08-10을 마지막으로 종료(2026-08-11부터 발주 미출력).
-# 송장입력(tracking_input의 baekdo 의미키)은 이 컷오프와 무관하게 계속 동작한다.
-# 이벤트 당첨자 발주(event_order._event_baekdo_product)도 별도 경로라 영향 없음.
-# 내년 시즌 재개 시 이 컷오프 상수만 지우면 된다.
-_BAEKDO_JEJU_LAST_ORDER_DATE = "2026-08-10"
+# 백도 제주다팜 발주 시즌 컷오프(마지막 발주일 'YYYY-MM-DD'). None이면 상시 발주.
+#  - 2026-08-10 시즌아웃으로 컷오프를 걸었다가, 2026-08-12 제주다팜 재입고로 해제(None).
+#  - 다시 종료되면 마지막 발주일만 넣으면 그날까지 발주하고 다음날부터 자동 중단된다.
+# 송장입력(tracking_input의 baekdo 의미키)·이벤트 당첨자 발주는 이 컷오프와 무관하게 동작.
+_BAEKDO_JEJU_LAST_ORDER_DATE: str | None = None
 
 
 def _baekdo_jeju_season_open() -> bool:
+    if not _BAEKDO_JEJU_LAST_ORDER_DATE:
+        return True
     return datetime.now(KST).strftime("%Y-%m-%d") <= _BAEKDO_JEJU_LAST_ORDER_DATE
 
 
