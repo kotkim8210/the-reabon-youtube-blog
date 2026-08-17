@@ -251,9 +251,18 @@ def _is_baekdo(product_name: object, option_text: object) -> bool:
 
 
 def is_myeongi_baekdo_excluded(product_name: object, option_text: object) -> bool:
-    """명이 발주에서 제외할 딱복 계열인지 판별한다."""
+    """쥬얼리(명이) 발주에서 제외할 품목인지 판별한다.
+
+    - 딱복(백도) 계열: 쥬얼리 시즌 종료로 발주 중단(제주다팜 메뉴에서 발주)
+    - 미니밤호박: 2026-08-17부터 전 옵션 제주다팜 발주로 이관
+
+    ※ 하드코딩 분기뿐 아니라 **어드민 규칙 엔진 폴백도 여기서 막아야 한다.**
+      규칙(product_rules)에 옛 쥬얼리 규칙이 남아 있으면 하드코딩을 꺼도
+      규칙이 대신 잡아 쥬얼리 발주서에 다시 나온다
+      (2026-08-17 'jewelryfruit/미니밤호박 3·5·10kg' 규칙으로 실제 발생).
+    """
     text = _combined_text(product_name, option_text).replace(" ", "")
-    return any(keyword in text for keyword in ("백도", "딱딱이복숭아", "딱복"))
+    return any(keyword in text for keyword in ("백도", "딱딱이복숭아", "딱복", "밤호박"))
 
 
 def _baekdo_kg(product_name: object, option_text: object) -> str:
@@ -479,6 +488,10 @@ def _jewelry_corn_option(product_name: object, option_text: object) -> str | Non
 
 def convert_option(option_text: str, product_name: str = "") -> str | None:
     """Convert DeliveryList option text to the vendor-facing product name."""
+    # 쥬얼리 발주에서 빠진 품목(백도·미니밤호박)은 어드민 규칙 폴백으로도 살아나면 안 된다
+    if is_myeongi_baekdo_excluded(product_name, option_text):
+        return None
+
     apple_corn = _apple_corn_option(product_name, option_text)
     if apple_corn:
         return apple_corn

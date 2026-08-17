@@ -59,3 +59,41 @@ def test_bamhobak_excludes_other_products():
 def test_bamhobak_tracking_semantic_key():
     keys = TI._semantic_option_keys("제주 미니 밤호박 보우짱 단호박", "1박스 로얄 정품 3kg")
     assert "bamhobak:3kg" in keys, keys
+
+
+def test_admin_rule_cannot_reintroduce_bamhobak_to_jewelry():
+    """규칙 엔진에 옛 쥬얼리 밤호박 규칙이 남아 있어도 쥬얼리 발주서에 나오면 안 된다.
+
+    (2026-08-17: 하드코딩을 껐더니 DB 규칙 'jewelryfruit/미니밤호박 3·5·10kg'이
+     대신 잡아 쥬얼리 발주서가 27건 나온 실사고)
+    """
+    from io import BytesIO
+    from openpyxl import Workbook
+    from app import rules_engine
+    from app.processors.myeongi_tracking import is_jewelryfruit_tracking_target
+
+    rules_engine._set_cache_for_test(
+        {"jewelryfruit": [{
+            "id": 4, "supplier_key": "jewelryfruit", "label": "미니밤호박 3·5·10kg", "priority": 100,
+            "name_keywords": ["밤호박"], "exclude_keywords": [], "grades": [],
+            "kg_allow": ["3", "5", "10"], "pair_map": {}, "extra_map": {},
+            "output_template": "미니 밤호박 보우짱 로얄과 {kg}kg",
+            "require_grade": False, "require_kg": True, "active": True,
+        }]},
+        {"jewelryfruit": {"key": "jewelryfruit", "name": "쥬얼리프룻"}},
+    )
+    try:
+        P, O = "제주 미니 밤호박 보우짱", "1박스 로얄 정품 5kg"
+        assert M.jewelry_rule_match(P, O) is None or M.convert_option(O, P) != "미니 밤호박 보우짱 로얄과 5kg"
+        assert is_jewelryfruit_tracking_target(P, O) is False
+
+        wb = Workbook(); ws = wb.active
+        ws.cell(2, 3, "OID1"); ws.cell(2, 11, P); ws.cell(2, 12, O); ws.cell(2, 23, 1)
+        ws.cell(2, 27, "밤호박씨"); ws.cell(2, 28, "010-0000-0000"); ws.cell(2, 29, "12345")
+        ws.cell(2, 30, "서울시"); ws.cell(2, 31, "")
+        buf = BytesIO(); wb.save(buf)
+        _out, filename, stats = M.process(buf.getvalue())
+        assert stats["total"] == 0, (filename, stats)
+        assert "밤호박" not in filename
+    finally:
+        rules_engine._set_cache_for_test({}, {})

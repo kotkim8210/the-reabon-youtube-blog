@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 
 from app.processors.myeongi_order import (
     convert_option,
+    is_myeongi_baekdo_excluded,
     jewelry_rule_match,
     is_apple_corn_order,
     is_house_watermelon_order,
@@ -42,6 +43,9 @@ def normalize(value) -> str:
 
 def is_jewelryfruit_tracking_target(product_name: str, option_text: str) -> bool:
     product = str(product_name or "")
+    # 쥬얼리 발주에서 빠진 품목(백도·미니밤호박)은 규칙 엔진 폴백으로도 잡히면 안 된다
+    if is_myeongi_baekdo_excluded(product_name, option_text):
+        return False
     return (
         "명이나물" in product
         or is_apple_corn_order(product_name, option_text)
