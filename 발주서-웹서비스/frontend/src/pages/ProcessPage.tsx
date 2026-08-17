@@ -272,9 +272,12 @@ const toolConfigs: Record<string, ToolConfig> = {
   'gaegeolmu-order': {
     title: '게걸무씨앗기름 발주서 생성',
     description:
-      '쿠팡 DeliveryList 또는 지마켓 발송관리 파일에서 게걸무씨앗기름 주문을 추출하여 발주서를 생성합니다.',
+      '쿠팡 DeliveryList에서 게걸무씨앗기름 주문을 추출해 발주서를 만듭니다. 지마켓 신규주문 파일을 함께 올리면 한 발주서로 합쳐서 나옵니다.',
     icon: '🌾',
-    files: [{ key: 'delivery', label: 'DeliveryList 또는 지마켓 발송관리 파일' }],
+    files: [
+      { key: 'delivery', label: '쿠팡 DeliveryList 파일 (지마켓 파일만 있으면 여기에 올려도 됩니다)' },
+      { key: 'gmarket', label: '지마켓 신규주문 파일 (선택 — 올리면 발주서에 합쳐짐)', optional: true },
+    ],
     color: 'amber',
     colorClasses: {
       bg: 'bg-amber-50',

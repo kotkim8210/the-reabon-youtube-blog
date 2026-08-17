@@ -267,16 +267,33 @@ def _process_coupang_delivery(dl_ws) -> tuple[int, list[dict]]:
 
 
 def _process_gmarket(ws) -> tuple[Workbook, int, list[dict]]:
-    headers = _header_map(ws)
+    """지마켓 신규주문 시트 단독 처리 — 쿠팡 DeliveryList 양식 워크북으로 변환."""
     out_wb = Workbook()
     out_ws = out_wb.active
     out_ws.title = "Delivery"
     out_ws.append(DELIVERY_HEADERS)
     _apply_delivery_sheet_style(out_ws)
 
-    output_row_index = 1
-    option_totals: dict[str, dict] = {}
+    added, option_totals = _append_gmarket_rows(ws, out_ws, start_index=0)
+    return out_wb, added, list(option_totals.values())
 
+
+def _append_gmarket_rows(
+    ws,
+    out_ws,
+    start_index: int = 0,
+    option_totals: dict[str, dict] | None = None,
+) -> tuple[int, dict[str, dict]]:
+    """지마켓 시트의 게걸무 주문을 DeliveryList 양식 행으로 out_ws에 이어붙인다.
+
+    start_index: 이미 들어있는 행 수(번호 컬럼 이어가기용).
+    option_totals: 쿠팡 집계와 합칠 때 넘기면 같은 옵션끼리 합산된다.
+    """
+    headers = _header_map(ws)
+    if option_totals is None:
+        option_totals = {}
+
+    output_row_index = start_index
     for row_number in range(2, ws.max_row + 1):
         product_text = normalize(_cell_by_header(ws, headers, row_number, "상품명"))
         option_text = normalize(_cell_by_header(ws, headers, row_number, "옵션"))
@@ -309,7 +326,7 @@ def _process_gmarket(ws) -> tuple[Workbook, int, list[dict]]:
 
         out_ws.append(
             [
-                output_row_index - 1,
+                output_row_index,
                 _number_text(_cell_by_header(ws, headers, row_number, "배송번호")),
                 order_no,
                 _normalize_carrier(_cell_by_header(ws, headers, row_number, "택배사명(발송방법)")),
@@ -352,20 +369,48 @@ def _process_gmarket(ws) -> tuple[Workbook, int, list[dict]]:
             ]
         )
 
-    return out_wb, output_row_index - 1, list(option_totals.values())
+    return output_row_index - start_index, option_totals
 
 
-def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
+def process(
+    delivery_file_bytes: bytes,
+    gmarket_file_bytes: bytes | None = None,
+) -> tuple[bytes, str, dict]:
+    """게걸무 발주서 생성.
+
+    delivery_file_bytes: 쿠팡 DeliveryList 또는 지마켓 신규주문(단독 업로드도 지원).
+    gmarket_file_bytes: 지마켓 신규주문(선택) — 쿠팡 발주서 뒤에 이어붙여 한 장으로 합친다
+        (2026-08-17 요청: 지마켓 주문도 게걸무 발주서에 합쳐서 출력).
+    """
     dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes))
     dl_ws = dl_wb.active
 
     if _is_gmarket_sheet(dl_ws):
+        # 첫 칸에 지마켓 파일을 올린 경우 — 종전처럼 단독 처리
         output_wb, total, options = _process_gmarket(dl_ws)
-        source = "지마켓"
+        output_ws = output_wb.active
+        option_totals = {bucket["coupang_option_keyword"]: bucket for bucket in options}
+        sources = ["지마켓"]
     else:
         total, options = _process_coupang_delivery(dl_ws)
         output_wb = dl_wb
-        source = "쿠팡"
+        output_ws = dl_ws
+        option_totals = {bucket["coupang_option_keyword"]: bucket for bucket in options}
+        sources = ["쿠팡"]
+
+    gmarket_added = 0
+    if gmarket_file_bytes:
+        gm_ws = load_workbook(filename=BytesIO(gmarket_file_bytes)).active
+        if not _is_gmarket_sheet(gm_ws):
+            raise ValueError(
+                "지마켓 파일 형식이 아닙니다. 지마켓 '신규주문' 엑셀(판매아이디·주문번호·수령인명 헤더)을 올려주세요."
+            )
+        gmarket_added, option_totals = _append_gmarket_rows(
+            gm_ws, output_ws, start_index=total, option_totals=option_totals
+        )
+        if gmarket_added:
+            sources.append("지마켓")
+        total += gmarket_added
 
     output = BytesIO()
     output_wb.save(output)
@@ -375,9 +420,12 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
     filename = f"DeliveryList_게걸무씨앗기름_발주({now.strftime('%Y%m%d')}).xlsx"
     stats = {
         "total": total,
-        "source": source,
+        "source": "+".join(sources),
         "product": "게걸무씨앗기름",
-        "options": options,
+        "options": list(option_totals.values()),
     }
+    if gmarket_file_bytes:
+        stats["gmarket"] = gmarket_added
+        stats["coupang"] = total - gmarket_added
 
     return output.read(), filename, stats

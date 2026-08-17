@@ -1998,11 +1998,13 @@ async def process_goguma_tracking(
 @app.post("/api/process/gaegeolmu-order")
 async def process_gaegeolmu_order(
     delivery_file: UploadFile = File(...),
+    gmarket_file: UploadFile | None = File(None),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
-        output_bytes, filename, stats = gaegeolmu_order.process(delivery_bytes)
+        gmarket_bytes = await gmarket_file.read() if gmarket_file else None
+        output_bytes, filename, stats = gaegeolmu_order.process(delivery_bytes, gmarket_bytes)
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
         )
