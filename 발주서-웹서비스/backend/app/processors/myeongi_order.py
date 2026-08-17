@@ -88,13 +88,14 @@ def _blackmango_label(product_name: object, option_text: object) -> str:
 # (홍감자는 2026-07 쥬얼리프룻 품절 → 제주다팜(kolrabi_order) 발주로 이관 — 관련 함수 제거)
 
 
-# 제주 미니밤호박(보우짱) — 2026-06부터 3·5·10kg은 제주다팜→쥬얼리프룻 발주 전환(공급가 인하).
-# 1kg은 계속 제주다팜(kolrabi_order)에서 발주. 쥬얼리 시트 옵션: '로얄과 3/5/10kg'.
-BAMHOBAK_JEWELRY_WEIGHTS = {"3", "5", "10"}
+# 제주 미니밤호박(보우짱) — 2026-08-17부터 **전 옵션 제주다팜(kolrabi_order) 발주**로 통합.
+# (2026-06~08 사이 3·5·10kg만 쥬얼리프룻에서 발주했으나 되돌림)
+# 쥬얼리 발주·송장 대상에서 제외하므로 아래 함수는 항상 False.
+BAMHOBAK_JEWELRY_WEIGHTS: set[str] = set()
 
 
 def is_jewelry_bamhobak_order(product_name: object, option_text: object) -> bool:
-    """미니밤호박 쥬얼리프룻 발주 여부 (3·5·10kg만; 1kg은 제주다팜)."""
+    """미니밤호박 쥬얼리프룻 발주 여부 — 2026-08-17 전 옵션 제주다팜 이관으로 상시 False."""
     text = _combined_text(product_name, option_text).replace(" ", "")
     if "밤호박" not in text:
         return False

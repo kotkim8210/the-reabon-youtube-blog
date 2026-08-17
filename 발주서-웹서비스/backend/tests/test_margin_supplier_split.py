@@ -15,10 +15,9 @@ from app.order_routing import JEJUDAPAM, JEWELRYFRUIT, resolve_order_supplier
 
 # ── 발주 라우팅 판정 (발주 프로세서 재사용) ──
 def test_resolve_order_supplier_split_products():
-    # 미니밤호박: 1kg 제주다팜 / 3·5·10kg 쥬얼리
-    assert resolve_order_supplier("제주 미니밤호박 보우짱", "1박스 로얄 정품 1kg") == JEJUDAPAM
-    assert resolve_order_supplier("제주 미니밤호박 보우짱", "1박스 로얄 정품 3kg") == JEWELRYFRUIT
-    assert resolve_order_supplier("제주 미니밤호박 보우짱", "1박스 로얄 정품 10kg") == JEWELRYFRUIT
+    # 미니밤호박: 2026-08-17부터 전 옵션 제주다팜
+    for kg in ("1", "3", "5", "10"):
+        assert resolve_order_supplier("제주 미니밤호박 보우짱", f"1박스 로얄 정품 {kg}kg") == JEJUDAPAM, kg
     # 백도: 2·4kg 제주다팜. 1kg은 쥬얼리 시즌 종료로 발주처 없음(2026-08-10)
     assert resolve_order_supplier("햇 백도 딱딱이복숭아", "1박스 중과 1kg") is None
     assert resolve_order_supplier("햇 백도 딱딱이복숭아", "1박스 중과 2kg") == JEJUDAPAM
@@ -48,20 +47,21 @@ def test_margin_options_match_order_routing():
 
 
 # ── 통합 파일 구성 ──
-def test_bamhobak_monitor_is_single_merged_file():
+def test_bamhobak_monitor_is_jejudapam_only():
+    """2026-08-17 전 옵션 제주다팜 이관 — 한 파일·단일 발주처로 추적."""
     config = spm.MONITOR_CONFIGS["bamhobak-jewelry"]
-    assert "bamhobak-jeju" not in spm.MONITOR_CONFIGS  # 제주다팜 단독 모니터 제거(통합)
+    assert "bamhobak-jeju" not in spm.MONITOR_CONFIGS
     assert config.template_path.exists()
+    assert config.product_code == "10000015"
     labels = [(o.row, spm.option_supplier_name(o, config), o.supplier_option_name) for o in config.options]
     assert labels == [
-        (8, "제주다팜", "로얄과 1kg"),
-        (9, "쥬얼리프룻", "로얄과 3kg"),
-        (10, "쥬얼리프룻", "로얄과 5kg"),
-        (11, "쥬얼리프룻", "로얄과 10kg"),
+        (8, "제주다팜", "제주 미니밤호박 보우짱 로얄과 1kg"),
+        (9, "제주다팜", "제주 미니밤호박 보우짱 로얄과 3kg"),
+        (10, "제주다팜", "제주 미니밤호박 보우짱 로얄과 5kg"),
+        (11, "제주다팜", "제주 미니밤호박 보우짱 로얄과 10kg"),
     ]
-    # 템플릿 C열(상품명 자리)에 발주처가 찍혀 있어야 한 장에서 구분된다
     ws = load_workbook(config.template_path)["쥬얼리프룻"]
-    assert [ws.cell(r, 3).value for r in range(8, 12)] == ["제주다팜", "쥬얼리프룻", "쥬얼리프룻", "쥬얼리프룻"]
+    assert [ws.cell(r, 3).value for r in range(8, 12)] == ["제주다팜"] * 4
 
 
 def test_baekdo_monitor_is_jejudapam_only_after_jewelry_season_end():
@@ -97,12 +97,16 @@ def test_supplier_source_as_config_overrides_only_given_fields():
 
 
 # ── 실제 실행: 두 발주처 공급가가 한 워크북에 들어간다 ──
-def test_run_monitor_writes_both_suppliers_into_one_workbook(monkeypatch):
-    jeju_prices = {"로얄과 1kg": 5200}
-    jewelry_prices = {"로얄과 3kg": 8100, "로얄과 5kg": 11700, "로얄과 10kg": 19300}
+def test_run_monitor_writes_jejudapam_prices_into_workbook(monkeypatch):
+    jeju_prices = {
+        "제주 미니밤호박 보우짱 로얄과 1kg": 6200,
+        "제주 미니밤호박 보우짱 로얄과 3kg": 9500,
+        "제주 미니밤호박 보우짱 로얄과 5kg": 13700,
+        "제주 미니밤호박 보우짱 로얄과 10kg": 23500,
+    }
 
     async def fake_collect(config):
-        return (jeju_prices if config.supplier_name == "제주다팜" else jewelry_prices), {}
+        return jeju_prices, {}
 
     monkeypatch.setattr(spm, "_collect_supplier_prices", fake_collect)
 
@@ -121,12 +125,10 @@ def test_run_monitor_writes_both_suppliers_into_one_workbook(monkeypatch):
     summary, output_bytes, filename = asyncio.run(spm.run_supplier_monitor("bamhobak-jewelry"))
 
     assert summary["total_items"] == 4
-    assert [row["supplier_name"] for row in summary["rows"]] == [
-        "제주다팜", "쥬얼리프룻", "쥬얼리프룻", "쥬얼리프룻",
-    ]
+    assert [row["supplier_name"] for row in summary["rows"]] == ["제주다팜"] * 4
     assert "미니밤호박" in filename
     ws = load_workbook(BytesIO(output_bytes))["쥬얼리프룻"]
-    assert [ws.cell(r, 9).value for r in range(8, 12)] == [5200, 8100, 11700, 19300]
+    assert [ws.cell(r, 9).value for r in range(8, 12)] == [6200, 9500, 13700, 23500]
 
 
 def test_missing_supplier_option_is_reported_not_silent(monkeypatch):
@@ -135,9 +137,12 @@ def test_missing_supplier_option_is_reported_not_silent(monkeypatch):
     (백도 쥬얼리 1kg 2종이 과수 표기 변경으로 조용히 누락돼 있던 2026-07-27 사고)
     """
     async def fake_collect(config):
-        if config.supplier_name == "제주다팜":
-            return {}, {}   # 수집 실패(옵션명 불일치) 재현
-        return {"로얄과 3kg": 8100, "로얄과 5kg": 11700, "로얄과 10kg": 19300}, {}
+        # 1kg 옵션만 수집 실패(옵션명 불일치) 재현
+        return {
+            "제주 미니밤호박 보우짱 로얄과 3kg": 9500,
+            "제주 미니밤호박 보우짱 로얄과 5kg": 13700,
+            "제주 미니밤호박 보우짱 로얄과 10kg": 23500,
+        }, {}
 
     monkeypatch.setattr(spm, "_collect_supplier_prices", fake_collect)
 

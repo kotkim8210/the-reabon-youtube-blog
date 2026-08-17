@@ -257,41 +257,34 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             SupplierOptionConfig("홍감자 5kg 특대", "특대 5kg", 12, sheet_name="쥬얼리프룻"),
         ),
     ),
-    # 미니밤호박 — 발주처가 옵션별로 갈린다(1kg 제주다팜 / 3·5·10kg 쥬얼리프룻).
-    # 2026-07-27부터 한 파일로 통합(발주처별 따로 받으면 마진 비교가 안 됨). C열=발주처.
+    # 미니밤호박 — 2026-08-17부터 **전 옵션 제주다팜 발주**(쥬얼리 3·5·10kg 발주 회수).
+    # adminplus pcode 10000015, 옵션명 '제주 미니밤호박 보우짱 로얄과 {kg}kg'.
     "bamhobak-jewelry": SupplierMonitorConfig(
         key="bamhobak-jewelry",
-        source_type="google_sheet",
-        supplier_name="제주다팜·쥬얼리프룻",
-        product_name="미니밤호박(보우짱)",
-        sheet_csv_url=GOOGLE_SHEET_JEWELRYFRUIT_KG_CSV,
-        sheet_product_name="미니 밤호박",
-        sheet_product_column="E",
-        sheet_option_column="F",
-        sheet_vip_column="I",
-        sheet_price_fallback_column="G",
-        sheet_previous_column="G",
+        source_type="adminplus",
+        base_url="https://kkangta55.adminplus.co.kr",
+        supplier_name="제주다팜",
+        product_name="제주 미니밤호박 보우짱 로얄과",
+        product_code="10000015",
         template_path=TEMPLATE_DIR / "밤호박_통합_소싱현황_원본.xlsx",
-        output_prefix="밤호박_통합_V1",
-        output_name_pattern="미니밤호박 소싱현황관리(쥬얼리)_V1_{date}.xlsx",
+        output_prefix="밤호박_제주다팜_V1",
+        output_name_pattern="미니밤호박 소싱현황관리(제주다팜)_V1_{date}.xlsx",
         skip_missing_options=True,
         options=(
             SupplierOptionConfig(
-                "미니밤호박 로얄과 1kg", "로얄과 1kg", 8, sheet_name="쥬얼리프룻",
-                source=JEJU_BAMHOBAK_SOURCE,
+                "미니밤호박 로얄과 1kg", "제주 미니밤호박 보우짱 로얄과 1kg", 8, sheet_name="쥬얼리프룻",
                 coupang_product="제주 미니밤호박 보우짱", coupang_option="1박스 로얄 정품 1kg",
             ),
-            # 2026-06 제주다팜→쥬얼리프룻 발주 전환분(3·5·10kg)
             SupplierOptionConfig(
-                "미니밤호박 로얄과 3kg", "로얄과 3kg", 9, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                "미니밤호박 로얄과 3kg", "제주 미니밤호박 보우짱 로얄과 3kg", 9, sheet_name="쥬얼리프룻",
                 coupang_product="제주 미니밤호박 보우짱", coupang_option="1박스 로얄 정품 3kg",
             ),
             SupplierOptionConfig(
-                "미니밤호박 로얄과 5kg", "로얄과 5kg", 10, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                "미니밤호박 로얄과 5kg", "제주 미니밤호박 보우짱 로얄과 5kg", 10, sheet_name="쥬얼리프룻",
                 coupang_product="제주 미니밤호박 보우짱", coupang_option="1박스 로얄 정품 5kg",
             ),
             SupplierOptionConfig(
-                "미니밤호박 로얄과 10kg", "로얄과 10kg", 11, sheet_name="쥬얼리프룻", supplier_name="쥬얼리프룻",
+                "미니밤호박 로얄과 10kg", "제주 미니밤호박 보우짱 로얄과 10kg", 11, sheet_name="쥬얼리프룻",
                 coupang_product="제주 미니밤호박 보우짱", coupang_option="1박스 로얄 정품 10kg",
             ),
         ),

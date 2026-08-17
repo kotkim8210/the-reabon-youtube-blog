@@ -328,11 +328,11 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
 
 
 async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
-    """토스 API에서 제주다팜 발주 대상(콜라비 + 미니밤호박 1kg + 홍감자) 주문을 수집.
+    """토스 API에서 제주다팜 발주 대상(콜라비 + 미니밤호박 전 옵션 + 홍감자) 주문을 수집.
 
     반환: {"colrabi": [...], "bamhobak": [...], "potato": [...]} — 각 entry에
     'product'(제주다팜 발주 품목명) 포함.
-    콜라비는 3/5/10kg('콜라비 정품 {kg}kg'), 미니밤호박은 1kg만(3·5·10kg은 쥬얼리),
+    콜라비는 3/5/10kg('콜라비 정품 {kg}kg'), 미니밤호박은 전 옵션(2026-08-17 쥬얼리→제주다팜 통합),
     홍감자는 2026-07 쥬얼리 품절로 제주다팜 이관(중1→중2, 대3→특3, 대5→특5).
     배송중·송장입력 건은 자동 제외.
     """
