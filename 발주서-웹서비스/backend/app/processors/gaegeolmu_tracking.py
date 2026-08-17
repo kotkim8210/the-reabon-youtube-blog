@@ -61,6 +61,26 @@ def parse_tracking_text(text: str) -> tuple[list[tuple[str, str]], list[str]]:
     return pairs, warnings
 
 
+def _require_delivery_list(ws) -> None:
+    """DeliveryList 칸에 쿠팡 DeliveryList가 맞는지 확인.
+
+    택배발송 파일(A=주문자명·B=운송장·C=수하인명)을 이 칸에 올리면 종전엔 그 파일을
+    그대로 되돌려줘, 쿠팡 '엑셀 대량배송' 메뉴가 인식하지 못했다(2026-08-17 실제 사고).
+    """
+    headers = {
+        normalize(ws.cell(row=1, column=col).value)
+        for col in range(1, min(ws.max_column, 41) + 1)
+    }
+    if {"주문번호", "운송장번호"} <= headers and ("수취인이름" in headers or ws.max_column >= 30):
+        return
+    raise ValueError(
+        "DeliveryList 칸에 쿠팡 DeliveryList가 아닌 파일이 올라왔습니다. "
+        "(감지된 열: " + ", ".join(sorted(h for h in headers if h)[:5]) + ") "
+        "택배발송 파일은 위쪽 '게걸무 택배발송 파일' 칸에, 쿠팡에서 받은 DeliveryList는 "
+        "아래 'DeliveryList 파일' 칸에 올려주세요."
+    )
+
+
 def process(
     tracking_bytes: bytes | None,
     delivery_bytes: bytes,
@@ -110,6 +130,7 @@ def process(
     for s in dl_wb.sheetnames[1:]:
         del dl_wb[s]
     dl_ws = dl_wb[first_sheet]
+    _require_delivery_list(dl_ws)
 
     # DeliveryList: 이름 → [{row, 주소, 옵션키}, ...]
     dl_name_entries: dict[str, list[dict]] = defaultdict(list)
