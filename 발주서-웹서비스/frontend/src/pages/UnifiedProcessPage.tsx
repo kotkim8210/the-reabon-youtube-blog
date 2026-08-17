@@ -152,7 +152,7 @@ const productConfigs: Record<string, ProductConfig> = {
       buttonLabel: '운송장 입력',
     },
     event: {
-      title: '라이브 이벤트 당첨자 발주서 생성 (백도딱딱이 2·4kg → 제주다팜 발주서)',
+      title: '라이브 이벤트 당첨자 발주서 생성 (모든 경품 → 제주다팜 발주서)',
       icon: '🎉',
       apiToolId: 'event-winner-order',
       files: [
@@ -188,7 +188,7 @@ const productConfigs: Record<string, ProductConfig> = {
       buttonLabel: '운송장 입력',
     },
     event: {
-      title: '라이브 이벤트 당첨자 발주서 생성 (참외·신비/거반도/대극천/백도딱딱이 복숭아)',
+      title: '라이브 이벤트 당첨자 발주서 생성 (모든 경품 → 제주다팜 발주서)',
       icon: '🎉',
       apiToolId: 'event-winner-order',
       files: [

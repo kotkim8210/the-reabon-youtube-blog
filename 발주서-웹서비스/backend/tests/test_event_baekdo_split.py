@@ -1,8 +1,13 @@
-"""이벤트 당첨자 발주: 백도 2·4kg 제주다팜 분리 출력 검증."""
+"""라이브 이벤트 당첨자 발주 — 2026-08-17부터 경품 무관 전량 제주다팜 1파일.
+
+- 제주다팜 취급 품목(백도·미니밤호박·청사과·홍감자)은 거래처 판매옵션명으로 변환
+- 그 밖의 경품은 경품명 그대로 (종전엔 성주참외로 둔갑했다)
+- 이름·주소가 빈 당첨자는 발주에서 빼되 needs_check로 알린다
+"""
 
 from io import BytesIO
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from app.processors import event_order
 
@@ -13,56 +18,77 @@ def _csv(rows: list[list[str]]) -> bytes:
     return "\n".join(lines).encode("utf-8-sig")
 
 
-def _row(prize: str, name: str) -> list[str]:
-    return [prize, "닉", "Y", name, "010-1111-2222", "서울시 강남구 테스트로 1", "OID1", "10000", "", ""]
+def _row(prize: str, name: str, *, address: str = "서울시 강남구 테스트로 1", order_id: str = "OID1") -> list[str]:
+    return [prize, "닉", "Y", name, "010-1111-2222", address, order_id, "10000", "", ""]
 
 
-def test_event_supplier_split():
-    assert event_order.event_supplier("백도 딱딱이복숭아 대과 2kg") == "jejudapam"
-    assert event_order.event_supplier("백도 딱딱이복숭아 중과 4kg") == "jejudapam"
-    # 2026-08-10: 쥬얼리 백도 발주 중단 → 1kg 당첨도 제주다팜(2kg로 승급)
-    assert event_order.event_supplier("백도 딱딱이복숭아 중과 1kg") == "jejudapam"
-    assert event_order.event_supplier("성주참외 3kg") == "jewelryfruit"
-    assert event_order.event_supplier("대극천 복숭아 소과 1kg") == "jewelryfruit"
+def test_all_prizes_go_to_jejudapam():
+    for prize in ("백도 딱딱이복숭아 대과 2kg", "미니밤호박1kg", "아오리사과  소과 (2kg)", "성주참외 3kg"):
+        assert event_order.event_supplier(prize) == "jejudapam", prize
 
 
-def test_event_product_name_baekdo_24kg_not_shinbi():
-    # 회귀 방지: 백도 2·4kg가 신비로 둔갑하지 않고 제주다팜 발주명으로
-    assert event_order.event_product_name("백도 딱딱이복숭아 대과 2kg") == "딱딱이 복숭아 대과 2kg"
-    assert event_order.event_product_name("백도 딱딱이복숭아 중과 4kg") == "딱딱이 복숭아 중과 4kg"
-    # 1kg 경품은 제주다팜 최소 규격 2kg로 올려서 발주 (이벤트 당첨자 전용 규칙)
-    assert event_order.event_product_name("백도 딱딱이복숭아 중과 1kg") == "딱딱이 복숭아 중과 2kg"
-    assert event_order.event_product_name(" 백도복숭아  대과 (1kg)") == "딱딱이 복숭아 대과 2kg"
-    assert "신비" not in event_order.event_product_name("백도 딱딱이복숭아 대과 2kg")
+def test_product_name_uses_jejudapam_option_names():
+    # 미니밤호박·청사과는 제주다팜 판매옵션명으로 변환
+    assert event_order.event_product_name("미니밤호박1kg") == "제주 미니밤호박 보우짱 로얄과 1kg"
+    assert (
+        event_order.event_product_name("아오리사과  소과 (2kg)")
+        == "청사과 소과(가정용) 포장재포함 2kg(10-13과내외)"
+    )
+    # 백도는 1kg 경품도 최소 규격 2kg로 승급
+    assert event_order.event_product_name(" 백도복숭아  중과 (1kg)") == "딱딱이 복숭아 중과 2kg"
+    assert event_order.event_product_name("백도 딱딱이복숭아 대과 4kg") == "딱딱이 복숭아 대과 4kg"
 
 
-def test_process_baekdo_only_goes_to_jejudapam():
-    results = event_order.process(_csv([_row("백도 딱딱이복숭아 대과 2kg", "김당첨")]))
-    assert len(results) == 1
-    _bytes, filename, stats = results[0]
-    assert "제주다팜" in filename and "백도" in filename
-    assert stats["supplier"] == "제주다팜"
-    assert stats["winners"] == 1
-    ws = load_workbook(BytesIO(_bytes)).active
-    found = any("딱딱이 복숭아 대과 2kg" == str(ws.cell(r, 8).value or "") for r in range(1, ws.max_row + 1))
-    assert found
+def test_unknown_prize_keeps_original_option():
+    """미지원 경품은 경품명 그대로 — 성주참외로 둔갑하면 안 된다(2026-08-17 사고)."""
+    assert event_order.event_product_name("한라봉 3kg 특품") == "한라봉 3kg 특품"
+    assert "참외" not in event_order.event_product_name("미니밤호박1kg")
 
 
-def test_process_mixed_returns_two_workbooks():
+def test_process_outputs_single_jejudapam_file():
     results = event_order.process(_csv([
-        _row("성주참외 3kg", "참외당첨"),
-        _row("백도 딱딱이복숭아 중과 4kg", "백도당첨"),
-        _row("백도 딱딱이복숭아 대과 1kg", "백도1kg당첨"),  # 1kg도 제주다팜(2kg 승급)
+        _row("미니밤호박1kg", "순유선", order_id="12102324980320"),
+        _row("아오리사과  소과 (2kg)", "심규정", order_id="5102305763420"),
     ]))
-    assert len(results) == 2
-    by_supplier = {s["supplier"]: (b, f, s) for b, f, s in results}
-    assert set(by_supplier) == {"쥬얼리프룻", "제주다팜"}
-    assert by_supplier["쥬얼리프룻"][2]["winners"] == 1   # 참외만
-    assert by_supplier["제주다팜"][2]["winners"] == 2     # 백도 4kg + 1kg(→2kg)
+    assert len(results) == 1
+    output, filename, stats = results[0]
+    assert stats["supplier"] == "제주다팜"
+    assert stats["total"] == 2 and stats["winners"] == 2
+    assert "제주다팜" in filename
+    ws = load_workbook(BytesIO(output)).active
+    rows = [(ws.cell(r, 2).value, ws.cell(r, 8).value) for r in range(2, 4)]
+    assert rows == [
+        ("순유선", "제주 미니밤호박 보우짱 로얄과 1kg"),
+        ("심규정", "청사과 소과(가정용) 포장재포함 2kg(10-13과내외)"),
+    ]
 
 
-# ── 발주 칸에 당첨자 CSV를 올렸을 때: openpyxl 원본오류 대신 안내 (2026-07-27 실제 사고) ──
+def test_missing_address_is_reported_not_silently_dropped():
+    """주소·이름이 빈 당첨자(취소 의심)는 발주에서 빼되 화면에 표시한다."""
+    results = event_order.process(_csv([
+        _row("아오리사과  소과 (2kg)", "심규정", order_id="5102305763420"),
+        ["아오리사과  소과 (2kg)", "이*미", "", "", "", "", "24102306274114", "89990", "0", ""],
+    ]))
+    _output, _filename, stats = results[0]
+    assert stats["winners"] == 1
+    assert "needs_check" in stats
+    assert "24102306274114" in stats["needs_check"]
+    assert "이름·주소 없음" in stats["needs_check"]
+
+
+def test_all_rows_incomplete_raises_with_detail():
+    try:
+        event_order.process(_csv([
+            ["미니밤호박1kg", "이*미", "", "", "", "", "24102306274114", "89990", "0", ""],
+        ]))
+    except ValueError as exc:
+        assert "개인정보 미기재" in str(exc) and "24102306274114" in str(exc)
+    else:
+        raise AssertionError("발주 가능한 당첨자가 없으면 사유를 알려야 한다")
+
+
 def test_delivery_slot_rejects_winners_csv_with_guidance():
+    """발주 칸에 당첨자 CSV를 올렸을 때 openpyxl 원본오류 대신 안내 (2026-07-27 사고)."""
     import pytest
     from fastapi import HTTPException
 
@@ -75,37 +101,6 @@ def test_delivery_slot_rejects_winners_csv_with_guidance():
     assert "이벤트 당첨자" in exc.value.detail
     assert "zip" not in exc.value.detail
 
-    # 정상 xlsx는 통과
-    from openpyxl import Workbook
     buf = BytesIO()
     Workbook().save(buf)
     assert _require_xlsx(buf.getvalue()) is None
-
-
-# ── 이벤트 당첨자 백도 1kg → 제주다팜 2kg 승급 (2026-08-10) ──
-def test_event_baekdo_1kg_promoted_to_jejudapam_2kg():
-    """실제 CSV 경품명(' 백도복숭아  중과 (1kg)')이 빈 발주서로 나오던 사고.
-
-    쥬얼리 백도 발주가 중단(is_myeongi_baekdo_excluded)이라 1kg 당첨자가 전부 걸러졌다.
-    이벤트 당첨자만 2kg로 올려 제주다팜 발주서로 출력한다(일반 주문 경로는 불변).
-    """
-    results = event_order.process(_csv([
-        _row(" 백도복숭아  중과 (1kg)", "도하림"),
-        _row(" 백도복숭아  중과 (1kg)", "이영선"),
-    ]))
-    assert len(results) == 1
-    _bytes, filename, stats = results[0]
-    assert stats["supplier"] == "제주다팜"
-    assert stats["total"] == 2 and stats["winners"] == 2
-    ws = load_workbook(BytesIO(_bytes)).active
-    names = [str(ws.cell(r, 8).value or "") for r in range(2, ws.max_row + 1)]
-    assert names.count("딱딱이 복숭아 중과 2kg") == 2
-
-
-def test_general_order_path_unchanged_by_event_rule():
-    """일반 쿠팡 주문 경로는 그대로 — 이벤트 규칙이 새어나가면 안 된다."""
-    from app.processors.kolrabi_order import convert_jeju_baekdo_option
-
-    # 제주다팜 일반 발주: 2·4kg만 대상이고 1kg은 여전히 미대상
-    assert convert_jeju_baekdo_option("햇 백도 딱딱이복숭아", "1박스 중과 2kg") == "딱딱이 복숭아 중과 2kg"
-    assert convert_jeju_baekdo_option("햇 백도 딱딱이복숭아", "1박스 중과 1kg") is None
