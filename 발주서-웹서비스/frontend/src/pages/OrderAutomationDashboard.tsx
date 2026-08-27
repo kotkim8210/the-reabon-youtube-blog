@@ -44,15 +44,12 @@ import { useUser } from '../App';
 const SUPPLIER_MONITOR_KEYS = [
   { key: 'kolrabi', accent: 'sky' },
   { key: 'corn-jbt', accent: 'amber' },
-  { key: 'chamoe-jewelry', accent: 'emerald' },
   { key: 'tomato-jbt', accent: 'sky' },
   { key: 'watermelon-jewelry', accent: 'emerald' },
   { key: 'dureup-jbt', accent: 'amber' },
   { key: 'bamhobak-jewelry', accent: 'emerald' },
   { key: 'potato-jeju', accent: 'sky' },
-  { key: 'apple-jeju', accent: 'emerald' },
   { key: 'hongro-jeju', accent: 'amber' },
-  { key: 'baekdo-jewelry', accent: 'sky' },
 ] as const;
 
 // 한시 모니터: 해당 날짜(YYYY-MM-DD)가 지나면 화면에서 자동 숨김
@@ -67,16 +64,13 @@ const DEFAULT_HIDDEN_SUPPLIER_MONITOR_KEYS: SupplierMonitorKey[] = ['tomato-jbt'
 const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   kolrabi: '콜라비',
   'corn-jbt': '초당옥수수',
-  'chamoe-jewelry': '성주참외(쥬얼리)',
   'tomato-jbt': '대저토마토',
   'watermelon-jewelry': '망고수박',
   'dureup-jbt': '남해땅두릅',
   // 발주처가 옵션별로 갈리는 상품은 한 파일에 모아서 받는다(1kg 제주다팜 + 3·5·10kg 쥬얼리 등)
   'bamhobak-jewelry': '미니밤호박 1·3·5·10kg(제주다팜)',
   'potato-jeju': '홍감자(제주다팜)',
-  'apple-jeju': '청사과·아오리사과(제주다팜)',
   'hongro-jeju': '홍로사과·가을햇사과(제주다팜)',
-  'baekdo-jewelry': '백도 딱딱이복숭아 2·4kg(제주다팜)',
 };
 
 /** 한시 모니터 만료 필터: 오늘이 expiresOn(YYYY-MM-DD)을 지나면 제외 */

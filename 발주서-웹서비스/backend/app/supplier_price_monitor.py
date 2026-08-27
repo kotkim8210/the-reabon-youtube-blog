@@ -704,7 +704,10 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
 #  - apple-corn-jewelryfruit: 2026-07 애플초당옥수수 품절(구글시트에서 VIP 공급가 빠짐). 시즌 재개 시 제거.
 #  - potato-jewelry: 2026-07-13 쥬얼리 홍감자 품절 → 발주 제주다팜 이관(마진 시트는 쥬얼리 기준이라 무용).
 # ※ 품절/시즌아웃 상품은 여기 추가 + 프론트 SUPPLIER_MONITOR_KEYS에서 제거로 마진방어에서 자동 숨김.
-PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt", "apple-corn-jewelryfruit", "potato-jewelry"}
+# 2026-08-27 거래처 어드민에서 옵션 0개(시즌 종료/품절) 확인 → 매일 오전 알림 오류 방지로 일시중지.
+#  - apple-jeju(청사과)·baekdo-jewelry(백도 딱딱이복숭아)·chamoe-jewelry(성주참외)
+#  재입고되면 여기서 제거 + 프론트 SUPPLIER_MONITOR_KEYS/라벨 복구.
+PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt", "apple-corn-jewelryfruit", "potato-jewelry", "apple-jeju", "baekdo-jewelry", "chamoe-jewelry"}
 
 MONITOR_CONFIGS["dureup-jbt"] = replace(
     MONITOR_CONFIGS["dureup-jbt"],
