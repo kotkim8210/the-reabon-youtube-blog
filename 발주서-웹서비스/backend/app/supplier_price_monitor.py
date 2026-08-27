@@ -399,6 +399,104 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
             ),
         ),
     ),
+    # 홍로사과(가을햇사과) — 2026-08 제주다팜 신규. adminplus pcode=10001216 '가을햇사과(홍사과)'.
+    # 소과·중소과·중대과·대과 × 1.5·2·3·4·5kg = 20종(실측 2026-08-27).
+    # supplier_option_name은 kolrabi_order._HONGRO_JEJU_OPTIONS와 같은 문자열이어야 공급가가 붙는다.
+    # ※ 쿠폰가(H열)는 소과 1.5kg만 확인됨 — 나머지는 사용자가 소싱현황 H열을 채우면 마진이 계산된다.
+    "hongro-jeju": SupplierMonitorConfig(
+        key="hongro-jeju",
+        source_type="adminplus",
+        base_url="https://kkangta55.adminplus.co.kr",
+        supplier_name="제주다팜",
+        product_name="가을햇사과(홍사과)",
+        product_code="10001216",
+        template_path=TEMPLATE_DIR / "홍로사과_제주다팜_소싱현황_원본.xlsx",
+        output_prefix="홍로사과_제주다팜_V1",
+        output_name_pattern="홍로사과(가을햇사과)_제주다팜 소싱현황관리_V1_{date}.xlsx",
+        skip_missing_options=True,
+        options=(
+            SupplierOptionConfig(
+                "홍로사과 소과 1.5kg", "가을햇사과(홍사과) 가정용 소과 포장재포함 1.5kg(7-10과내)", 8, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 소과 1.5kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 소과 2kg", "가을햇사과(홍사과)가정용 소과 포장재포함 2kg(11-15과내외)", 9, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 소과 2kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 소과 3kg", "가을햇사과(홍사과) 가정용 소과 포장재포함 3kg(17-20과내외)", 10, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 소과 3kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 소과 4kg", "가을햇사과(홍사과) 가정용 소과 포장재포함 4kg(20-25과내외)", 11, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 소과 4kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 소과 5kg", "가을햇사과(홍사과) 가정용 소과 포장재포함 5kg(29-35과)", 12, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 소과 5kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중소과 1.5kg", "가을햇사과(홍사과)가정용 중소과 포장재포함 1.5kg(6과내외)", 13, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중소과 1.5kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중소과 2kg", "가을햇사과(홍사과) 가정용 중소과 포장재포함 2kg(7-8과내외)", 14, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중소과 2kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중소과 3kg", "가을햇사과(홍사과) 가정용 중소과 포장재포함 3kg(13-15과내외)", 15, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중소과 3kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중소과 4kg", "가을햇사과(홍사과) 가정용 중소과 포장재포함 4kg(15-17과내외)", 16, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중소과 4kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중소과 5kg", "가을햇사과(홍사과) 가정용 중소과 포장재포함 5kg(23-24과)", 17, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중소과 5kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중대과 1.5kg", "가을햇사과(홍사과) 가정용 중대과 포장재포함 1.5kg(4-5과내외)", 18, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중대과 1.5kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중대과 2kg", "가을햇사과(홍사과) 가정용 중대과 포장재포함 2kg(7과내외)", 19, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중대과 2kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중대과 3kg", "가을햇사과(홍사과) 가정용 중대과 포장재포함 3kg(11-12과내외)", 20, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중대과 3kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중대과 4kg", "가을햇사과(홍사과) 가정용 중대과 포장재포함 4kg(13-14과내외)", 21, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중대과 4kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 중대과 5kg", "가을햇사과(홍사과) 가정용 중대과 포장재포함 5kg(19-22과)", 22, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 중대과 5kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 대과 1.5kg", "가을햇사과(홍사과) 가정용 대과 포장재포함 1.5kg(4과내외)", 23, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 대과 1.5kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 대과 2kg", "가을햇사과(홍사과) 가정용 대과 포장재포함 2kg(6과내외)", 24, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 대과 2kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 대과 3kg", "가을햇사과(홍사과) 가정용 대과 포장재포함 3kg(10과내외)", 25, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 대과 3kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 대과 4kg", "가을햇사과(홍사과) 가정용 대과 포장재포함 4kg(12과내외)", 26, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 대과 4kg",
+            ),
+            SupplierOptionConfig(
+                "홍로사과 대과 5kg", "가을햇사과(홍사과) 가정용 대과 포장재포함 5kg(16-18과)", 27, sheet_name="쥬얼리프룻",
+                coupang_product="2026 햇 안동 고당도 홍로사과", coupang_option="1박스 대과 5kg",
+            ),
+        ),
+    ),
     "corn-jbt": SupplierMonitorConfig(
         key="corn-jbt",
         source_type="google_sheet",

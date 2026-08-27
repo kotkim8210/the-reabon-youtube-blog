@@ -191,6 +191,67 @@ def convert_apple_option(product_name: object, option_text: object) -> str | Non
     return _APPLE_JEJU_OPTIONS.get((grade, kg))
 
 
+# 홍로사과(가을햇사과) — 2026-08 제주다팜 신규 발주. 쿠팡 옵션의 등급+kg를 제주다팜
+# 판매옵션 전체 문자열로 변환한다. 실측 옵션(pcode 10001216 '가을햇사과(홍사과)', 2026-08-27):
+# 소과·중소과·중대과·대과 × 1.5·2·3·4·5kg = 20종.
+# ※ 거래처 표기가 '가을햇사과(홍사과) 가정용'과 '가을햇사과(홍사과)가정용'으로 섞여 있어
+#   실측 문자열을 그대로 둔다(발주서에 거래처가 아는 이름이 찍혀야 함).
+_HONGRO_JEJU_OPTIONS = {
+    ("소과", "1.5"): "가을햇사과(홍사과) 가정용 소과 포장재포함 1.5kg(7-10과내)",
+    ("소과", "2"): "가을햇사과(홍사과)가정용 소과 포장재포함 2kg(11-15과내외)",
+    ("소과", "3"): "가을햇사과(홍사과) 가정용 소과 포장재포함 3kg(17-20과내외)",
+    ("소과", "4"): "가을햇사과(홍사과) 가정용 소과 포장재포함 4kg(20-25과내외)",
+    ("소과", "5"): "가을햇사과(홍사과) 가정용 소과 포장재포함 5kg(29-35과)",
+    ("중소과", "1.5"): "가을햇사과(홍사과)가정용 중소과 포장재포함 1.5kg(6과내외)",
+    ("중소과", "2"): "가을햇사과(홍사과) 가정용 중소과 포장재포함 2kg(7-8과내외)",
+    ("중소과", "3"): "가을햇사과(홍사과) 가정용 중소과 포장재포함 3kg(13-15과내외)",
+    ("중소과", "4"): "가을햇사과(홍사과) 가정용 중소과 포장재포함 4kg(15-17과내외)",
+    ("중소과", "5"): "가을햇사과(홍사과) 가정용 중소과 포장재포함 5kg(23-24과)",
+    ("중대과", "1.5"): "가을햇사과(홍사과) 가정용 중대과 포장재포함 1.5kg(4-5과내외)",
+    ("중대과", "2"): "가을햇사과(홍사과) 가정용 중대과 포장재포함 2kg(7과내외)",
+    ("중대과", "3"): "가을햇사과(홍사과) 가정용 중대과 포장재포함 3kg(11-12과내외)",
+    ("중대과", "4"): "가을햇사과(홍사과) 가정용 중대과 포장재포함 4kg(13-14과내외)",
+    ("중대과", "5"): "가을햇사과(홍사과) 가정용 중대과 포장재포함 5kg(19-22과)",
+    ("대과", "1.5"): "가을햇사과(홍사과) 가정용 대과 포장재포함 1.5kg(4과내외)",
+    ("대과", "2"): "가을햇사과(홍사과) 가정용 대과 포장재포함 2kg(6과내외)",
+    ("대과", "3"): "가을햇사과(홍사과) 가정용 대과 포장재포함 3kg(10과내외)",
+    ("대과", "4"): "가을햇사과(홍사과) 가정용 대과 포장재포함 4kg(12과내외)",
+    ("대과", "5"): "가을햇사과(홍사과) 가정용 대과 포장재포함 5kg(16-18과)",
+}
+# 등급 판정 순서: '중소과'·'중대과'가 '소과'·'대과'를 포함하므로 긴 것 먼저.
+_HONGRO_GRADES = ("중소과", "중대과", "소과", "대과")
+
+
+def _fmt_kg_text(raw: str) -> str:
+    """'1.5'→'1.5', '2.0'→'2' (옵션 테이블 키와 맞추기 위한 정규화)."""
+    try:
+        f = float(raw)
+    except (TypeError, ValueError):
+        return str(raw)
+    return str(int(f)) if f.is_integer() else str(f)
+
+
+def is_jeju_hongro_order(product_name: object, option_text: object) -> bool:
+    """홍로사과(가을햇사과) 제주다팜 발주 여부. 청사과(아오리)와는 배타적으로 판정."""
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    if "청사과" in text or "아오리" in text:
+        return False  # 청사과는 별도 상품(convert_apple_option)
+    return "홍로" in text or "홍사과" in text or "가을햇사과" in text
+
+
+def convert_hongro_option(product_name: object, option_text: object) -> str | None:
+    """홍로사과 DeliveryList → 제주다팜 발주명(판매옵션 전체 문자열). 미매칭이면 None."""
+    if not is_jeju_hongro_order(product_name, option_text):
+        return None
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    grade = next((g for g in _HONGRO_GRADES if g in text), "")
+    m = re.search(r"(\d+(?:\.\d+)?)kg", text, re.IGNORECASE)
+    kg = _fmt_kg_text(m.group(1)) if m else ""
+    if not grade or not kg:
+        return None
+    return _HONGRO_JEJU_OPTIONS.get((grade, kg))
+
+
 def clear_stray_header_numbers(ws) -> None:
     for col in range(14, ws.max_column + 1):
         cell = ws.cell(row=1, column=col)
@@ -740,6 +801,21 @@ def process_apple(
     )
 
 
+def process_hongro(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """홍로사과(가을햇사과) 제주다팜 발주 (2026-08 신규). 발주명=제주다팜 판매옵션."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_hongro_option,
+        "홍로사과(제주다팜)",
+        f"제주다팜_아이티소프트_홍로사과발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+    )
+
+
 def process_outputs(
     delivery_file_bytes: bytes,
     toss_colrabi_entries: list[dict] | None = None,
@@ -784,5 +860,9 @@ def process_outputs(
     apple_result = process_apple(delivery_file_bytes)
     if apple_result and int((apple_result[2] or {}).get("total") or 0) > 0:
         results.append(apple_result)
+
+    hongro_result = process_hongro(delivery_file_bytes)
+    if hongro_result and int((hongro_result[2] or {}).get("total") or 0) > 0:
+        results.append(hongro_result)
 
     return results
