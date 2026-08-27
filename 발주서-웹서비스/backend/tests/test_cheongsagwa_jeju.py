@@ -61,11 +61,12 @@ def test_process_apple_outputs_jeju_order():
     assert products[1].startswith("청사과 대과")
 
 
-def test_apple_appears_in_process_outputs():
+def test_apple_no_longer_in_jejudapam_outputs():
+    """2026-08-27 제이비티 이관 — 제주다팜 발주서에는 더 이상 청사과가 없다."""
     data = _delivery([{"product": "청사과 아오리", "option": "1박스 중소과 4kg", "name": "박사과"}])
     results = kolrabi_order.process_outputs(data)
     labels = {st.get("product") for _, _, st in results}
-    assert "청사과(제주다팜)" in labels
+    assert "청사과(제주다팜)" not in labels
 
 
 def test_apple_tracking_semantic_key_matches_both_sides():
@@ -115,7 +116,7 @@ def test_baekdo_jeju_order_output_gated_by_season(monkeypatch):
     assert kolrabi_order.is_jeju_baekdo_order("햇 백도 딱딱이복숭아", "1박스 중과 2kg") is True
 
 
-# ── 마진방어(apple-jeju) 연동 ──
+# ── 마진방어(apple-jeju) — 2026-08-27 발주는 제이비티로 이관, 마진 소스 이관은 대기 ──
 def test_apple_margin_monitor_matches_order_mapping():
     """마진방어 옵션명 = 발주명(제주다팜 판매옵션)이어야 공급가가 붙는다."""
     from app import supplier_price_monitor as spm
@@ -127,9 +128,10 @@ def test_apple_margin_monitor_matches_order_mapping():
     assert [o.row for o in config.options] == [8, 9, 10, 11, 12, 13, 14, 15]
     for o in config.options:
         assert spm.option_supplier_name(o, config) == "제주다팜"
-        # 발주 변환 결과와 문자열이 정확히 같아야 함(공급가 매칭 키)
-        converted = kolrabi_order.convert_apple_option(o.coupang_product, o.coupang_option)
-        assert converted == o.supplier_option_name, (o.label, converted, o.supplier_option_name)
+        # 2026-08-27 발주가 제이비티로 이관돼 발주 라우팅 가드에서 제외된 상태
+        assert not o.coupang_product and not o.coupang_option
+    # 모니터 자체는 일시중지(제주다팜 옵션 0개) — 재개하려면 마진 소스를 제이비티로 옮겨야 한다
+    assert spm.is_supplier_monitor_paused("apple-jeju") is True
 
 
 def test_apple_template_rows_align_with_options():

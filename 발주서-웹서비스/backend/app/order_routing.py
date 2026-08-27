@@ -28,8 +28,7 @@ def resolve_order_supplier(product_name: object, option_text: object) -> str | N
         product_name, option_text
     ):
         return JEJUDAPAM
-    if kolrabi_order.convert_apple_option(product_name, option_text):
-        return JEJUDAPAM
+    # 청사과(아오리)는 2026-08-27 제주다팜 → 제이비티 이관
     if kolrabi_order.convert_hongro_option(product_name, option_text):
         return JEJUDAPAM
 

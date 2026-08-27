@@ -426,8 +426,71 @@ async def process_toss_watermelon_order(
     )
 
 
+# 청사과(아오리) — 2026-08-27 제주다팜 → 제이비티 발주 이관.
+# 제이비티 판매옵션(구글시트 실측): '청사과가정용A급({등급}){kg}kg({과수})'.
+# 쿠팡 등급(소과/중소과/대과) → 제이비티 등급(소과/중소과/중과) 매핑:
+#   제이비티엔 '대과'가 없고 가장 큰 등급이 '중과'라 대과 주문은 중과로 발주한다.
+_JBT_APPLE_OPTIONS = {
+    ("소과", "1"): "청사과가정용A급(소과)1kg(6-8과)",
+    ("소과", "1.5"): "청사과가정용A급(소과)1.5kg(10-12과)",
+    ("소과", "2"): "청사과가정용A급(소과)2kg(11-15과)",
+    ("소과", "3"): "청사과가정용A급(소과)3kg(17-21과)",
+    ("소과", "4"): "청사과가정용A급(소과)4kg(23-28과)",
+    ("소과", "5"): "청사과가정용A급(소과)5kg(28-33과)",
+    ("중소과", "1"): "청사과가정용A급(중소과)1kg(5-6과)",
+    ("중소과", "1.5"): "청사과가정용A급(중소과)1.5kg(8-9과)",
+    ("중소과", "2"): "청사과가정용A급(중소과)2kg(9-10과)",
+    ("중소과", "3"): "청사과가정용A급(중소과)3kg(14-16과)",
+    ("중소과", "4"): "청사과가정용A급(중소과)4kg(19-22과)",
+    ("중소과", "5"): "청사과가정용A급(중소과)5kg(23-28과)",
+    ("중과", "1.5"): "청사과가정용A급(중과)1.5kg(6-7과)",
+    ("중과", "2"): "청사과가정용A급(중과)2kg(7-8과)",
+    ("중과", "3"): "청사과가정용A급(중과)3kg(11-13과)",
+    ("중과", "4"): "청사과가정용A급(중과)4kg(15-18과)",
+    ("중과", "5"): "청사과가정용A급(중과)5kg(18-22과)",
+}
+# 등급 판정 순서: '중소과'가 '소과'를 포함하므로 긴 것 먼저. 쿠팡 '대과' → 제이비티 '중과'.
+_JBT_APPLE_GRADES = (("중소과", "중소과"), ("소과", "소과"), ("대과", "중과"), ("중과", "중과"))
+
+
+def is_jbt_apple_order(product_name: object = "", option_text: object = "") -> bool:
+    """청사과(아오리) 제이비티 발주 여부. 홍로사과(가을햇사과)와는 배타."""
+    text = re.sub(r"\s+", "", f"{product_name or ''} {option_text or ''}")
+    if "홍로" in text or "홍사과" in text or "가을햇사과" in text:
+        return False
+    return "청사과" in text or "아오리" in text
+
+
+def _jbt_apple_name_from_text(text: str) -> str | None:
+    """등급·kg가 든 텍스트(쿠팡 옵션 등) → 제이비티 청사과 발주명."""
+    compact = re.sub(r"\s+", "", text or "")
+    grade = next((jbt for cou, jbt in _JBT_APPLE_GRADES if cou in compact), "")
+    m = re.search(r"(\d+(?:\.\d+)?)kg", compact, re.IGNORECASE)
+    if not m or not grade:
+        return None
+    kg = m.group(1)
+    try:
+        f = float(kg)
+        kg = str(int(f)) if f.is_integer() else str(f)
+    except ValueError:
+        pass
+    return _JBT_APPLE_OPTIONS.get((grade, kg))
+
+
+def jbt_apple_option(product_name: object = "", option_text: object = "") -> str | None:
+    """청사과 DeliveryList → 제이비티 발주명. 취급하지 않는 조합이면 None."""
+    if not is_jbt_apple_order(product_name, option_text):
+        return None
+    return _jbt_apple_name_from_text(f"{product_name or ''} {option_text or ''}")
+
+
 def transform_product(option_text: str, product_type: str = "") -> str:
     text = normalize(option_text)
+
+    if product_type == "청사과":
+        # 발주서 행 생성은 옵션(L열)만 넘어오므로 옵션에서 등급·kg를 읽어 발주명을 만든다.
+        # 제이비티 청사과는 판매옵션명 자체가 발주명이라 _vip 접미사를 붙이지 않는다.
+        return _jbt_apple_name_from_text(text) or text
 
     if product_type == "옥수수":
         grade = "중품" if "중품" in text else "특품" if "특품" in text else ""
@@ -526,6 +589,7 @@ def build_main_order_workbook(
     has_watermelon: bool,
     has_corn: bool = False,
     has_peach: bool = False,
+    has_apple: bool = False,
 ) -> tuple[bytes, str, dict]:
     wb = Workbook()
     ws = wb.active
@@ -609,6 +673,8 @@ def build_main_order_workbook(
             product_label = "초당옥수수"
         elif product_type == "복숭아":
             product_label = "신비복숭아"
+        elif product_type == "청사과":
+            product_label = "청사과"
         else:
             product_label = "제이비티"
 
@@ -668,9 +734,11 @@ def build_main_order_workbook(
         parts.append("초당옥수수")
     if has_peach:
         parts.append("신비복숭아")
+    if has_apple:
+        parts.append("청사과")
     product_label = "_".join(parts) if parts else "발주"
     # 신비복숭아 3·4kg(제이비티) 발주가 포함되면 파일명 맨 앞에 '제이비_' 접두
-    prefix = "제이비_" if has_peach else ""
+    prefix = "제이비_" if (has_peach or has_apple) else ""
     filename = f"{prefix}아이티소프트_{product_label}({now.strftime('%Y%m%d')}).xlsx"
     stats = {
         "total": max(out_row - 1, 0),  # 헤더 제외 실제 발주 행 수(수량1 분할 반영)
@@ -699,6 +767,7 @@ def process_outputs(
     has_watermelon = False
     has_corn = False
     has_peach = False
+    has_apple = False
 
     for row in dl_ws.iter_rows(min_row=2):
         product_name = normalize(row[10].value) if len(row) > 10 else ""
@@ -712,6 +781,11 @@ def process_outputs(
             has_ddureup = True
             filtered_rows.append((row, "땅두릅"))
         # ※ 수박(6/7/8kg)은 쥬얼리팜(myeongi), 초당옥수수는 제주다팜(kolrabi_order)으로 발주 이관 — 제이비티 제외
+        elif is_jbt_apple_order(product_name, option):
+            # 청사과(아오리) — 2026-08-27 제주다팜 → 제이비티 이관
+            if jbt_apple_option(product_name, option):
+                has_apple = True
+                filtered_rows.append((row, "청사과"))
         elif is_jbt_shinbi_peach(product_name, option):
             # 신비복숭아 3·4kg만 제이비티(중소과). 1·2kg은 쥬얼리프룻, 800g은 제외.
             # 백도딱딱이·거반도·대극천은 kg 무관 쥬얼리 → 여기서 걸리면 안 됨.
@@ -737,6 +811,7 @@ def process_outputs(
                 has_watermelon=has_watermelon,
                 has_corn=has_corn,
                 has_peach=has_peach,
+                has_apple=has_apple,
             )
         )
 

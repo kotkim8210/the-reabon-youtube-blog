@@ -59,6 +59,12 @@ def is_mixed_chamoe_row(product_name: str, option_text: str) -> bool:
 
 
 def product_type_for(product_name: str) -> str:
+    # 청사과(아오리)는 2026-08-27 제주다팜 → 제이비티 이관. 홍로(가을햇사과)는 제주다팜 유지.
+    _compact = re.sub(r"\s+", "", product_name or "")
+    if ("청사과" in _compact or "아오리" in _compact) and not any(
+        k in _compact for k in ("홍로", "홍사과", "가을햇사과")
+    ):
+        return "청사과"
     if "토마토" in product_name:
         return "토마토"
     if "참외" in product_name:
@@ -91,6 +97,9 @@ def is_jbt_tracking_target(product_name: str, option_text: str) -> bool:
     product_type = product_type_for(product_name)
     if product_type in {"토마토", "땅두릅"}:
         return True
+    if product_type == "청사과":
+        from app.processors.tomato_order import jbt_apple_option
+        return bool(jbt_apple_option(product_name, option_text))
     # 신비복숭아는 3·4kg만 제이비티 (1·2kg은 쥬얼리, 800g은 제외)
     if product_type == "복숭아":
         from app.processors.tomato_order import peach_kg, JBT_PEACH_KGS

@@ -857,9 +857,8 @@ def process_outputs(
         if baekdo_result and int((baekdo_result[2] or {}).get("total") or 0) > 0:
             results.append(baekdo_result)
 
-    apple_result = process_apple(delivery_file_bytes)
-    if apple_result and int((apple_result[2] or {}).get("total") or 0) > 0:
-        results.append(apple_result)
+    # 청사과(아오리)는 2026-08-27 제이비티로 발주 이관 — 제주다팜 발주서에서 제외.
+    # (process_apple/convert_apple_option 함수는 이력·이벤트 참조용으로 남겨둔다)
 
     hongro_result = process_hongro(delivery_file_bytes)
     if hongro_result and int((hongro_result[2] or {}).get("total") or 0) > 0:
