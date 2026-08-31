@@ -74,6 +74,10 @@ def event_product_name(prize: str) -> str:
     if baekdo:
         return baekdo
 
+    jbt = _jbt_event_product(text)
+    if jbt:
+        return jbt
+
     jejudapam = _jejudapam_event_product(text)
     if jejudapam:
         return jejudapam
@@ -82,11 +86,24 @@ def event_product_name(prize: str) -> str:
     return _norm(text)
 
 
-def event_supplier(prize: str) -> str:
-    """이벤트 당첨자 발주처 — 2026-08-17부터 **경품 종류와 무관하게 전량 제주다팜**.
+def _jbt_event_product(prize: str) -> str | None:
+    """제이비티 발주 품목(청사과/아오리) 경품이면 제이비티 판매옵션명. 아니면 None.
 
-    (사용자 요청: 라이브 이벤트 당첨자는 어떤 옵션이든 제주다팜 발주서로 나가야 한다)
+    청사과는 2026-08-27 제주다팜 → 제이비티 이관 — 당첨자 발주도 제이비티 양식으로 나간다.
     """
+    from app.processors.tomato_order import jbt_apple_option
+
+    return jbt_apple_option(str(prize or ""), "")
+
+
+def event_supplier(prize: str) -> str:
+    """이벤트 당첨자 발주처.
+
+    기본은 제주다팜이지만, **발주처가 제이비티인 품목(청사과/아오리)은 제이비티**로 보낸다
+    (2026-08-31 — 발주처 이관을 이벤트 경로도 따라가야 엉뚱한 거래처로 발주된다).
+    """
+    if _jbt_event_product(prize):
+        return "jbt"
     return "jejudapam"
 
 
@@ -97,13 +114,14 @@ def _jejudapam_event_product(prize: str) -> str | None:
     (미니밤호박·청사과(아오리)·홍감자·콜라비 …)
     """
     from app.processors.kolrabi_order import (
-        convert_apple_option,
         convert_bamhobak_option,
+        convert_hongro_option,
         convert_potato_option,
     )
 
+    # 청사과(아오리)는 제이비티 이관 → _jbt_event_product가 먼저 처리한다.
     text = str(prize or "")
-    for converter in (convert_bamhobak_option, convert_apple_option, convert_potato_option):
+    for converter in (convert_bamhobak_option, convert_hongro_option, convert_potato_option):
         converted = converter(text, "")
         if converted:
             return converted
@@ -178,7 +196,7 @@ def parse_winners(csv_bytes: bytes) -> list[dict]:
             "option": product,
             "qty": "1",
             "memo": "문 앞",
-            "order_id": _norm(cell(row, c_order)),
+            "order_id": _order_id_text(cell(row, c_order)),
             "supplier": event_supplier(prize),
         })
 
@@ -232,11 +250,42 @@ def _empty_delivery_bytes() -> bytes:
     return buf.getvalue()
 
 
-def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
-    """당첨자 CSV → 제주다팜 발주서 1개.
+def _order_id_text(value: object) -> str:
+    """주문 아이디 정규화.
 
-    2026-08-17부터 이벤트 당첨자는 경품 종류와 무관하게 전량 제주다팜 발주다.
-    (종전엔 쥬얼리/제주다팜을 나눠 최대 2개 파일을 냈다)
+    라이브 당첨자 CSV를 엑셀로 열었다 저장하면 주문번호가 '3.10263E+12'처럼
+    지수표기로 손상된다(유효숫자 소실 → 복원 불가). 그런 값은 발주서에 넣지 않고
+    비워서 잘못된 주문번호가 거래처로 나가는 것을 막는다.
+    """
+    text = _norm(value)
+    if not text:
+        return ""
+    if re.fullmatch(r"\d+(?:\.\d+)?[eE]\+?\d+", text):
+        return ""
+    return text
+
+
+def _build_jbt_event_workbook(entries: list[dict], today: str) -> tuple[bytes, str, dict]:
+    """제이비티 발주 대상 당첨자 → 제이비티 발주서 양식."""
+    from app.processors.tomato_order import _virtual_toss_row, build_main_order_workbook
+
+    rows = [(_virtual_toss_row(entry), "청사과") for entry in entries]
+    output_bytes, _filename, stats = build_main_order_workbook(
+        filtered_rows=rows,
+        has_tomato=False,
+        has_chamoe=False,
+        has_ddureup=False,
+        has_watermelon=False,
+        has_apple=True,
+    )
+    return output_bytes, f"이벤트당첨_제이비티_청사과_발주({today}).xlsx", stats
+
+
+def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
+    """당첨자 CSV → 발주처별 발주서.
+
+    경품의 실제 발주처를 따라간다(2026-08-31): 청사과(아오리)는 **제이비티 양식**,
+    그 밖의 경품은 제주다팜 양식. 두 발주처가 섞이면 파일이 2개 나온다.
     이름·주소가 비어 발주할 수 없는 당첨자는 stats['needs_check']로 화면에 표시한다.
     """
     from app.processors.kolrabi_order import _build_jejudapam_order
@@ -252,32 +301,49 @@ def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
         raise ValueError("발주할 이벤트 당첨자가 없습니다. (환불/취소 건만 있거나 빈 파일)")
 
     today = datetime.now(KST).strftime("%Y%m%d")
-    products = [e.get("product", "") for e in entries]
-    labels = _labels_for(products)
-    if not labels:
-        # 라벨을 못 뽑는 신규 경품은 품목명 앞부분을 파일명에 쓴다(파일명 불가 문자 제거)
-        raw = _norm(products[0]) if products else "발주"
-        labels = ["".join(ch for ch in raw if ch not in '\\/:*?"<>|')[:20].strip() or "발주"]
-    label = "_".join(labels)
+    jbt_entries = [e for e in entries if e.get("supplier") == "jbt"]
+    jeju_entries = [e for e in entries if e.get("supplier") != "jbt"]
+    results: list[tuple[bytes, str, dict]] = []
 
-    result = _build_jejudapam_order(
-        _empty_delivery_bytes(),
-        lambda *_args: None,      # DeliveryList는 비어 있고 당첨자는 toss_entries로 넣는다
-        f"이벤트 {'·'.join(labels)}(제주다팜)",
-        f"이벤트당첨_제주다팜_{label}_발주({today}).xlsx",
-        entries,
-    )
-    if not result:
+    if jeju_entries:
+        products = [e.get("product", "") for e in jeju_entries]
+        labels = _labels_for(products)
+        if not labels:
+            raw = _norm(products[0]) if products else "발주"
+            labels = ["".join(ch for ch in raw if ch not in '\\/:*?"<>|')[:20].strip() or "발주"]
+        label = "_".join(labels)
+        result = _build_jejudapam_order(
+            _empty_delivery_bytes(),
+            lambda *_args: None,   # DeliveryList는 비어 있고 당첨자는 toss_entries로 넣는다
+            f"이벤트 {'·'.join(labels)}(제주다팜)",
+            f"이벤트당첨_제주다팜_{label}_발주({today}).xlsx",
+            jeju_entries,
+        )
+        if result:
+            output_bytes, filename, stats = result
+            results.append((output_bytes, filename, {
+                **stats,
+                "supplier": "제주다팜",
+                "winners": len(jeju_entries),
+            }))
+
+    if jbt_entries:
+        output_bytes, filename, stats = _build_jbt_event_workbook(jbt_entries, today)
+        results.append((output_bytes, filename, {
+            **stats,
+            "supplier": "제이비티",
+            "product": "이벤트 청사과(제이비티)",
+            "winners": len(jbt_entries),
+        }))
+
+    if not results:
         raise ValueError("발주할 이벤트 당첨자가 없습니다.")
 
-    output_bytes, filename, stats = result
-    stats = {
-        **stats,
-        "supplier": "제주다팜",
-        "winners": len(entries),
-        "skipped_refund": skipped_refund,
-    }
+    # 환불 제외·확인필요는 첫 파일 통계에 싣는다(화면에 한 번만 보이게)
+    first_stats = results[0][2]
+    first_stats["skipped_refund"] = skipped_refund
     if incomplete:
-        # 주소/이름이 비어 발주 못 한 당첨자 — 취소 여부 등 확인 필요
-        stats["needs_check"] = f"{len(incomplete)}건 발주 제외(개인정보 미기재): " + " / ".join(incomplete)
-    return [(output_bytes, filename, stats)]
+        first_stats["needs_check"] = (
+            f"{len(incomplete)}건 발주 제외(개인정보 미기재): " + " / ".join(incomplete)
+        )
+    return results

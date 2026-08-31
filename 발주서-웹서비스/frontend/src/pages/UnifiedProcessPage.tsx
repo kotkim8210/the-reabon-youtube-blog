@@ -223,6 +223,15 @@ const productConfigs: Record<string, ProductConfig> = {
       ],
       buttonLabel: '운송장 입력',
     },
+    event: {
+      title: '라이브 이벤트 당첨자 발주서 생성 (청사과 → 제이비티 발주서)',
+      icon: '🎉',
+      apiToolId: 'event-winner-order',
+      files: [
+        { key: 'winners', label: '라이브 이벤트 당첨자 CSV (winners_raw)', accept: '.csv', acceptLabel: '.csv 파일' },
+      ],
+      buttonLabel: '이벤트 발주서 생성',
+    },
   },
 };
 

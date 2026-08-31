@@ -22,17 +22,21 @@ def _row(prize: str, name: str, *, address: str = "서울시 강남구 테스트
     return [prize, "닉", "Y", name, "010-1111-2222", address, order_id, "10000", "", ""]
 
 
-def test_all_prizes_go_to_jejudapam():
-    for prize in ("백도 딱딱이복숭아 대과 2kg", "미니밤호박1kg", "아오리사과  소과 (2kg)", "성주참외 3kg"):
+def test_prizes_follow_actual_supplier():
+    """경품의 실제 발주처를 따른다 — 청사과(아오리)만 제이비티, 나머지는 제주다팜."""
+    for prize in ("백도 딱딱이복숭아 대과 2kg", "미니밤호박1kg", "성주참외 3kg"):
         assert event_order.event_supplier(prize) == "jejudapam", prize
+    # 청사과는 2026-08-27 제이비티 이관 → 당첨자 발주도 제이비티
+    assert event_order.event_supplier("아오리사과  소과 (2kg)") == "jbt"
 
 
 def test_product_name_uses_jejudapam_option_names():
     # 미니밤호박·청사과는 제주다팜 판매옵션명으로 변환
     assert event_order.event_product_name("미니밤호박1kg") == "제주 미니밤호박 보우짱 로얄과 1kg"
+    # 청사과는 제이비티 판매옵션명으로 변환된다(발주처 이관 반영)
     assert (
         event_order.event_product_name("아오리사과  소과 (2kg)")
-        == "청사과 소과(가정용) 포장재포함 2kg(10-13과내외)"
+        == "청사과가정용A급(소과)2kg(11-15과)"
     )
     # 백도는 1kg 경품도 최소 규격 2kg로 승급
     assert event_order.event_product_name(" 백도복숭아  중과 (1kg)") == "딱딱이 복숭아 중과 2kg"
@@ -45,22 +49,23 @@ def test_unknown_prize_keeps_original_option():
     assert "참외" not in event_order.event_product_name("미니밤호박1kg")
 
 
-def test_process_outputs_single_jejudapam_file():
+def test_process_outputs_split_by_supplier():
+    """제주다팜 경품 + 제이비티(청사과) 경품이 섞이면 발주서 2개."""
     results = event_order.process(_csv([
         _row("미니밤호박1kg", "순유선", order_id="12102324980320"),
         _row("아오리사과  소과 (2kg)", "심규정", order_id="5102305763420"),
     ]))
-    assert len(results) == 1
-    output, filename, stats = results[0]
-    assert stats["supplier"] == "제주다팜"
-    assert stats["total"] == 2 and stats["winners"] == 2
-    assert "제주다팜" in filename
-    ws = load_workbook(BytesIO(output)).active
-    rows = [(ws.cell(r, 2).value, ws.cell(r, 8).value) for r in range(2, 4)]
-    assert rows == [
-        ("순유선", "제주 미니밤호박 보우짱 로얄과 1kg"),
-        ("심규정", "청사과 소과(가정용) 포장재포함 2kg(10-13과내외)"),
-    ]
+    assert len(results) == 2
+    by_supplier = {st["supplier"]: (b, f, st) for b, f, st in results}
+    assert set(by_supplier) == {"제주다팜", "제이비티"}
+
+    jeju_bytes = by_supplier["제주다팜"][0]
+    ws = load_workbook(BytesIO(jeju_bytes)).active
+    assert (ws.cell(2, 2).value, ws.cell(2, 8).value) == ("순유선", "제주 미니밤호박 보우짱 로얄과 1kg")
+
+    jbt_bytes = by_supplier["제이비티"][0]
+    ws2 = load_workbook(BytesIO(jbt_bytes)).active
+    assert (ws2.cell(2, 2).value, ws2.cell(2, 5).value) == ("심규정", "청사과가정용A급(소과)2kg(11-15과)")
 
 
 def test_missing_address_is_reported_not_silently_dropped():
