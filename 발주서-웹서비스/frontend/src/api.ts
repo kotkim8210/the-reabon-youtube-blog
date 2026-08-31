@@ -399,6 +399,7 @@ export async function processFile(
     alwayz: 'alwayz_file',
     toss: 'toss_file',
     temu: 'temu_file',
+    gmarket: 'gmarket_file',
     toss_export: 'toss_export_file',
     winners: 'winners_file',
     tracking: 'tracking_file',
