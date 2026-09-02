@@ -269,6 +269,19 @@ const toolConfigs: Record<string, ToolConfig> = {
       badge: 'bg-amber-100 text-amber-700',
     },
   },
+  'biseller-order': {
+    title: '비셀러 LA한입갈비 발주서 생성',
+    description:
+      '쿠팡 DeliveryList에서 한입 LA갈비 주문을 추출해 비셀러 발주 양식으로 만듭니다. 옵션 800g N개 → 비셀러 상품명 800G*N세트로 변환합니다.',
+    icon: '🥩',
+    files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
+    color: 'red',
+    colorClasses: {
+      bg: 'bg-red-50',
+      text: 'text-red-700',
+      badge: 'bg-red-100 text-red-700',
+    },
+  },
   'gaegeolmu-order': {
     title: '게걸무씨앗기름 발주서 생성',
     description:
@@ -527,12 +540,16 @@ function ProcessPage() {
   };
 
   const formatStats = (stats: Record<string, unknown>): string[] => {
+    const statLabels: Record<string, string> = {
+      needs_check: '⚠️ 확인 필요(발주서에 못 넣음)',
+    };
     const lines: string[] = [];
     for (const [key, value] of Object.entries(stats)) {
+      const label = statLabels[key] || key;
       if (typeof value === 'number') {
-        lines.push(`${key}: ${value}건`);
+        lines.push(`${label}: ${value}건`);
       } else {
-        lines.push(`${key}: ${value}`);
+        lines.push(`${label}: ${value}`);
       }
     }
     return lines;
