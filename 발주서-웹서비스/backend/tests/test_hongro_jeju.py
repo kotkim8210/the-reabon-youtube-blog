@@ -107,3 +107,40 @@ def test_margin_template_rows_align():
     # 공급가(I열)는 실측값이 채워져 있어야 첫 실행부터 비교가 된다
     assert all(isinstance(ws.cell(r, 9).value, (int, float)) for r in range(8, 28))
     assert ws.cell(8, 9).value == 6300 and ws.cell(27, 9).value == 17500
+
+
+def test_unmatched_hongro_option_is_reported():
+    """거래처 판매옵션에 없는 등급·kg 주문이 조용히 사라지면 안 된다.
+
+    2026-09 라이브 대비: 쿠팡에 새 옵션(예: '중과')을 열면 발주명 변환이 실패하는데,
+    종전엔 그 행이 아무 표시 없이 발주서에서 빠졌다.
+    """
+    payload = _delivery([
+        {"product": COUPANG_PRODUCT, "option": "1박스 소과 3kg(17-20과내외)", "name": "정상건"},
+        {"product": COUPANG_PRODUCT, "option": "1박스 중과 3kg", "name": "미등록옵션"},
+    ])
+    _out, _fn, stats = kolrabi_order.process_hongro(payload)
+    assert stats["total"] == 1
+    needs = stats.get("needs_check") or []
+    assert len(needs) == 1 and "미등록옵션" in needs[0] and "중과" in needs[0]
+
+
+def test_unmatched_only_still_surfaces_in_outputs():
+    """미매칭만 있고 발주 건이 0이어도 결과에 실려 사용자에게 보여야 한다."""
+    payload = _delivery([
+        {"product": COUPANG_PRODUCT, "option": "1박스 중과 3kg", "name": "미등록옵션"},
+    ])
+    results = kolrabi_order.process_outputs(payload)
+    hongro = [r for r in results if "홍로" in r[1]]
+    assert len(hongro) == 1
+    assert hongro[0][2]["total"] == 0
+    assert hongro[0][2]["needs_check"]
+
+
+def test_matched_orders_have_no_needs_check():
+    payload = _delivery([
+        {"product": COUPANG_PRODUCT, "option": "1박스 대과 3kg(10과내외)", "name": "정상건"},
+    ])
+    _out, _fn, stats = kolrabi_order.process_hongro(payload)
+    assert stats["total"] == 1
+    assert "needs_check" not in stats

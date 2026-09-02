@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
@@ -6,6 +7,8 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
+
+logger = logging.getLogger(__name__)
 
 
 KST = timezone(timedelta(hours=9))
@@ -601,24 +604,36 @@ def _build_jejudapam_order(
     product_label: str,
     filename: str,
     toss_entries: list[dict] | None = None,
+    matcher=None,
 ) -> tuple[bytes, str, dict] | None:
     """제주다팜 단일품목 발주서 생성 코어 (홍감자·백도 공용).
 
     converter(product_name, option)이 발주명을 돌려주면(None이면 제외) 콜라비_제주다팜_원본
     템플릿에 채운다. toss_entries는 product 확정 상태로 행 추가.
+
+    matcher(product_name, option): 이 상품인지 판정. 주면 '이 상품인데 옵션 변환 실패'인 행을
+    stats['needs_check']에 담아 알린다(거래처 판매옵션에 없는 등급·kg가 새로 팔릴 때 주문이
+    발주서에서 조용히 사라지는 것을 막는다).
     """
     dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes), data_only=True)
     dl_ws = dl_wb.active
 
     filtered_rows: list[tuple] = []
+    unmatched: list[str] = []
     for row in dl_ws.iter_rows(min_row=2):
         product_name = normalize(row[10].value) if len(row) > 10 else ""
         option = normalize(row[11].value) if len(row) > 11 else ""
         converted = converter(product_name, option)
         if converted:
             filtered_rows.append((row, converted))
+        elif matcher and matcher(product_name, option):
+            recipient = normalize(row[26].value) if len(row) > 26 else ""
+            unmatched.append(f"{recipient or '이름없음'}({option or product_name}) — 거래처 판매옵션에 없음")
 
-    if not filtered_rows and not toss_entries:
+    if unmatched:
+        logger.warning("%s 발주 미매칭 %d건: %s", product_label, len(unmatched), "; ".join(unmatched))
+
+    if not filtered_rows and not toss_entries and not unmatched:
         return None
 
     template_path = TEMPLATE_DIR / "콜라비_제주다팜_원본.xlsx"
@@ -753,6 +768,8 @@ def _build_jejudapam_order(
         "product": product_label,
         "options": list(option_totals.values()),
     }
+    if unmatched:
+        stats["needs_check"] = unmatched
     return output.read(), filename, stats
 
 
@@ -768,6 +785,7 @@ def process_potato(
         "홍감자(제주다팜)",
         f"제주다팜_아이티소프트_홍감자발주({now.strftime('%Y%m%d')}).xlsx",
         toss_entries,
+        matcher=is_jeju_potato_order,
     )
 
 
@@ -783,6 +801,7 @@ def process_baekdo(
         "백도딱딱이복숭아(제주다팜)",
         f"제주다팜_아이티소프트_백도딱딱이복숭아발주({now.strftime('%Y%m%d')}).xlsx",
         toss_entries,
+        matcher=is_jeju_baekdo_order,
     )
 
 
@@ -798,6 +817,7 @@ def process_apple(
         "청사과(제주다팜)",
         f"제주다팜_아이티소프트_청사과발주({now.strftime('%Y%m%d')}).xlsx",
         toss_entries,
+        matcher=is_jeju_apple_order,
     )
 
 
@@ -813,7 +833,14 @@ def process_hongro(
         "홍로사과(제주다팜)",
         f"제주다팜_아이티소프트_홍로사과발주({now.strftime('%Y%m%d')}).xlsx",
         toss_entries,
+        matcher=is_jeju_hongro_order,
     )
+
+
+def _has_content(stats: dict | None) -> bool:
+    """발주 건이 있거나, 확인이 필요한 미매칭 건이 있으면 결과로 내보낸다."""
+    stats = stats or {}
+    return int(stats.get("total") or 0) > 0 or bool(stats.get("needs_check"))
 
 
 def process_outputs(
@@ -843,25 +870,25 @@ def process_outputs(
     # 초당옥수수는 2026-06부터 쥬얼리프룻(myeongi) 발주로 이관 — 여기서 출력하지 않는다.
 
     bamhobak_result = process_bamhobak(delivery_file_bytes, toss_entries=toss_bamhobak_entries)
-    if bamhobak_result and int((bamhobak_result[2] or {}).get("total") or 0) > 0:
+    if bamhobak_result and _has_content(bamhobak_result[2]):
         results.append(bamhobak_result)
 
     potato_result = process_potato(delivery_file_bytes, toss_entries=toss_potato_entries)
-    if potato_result and int((potato_result[2] or {}).get("total") or 0) > 0:
+    if potato_result and _has_content(potato_result[2]):
         results.append(potato_result)
 
     # 백도 제주다팜 발주는 2026-08-10을 마지막으로 시즌아웃 → 이후엔 발주서 미출력
     # (송장입력·이벤트·마진방어(pause)와 무관하게 발주 출력만 차단).
     if _baekdo_jeju_season_open():
         baekdo_result = process_baekdo(delivery_file_bytes, toss_entries=toss_baekdo_entries)
-        if baekdo_result and int((baekdo_result[2] or {}).get("total") or 0) > 0:
+        if baekdo_result and _has_content(baekdo_result[2]):
             results.append(baekdo_result)
 
     # 청사과(아오리)는 2026-08-27 제이비티로 발주 이관 — 제주다팜 발주서에서 제외.
     # (process_apple/convert_apple_option 함수는 이력·이벤트 참조용으로 남겨둔다)
 
     hongro_result = process_hongro(delivery_file_bytes)
-    if hongro_result and int((hongro_result[2] or {}).get("total") or 0) > 0:
+    if hongro_result and _has_content(hongro_result[2]):
         results.append(hongro_result)
 
     return results

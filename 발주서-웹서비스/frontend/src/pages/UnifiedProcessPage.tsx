@@ -240,6 +240,7 @@ function formatStats(stats: Record<string, unknown>): string[] {
   const labels: Record<string, string> = {
     duplicate_skipped: '이전 발주분 제외',
     duplicate_skipped_names: '제외된 주문(받는분)',
+    needs_check: '⚠️ 확인 필요(발주서에 못 넣음)',
   };
   return Object.entries(stats).map(([key, value]) =>
     typeof value === 'number' ? `${labels[key] || key}: ${value}건` : `${labels[key] || key}: ${value}`
