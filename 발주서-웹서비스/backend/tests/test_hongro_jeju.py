@@ -112,23 +112,23 @@ def test_margin_template_rows_align():
 def test_unmatched_hongro_option_is_reported():
     """거래처 판매옵션에 없는 등급·kg 주문이 조용히 사라지면 안 된다.
 
-    2026-09 라이브 대비: 쿠팡에 새 옵션(예: '중과')을 열면 발주명 변환이 실패하는데,
-    종전엔 그 행이 아무 표시 없이 발주서에서 빠졌다.
+    2026-09 라이브 대비: 거래처에 없는 중량·등급 옵션을 쿠팡에 열면 발주명 변환이
+    실패하는데, 종전엔 그 행이 아무 표시 없이 발주서에서 빠졌다.
     """
     payload = _delivery([
         {"product": COUPANG_PRODUCT, "option": "1박스 소과 3kg(17-20과내외)", "name": "정상건"},
-        {"product": COUPANG_PRODUCT, "option": "1박스 중과 3kg", "name": "미등록옵션"},
+        {"product": COUPANG_PRODUCT, "option": "1박스 소과 10kg", "name": "미등록옵션"},
     ])
     _out, _fn, stats = kolrabi_order.process_hongro(payload)
     assert stats["total"] == 1
     needs = stats.get("needs_check") or []
-    assert len(needs) == 1 and "미등록옵션" in needs[0] and "중과" in needs[0]
+    assert len(needs) == 1 and "미등록옵션" in needs[0] and "10kg" in needs[0]
 
 
 def test_unmatched_only_still_surfaces_in_outputs():
     """미매칭만 있고 발주 건이 0이어도 결과에 실려 사용자에게 보여야 한다."""
     payload = _delivery([
-        {"product": COUPANG_PRODUCT, "option": "1박스 중과 3kg", "name": "미등록옵션"},
+        {"product": COUPANG_PRODUCT, "option": "1박스 소과 10kg", "name": "미등록옵션"},
     ])
     results = kolrabi_order.process_outputs(payload)
     hongro = [r for r in results if "홍로" in r[1]]
@@ -140,6 +140,39 @@ def test_unmatched_only_still_surfaces_in_outputs():
 def test_matched_orders_have_no_needs_check():
     payload = _delivery([
         {"product": COUPANG_PRODUCT, "option": "1박스 대과 3kg(10과내외)", "name": "정상건"},
+    ])
+    _out, _fn, stats = kolrabi_order.process_hongro(payload)
+    assert stats["total"] == 1
+    assert "needs_check" not in stats
+
+
+def test_coupang_junggwa_maps_to_jeju_jungdaegwa():
+    """쿠팡 '중과' = 제주다팜 '중대과'(2026-09-02 사용자 확인). 과수 표기도 11-12과내외로 동일."""
+    assert (
+        kolrabi_order.convert_hongro_option(COUPANG_PRODUCT, "중과 3kg(11-12과내외) 1박스")
+        == "가을햇사과(홍사과) 가정용 중대과 포장재포함 3kg(11-12과내외)"
+    )
+    # 다른 중량도 같은 규칙
+    assert "중대과" in kolrabi_order.convert_hongro_option(COUPANG_PRODUCT, "1박스 중과 2kg")
+    assert "중대과" in kolrabi_order.convert_hongro_option(COUPANG_PRODUCT, "1박스 중과 5kg")
+    # 중소과·중대과 표기는 그대로 유지(중과 별칭에 잡아먹히면 안 됨)
+    assert "중소과" in kolrabi_order.convert_hongro_option(COUPANG_PRODUCT, "1박스 중소과 3kg")
+    assert "중대과" in kolrabi_order.convert_hongro_option(COUPANG_PRODUCT, "1박스 중대과 3kg")
+    # 소과·대과가 중과 별칭에 오염되지 않는다
+    assert "가정용 소과" in kolrabi_order.convert_hongro_option(COUPANG_PRODUCT, "1박스 소과 3kg")
+    assert "가정용 대과" in kolrabi_order.convert_hongro_option(COUPANG_PRODUCT, "1박스 대과 3kg")
+
+
+def test_junggwa_tracking_keys_match_between_coupang_and_jeju():
+    coupang = _semantic_option_keys(COUPANG_PRODUCT, "중과 3kg(11-12과내외) 1박스")
+    jeju = _semantic_option_keys("가을햇사과(홍사과) 가정용 중대과 포장재포함 3kg(11-12과내외)")
+    assert "hongro:중대과:3kg" in coupang
+    assert coupang & jeju
+
+
+def test_junggwa_no_longer_reported_as_unmatched():
+    payload = _delivery([
+        {"product": COUPANG_PRODUCT, "option": "중과 3kg(11-12과내외) 1박스", "name": "중과주문"},
     ])
     _out, _fn, stats = kolrabi_order.process_hongro(payload)
     assert stats["total"] == 1

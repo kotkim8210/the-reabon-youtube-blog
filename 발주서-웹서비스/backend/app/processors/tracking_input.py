@@ -82,7 +82,10 @@ def _semantic_option_keys(*values: object) -> set[str]:
         # 홍로사과: orderlist(발주명 '가을햇사과(홍사과) 가정용 {등급} 포장재포함 {kg}kg(...)')와
         # DeliveryList(쿠팡 '1박스 {등급} {kg}kg(...)')를 등급+kg 의미키로 묶는다.
         # 등급은 '중소과'·'중대과'가 '소과'·'대과'를 포함하므로 긴 것 먼저.
-        grade = next((g for g in ("중소과", "중대과", "소과", "대과") if g in text), "")
+        # 쿠팡 '중과' = 제주다팜 '중대과' → 같은 의미키로 묶어야 매칭된다.
+        from app.processors.kolrabi_order import _HONGRO_GRADE_ALIASES, _HONGRO_GRADES
+        grade = next((g for g in _HONGRO_GRADES if g in text), "")
+        grade = _HONGRO_GRADE_ALIASES.get(grade, grade)
         hongro_kgs = set(re.findall(r"(\d+(?:\.\d+)?)kg", text, flags=re.IGNORECASE))
         keys.update(f"hongro:{grade}:{w}kg" for w in hongro_kgs)
     if "청사과" in text or "아오리" in text:

@@ -222,7 +222,9 @@ _HONGRO_JEJU_OPTIONS = {
     ("대과", "5"): "가을햇사과(홍사과) 가정용 대과 포장재포함 5kg(16-18과)",
 }
 # 등급 판정 순서: '중소과'·'중대과'가 '소과'·'대과'를 포함하므로 긴 것 먼저.
-_HONGRO_GRADES = ("중소과", "중대과", "소과", "대과")
+# 쿠팡은 '중과'로 파는데 제주다팜 판매옵션은 '중대과'다(과수 표기 동일: 3kg=11-12과내외).
+_HONGRO_GRADES = ("중소과", "중대과", "중과", "소과", "대과")
+_HONGRO_GRADE_ALIASES = {"중과": "중대과"}
 
 
 def _fmt_kg_text(raw: str) -> str:
@@ -248,6 +250,7 @@ def convert_hongro_option(product_name: object, option_text: object) -> str | No
         return None
     text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
     grade = next((g for g in _HONGRO_GRADES if g in text), "")
+    grade = _HONGRO_GRADE_ALIASES.get(grade, grade)
     m = re.search(r"(\d+(?:\.\d+)?)kg", text, re.IGNORECASE)
     kg = _fmt_kg_text(m.group(1)) if m else ""
     if not grade or not kg:
