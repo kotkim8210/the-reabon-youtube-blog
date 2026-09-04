@@ -73,6 +73,7 @@ def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
     cols = detect_haedal_columns(ws)
 
     entries = []
+    missing: list[str] = []
     for row_idx in range(cols.start_row, ws.max_row + 1):
         name = normalize(ws.cell(row=row_idx, column=cols.name).value)
         phone = phone_digits(ws.cell(row=row_idx, column=cols.phone).value)
@@ -82,6 +83,8 @@ def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
             continue
 
         tracking = find_tracking_in_row(ws, row_idx, cols.tracking)
+        if not tracking:
+            missing.append(f"{row_idx}행 {name}")
         if tracking:
             skip_cols = tuple(
                 c for c in (cols.name, cols.phone, cols.address, cols.product, cols.tracking) if c
@@ -97,6 +100,15 @@ def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
                     "option_keys": option_key_set(product, transform_option(str(product or ""))),
                 }
             )
+
+    # 조용한 누락 금지: 수취인은 있는데 송장이 없는 행은 로그로 남긴다.
+    if missing:
+        logger.warning(
+            "해달 회신에 송장 없는 행 %s건 (송장열=%s): %s",
+            len(missing),
+            cols.tracking,
+            ", ".join(missing[:20]),
+        )
 
     return entries
 

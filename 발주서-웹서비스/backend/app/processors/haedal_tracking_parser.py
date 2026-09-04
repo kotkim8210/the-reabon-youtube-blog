@@ -58,6 +58,42 @@ def _tracking_number_candidate(value: object) -> str:
     return ""
 
 
+def _detect_tracking_column_by_data(
+    ws,
+    start_row: int,
+    skip_cols: tuple[int, ...] = (),
+    max_rows: int = 200,
+) -> int | None:
+    """데이터에서 송장 열을 찾는다 (열 단위 다수결).
+
+    헤더명이 틀린 회신 파일 — 해달이 한진양식 값을 한 칸씩 밀어 넣어
+    '지불조건'(P) 칸에 송장, '출고번호'(Q) 칸에 택배사를 적어 보낸 2026-09-04 사례 —
+    에서도 **모든 행이 같은 열**을 읽도록 파일 단위로 열을 하나 확정한다.
+    행마다 따로 스캔하면 어떤 행만 메모칸의 숫자를 집어 엉뚱한 송장이 등록될 수 있다.
+
+    후보는 `_tracking_number_candidate`(12자리, 0으로 시작하지 않음)만 인정해
+    안심번호(0502-…)·휴대폰(010-…)·우편번호 오탐을 배제한다.
+    """
+    end_row = min(getattr(ws, "max_row", 1), start_row + max_rows - 1)
+    if end_row < start_row:
+        return None
+
+    skip = set(skip_cols)
+    best_col: int | None = None
+    best_hits = 0
+    for col_idx in range(1, getattr(ws, "max_column", 1) + 1):
+        if col_idx in skip:
+            continue
+        hits = 0
+        for row_idx in range(start_row, end_row + 1):
+            if _tracking_number_candidate(ws.cell(row=row_idx, column=col_idx).value):
+                hits += 1
+        if hits > best_hits:
+            best_hits = hits
+            best_col = col_idx
+    return best_col if best_hits else None
+
+
 def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
     """Find important columns from Korean headers, with legacy defaults.
 
@@ -137,6 +173,25 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
                 if courier_like and not courier_col:
                     courier_col = tracking_col  # 그 칸이 사실상 택배사 열
                 tracking_col = None
+
+        if tracking_col is None:
+            # 헤더로 못 찾았거나(또는 찾은 칸이 송장이 아니었으면) 데이터로 열을 확정한다.
+            # 이름/전화/주소/상품/택배사 열은 후보에서 제외해 오탐을 줄인다.
+            tracking_col = _detect_tracking_column_by_data(
+                ws,
+                best_row + 1,
+                tuple(
+                    c
+                    for c in (
+                        best.get("name"),
+                        best.get("phone"),
+                        best.get("address"),
+                        best.get("product"),
+                        courier_col,
+                    )
+                    if c
+                ),
+            )
         return HaedalColumns(
             start_row=best_row + 1,
             name=best.get("name", 1),

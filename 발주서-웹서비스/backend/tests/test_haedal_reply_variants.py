@@ -42,7 +42,7 @@ def _hanjin_reply(rows: list[dict]) -> "Workbook":
         row[7] = "010-5700-7756"
         row[12] = 1
         row[13] = r.get("product", "꿀고구마 3Kg (중상)")
-        row[15] = "선불"
+        row[15] = r.get("col_p", "선불")   # 지불조건 칸
         row[16] = r.get("col_q", "")   # 출고번호 칸
         row[17] = r.get("col_r", "")   # 특기사항 칸
         row[18] = "문 앞"
@@ -64,7 +64,9 @@ def test_courier_in_tracking_column_falls_back_to_row_scan():
     ])
     ws = wb.active
     cols = detect_haedal_columns(ws)
-    assert cols.tracking is None            # 전 행 무효 → 열 감지 폐기
+    # 헤더('출고번호')로 잡은 열은 무효 → 폐기하고, 데이터로 실제 송장 열(R=18)을 확정한다.
+    # 행마다 따로 스캔하지 않고 파일 단위로 한 열을 쓰는 것이 핵심(행별 열 드리프트 차단).
+    assert cols.tracking == 18
     assert cols.courier == 17               # 그 칸은 택배사 열로 재해석
     assert find_tracking_in_row(ws, 2, cols.tracking) == "699444118913"
     assert find_courier_in_row(ws, 2, cols.courier) == "CJ대한통운"
@@ -80,6 +82,56 @@ def test_parse_haedal_file_end_to_end_with_shifted_columns():
         ("유빈", "699444118913", "CJGLS"),
         ("이응동", "699444119042", "CJGLS"),
     ]
+
+
+# ── 사고 3 (2026-09-04): 값이 한 칸씩 밀려 지불조건 칸=송장, 출고번호 칸=택배사 ──
+# 해달(알제이시스템즈) 한진양식 회신에서 P열('지불조건')에 12자리 송장,
+# Q열('출고번호')에 '한진'이 들어와 쿠팡·토스 양쪽 등록이 통째로 실패했다.
+def test_tracking_in_payment_column_and_courier_in_tracking_column():
+    wb = _hanjin_reply([
+        {"name": "이태화", "col_p": "463207503463", "col_q": "한진"},
+        {"name": "김성희", "col_p": "463207503474", "col_q": "한진"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 16              # P열(지불조건)이 실제 송장 열
+    assert cols.courier == 17               # Q열(출고번호)은 택배사 열로 재해석
+    assert find_tracking_in_row(ws, 2, cols.tracking) == "463207503463"
+    assert find_courier_in_row(ws, 2, cols.courier) == "한진"
+
+
+def test_parse_haedal_file_end_to_end_with_payment_column_tracking():
+    data = _bytes(_hanjin_reply([
+        {"name": "이태화", "col_p": "463207503463", "col_q": "한진"},
+        {"name": "신명희", "col_p": "463207503485", "col_q": "한진", "product": "꿀고구마 5Kg (중상)"},
+    ]))
+    entries = parse_haedal_file(data)
+    assert [(e["name"], e["tracking"], e["delivery_company_code"]) for e in entries] == [
+        ("이태화", "463207503463", "HANJIN"),
+        ("신명희", "463207503485", "HANJIN"),
+    ]
+
+
+def test_safe_number_column_never_wins_tracking_detection():
+    """안심번호(0502-…)도 12자리다. 송장 열이 따로 있으면 절대 그쪽을 잡으면 안 된다."""
+    wb = _hanjin_reply([
+        {"name": "이태화", "phone": "0502-1759-3645", "col_p": "463207503463", "col_q": "한진"},
+        {"name": "김성희", "phone": "0502-1698-7904", "col_p": "463207503474", "col_q": "한진"},
+    ])
+    cols = detect_haedal_columns(wb.active)
+    assert cols.tracking == 16              # B열(안심번호) 아님
+
+
+def test_row_without_tracking_is_skipped_not_guessed():
+    """송장 열이 확정된 뒤에는 빈 행을 다른 칸에서 추측해 채우지 않는다."""
+    wb = _hanjin_reply([
+        {"name": "이태화", "col_p": "463207503463", "col_q": "한진"},
+        {"name": "누락행", "col_p": "", "col_q": "한진", "col_r": "463207503999"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 16
+    assert find_tracking_in_row(ws, 3, cols.tracking) == ""
 
 
 # ── 회귀: 정상 회신(출고번호 칸에 송장)은 기존대로 그 열만 신뢰 ──
