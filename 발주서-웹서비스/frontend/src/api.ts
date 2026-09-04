@@ -159,6 +159,35 @@ export interface BlockedIP {
 export const fetchUsers = () => apiGet<{ users: UserInfo[] }>('/admin/users');
 export const createUser = (username: string, password: string = '12345') =>
   apiPost<{ status: string; user_id: number }>('/admin/users', { username, password });
+
+export interface CsRefundOrder {
+  order_code: string;
+  order_datetime: string;
+  product: string;
+  courier: string;
+  tracking: string;
+  orderer: string;
+  recipient: string;
+  recipient_phone: string;
+  address: string;
+  status: string;
+}
+export interface CsRefundResponse {
+  status: 'ok' | 'multiple' | 'empty' | 'error';
+  text?: string;
+  message?: string;
+  received_date?: string;
+  order?: CsRefundOrder;
+  candidates?: CsRefundOrder[];
+}
+export const generateCsRefundTemplate = (body: {
+  recipient: string;
+  note?: string;
+  received_date?: string;
+  order_code?: string;
+  days?: number;
+}) => apiPost<CsRefundResponse>('/cs-refund/generate', body);
+
 export async function toggleUserActive(userId: number): Promise<{ status: string; is_active: boolean }> {
   const res = await fetch(`${BASE_URL}/admin/users/${userId}/toggle`, {
     method: 'PATCH',
