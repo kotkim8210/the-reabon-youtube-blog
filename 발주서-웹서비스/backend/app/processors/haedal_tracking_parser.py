@@ -126,10 +126,11 @@ def _drop_tracking_column_if_no_tracking(
     courier_col: int | None,
     start_row: int,
 ) -> tuple[int | None, int | None]:
-    """송장 열로 감지한 칸에 유효 송장이 하나도 없으면 감지를 버린다.
+    """감지한 송장 열의 값이 전부 택배사명이면 그 칸을 택배사 열로 재해석한다.
 
-    값이 전부 택배사명이면 그 칸을 택배사 열로 재해석한다. 송장 열이 None이 되면
-    find_tracking_in_row가 행 스캔 폴백으로 실제 송장이 있는 칸을 찾는다.
+    송장 열이 None이 되면 find_tracking_in_row가 행 스캔 폴백으로 실제 송장이
+    있는 칸을 찾는다. '미출고' 같은 상태값이 섞인 경우는 건드리지 않는다 —
+    그 행은 아직 송장이 없는 것이므로 P/Q를 섞어 잘못 등록하면 안 된다.
     """
     valid = 0
     nonempty = 0
@@ -144,8 +145,8 @@ def _drop_tracking_column_if_no_tracking(
             valid += 1
         elif any(hint in re.sub(r"\s+", "", text).lower() for hint in _COURIER_HINTS):
             courier_like += 1
-    if nonempty and not valid:
-        if courier_like and not courier_col:
+    if nonempty and not valid and courier_like == nonempty:
+        if not courier_col:
             courier_col = tracking_col  # 그 칸이 사실상 택배사 열
         return None, courier_col
     return tracking_col, courier_col

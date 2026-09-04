@@ -194,3 +194,19 @@ def test_empty_q_with_tracking_in_p_uses_p_column():
     cols = detect_haedal_columns(ws)
     assert cols.tracking == 16
     assert find_tracking_in_row(ws, 2, cols.tracking) == "463207503500"
+
+
+def test_status_text_in_tracking_column_does_not_shift_columns():
+    """'미출고' 같은 상태값은 택배사명이 아니다 — 그 행은 송장 없음으로 둔다.
+
+    열 감지를 버리고 행 스캔으로 넘어가면 아직 발송 안 된 주문에
+    옆 칸 숫자를 송장으로 잘못 등록할 수 있다.
+    """
+    wb = _hanjin_reply([
+        {"name": "이은선", "col_p": "463198389500", "col_q": "미출고"},
+        {"name": "임은정", "col_p": "463198389511"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 17
+    assert find_tracking_in_row(ws, 2, cols.tracking) == ""
