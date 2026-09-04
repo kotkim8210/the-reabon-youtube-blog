@@ -58,6 +58,68 @@ def _tracking_number_candidate(value: object) -> str:
     return ""
 
 
+def _resolve_misaligned_tracking_column(
+    ws,
+    expected_col: int,
+    header_row: int,
+    start_row: int,
+) -> int:
+    """Recognize the known 해달 P/Q one-cell tracking shift without guessing.
+
+    Some 해달 replies keep ``지불조건`` in P and ``출고번호`` in Q, but write
+    every Hanjin invoice in P.  Only that exact legacy shape is corrected.
+    """
+    if expected_col != 17:
+        return expected_col
+
+    required_headers = {
+        1: "받으시는분",
+        2: "받으시는분전화",
+        6: "받는분총주소",
+        14: "품목명",
+        16: "지불조건",
+        17: "출고번호",
+    }
+    if any(
+        _key(ws.cell(row=header_row, column=col_idx).value) != header
+        for col_idx, header in required_headers.items()
+    ):
+        return expected_col
+
+    # Q에 값이 하나라도 있으면 행별로 P/Q를 섞지 않고 원래 Q만 신뢰한다.
+    q_values = [
+        ws.cell(row=row_idx, column=expected_col).value
+        for row_idx in range(start_row, getattr(ws, "max_row", 1) + 1)
+        if ws.cell(row=row_idx, column=expected_col).value not in (None, "")
+    ]
+    if q_values:
+        return expected_col
+
+    data_rows = [
+        row_idx
+        for row_idx in range(start_row, getattr(ws, "max_row", 1) + 1)
+        if any(
+            ws.cell(row=row_idx, column=col_idx).value not in (None, "")
+            for col_idx in range(1, getattr(ws, "max_column", 1) + 1)
+        )
+    ]
+    p_values = [
+        ws.cell(row=row_idx, column=16).value
+        for row_idx in data_rows
+        if ws.cell(row=row_idx, column=16).value not in (None, "")
+    ]
+
+    def strict_hanjin_tracking(value: object) -> str:
+        text = str(value).strip()
+        if re.fullmatch(r"\d+\.0", text):
+            text = text[:-2]
+        return text if re.fullmatch(r"4\d{11}", text) else ""
+
+    if p_values and all(strict_hanjin_tracking(value) for value in p_values):
+        return 16
+    return expected_col
+
+
 def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
     """Find important columns from Korean headers, with legacy defaults.
 
@@ -114,37 +176,23 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
 
     # 헤더가 일부라도 있으면 데이터 시작은 다음 행. 아니면 기존 방식 유지.
     if best:
+        start_row = best_row + 1
         tracking_col = best.get("tracking")
-        courier_col = best.get("courier")
         if tracking_col:
-            # 헤더로 찾은 송장 열을 실제 데이터로 검증한다. 해달이 '출고번호' 칸에
-            # 택배사(CJ대한통운)를 적고 송장은 옆 칸(특기사항)에 넣어 보낸 사례(2026-08-03):
-            # 열 전체에 유효 송장이 하나도 없으면 열 감지를 버리고 행 스캔 폴백을 쓴다.
-            valid = 0
-            nonempty = 0
-            courier_like = 0
-            for row_idx in range(best_row + 1, min(getattr(ws, "max_row", 1), best_row + 200) + 1):
-                value = ws.cell(row=row_idx, column=tracking_col).value
-                text = str(value).strip() if value is not None else ""
-                if not text:
-                    continue
-                nonempty += 1
-                if _valid_tracking(value):
-                    valid += 1
-                elif any(hint in re.sub(r"\s+", "", text).lower() for hint in _COURIER_HINTS):
-                    courier_like += 1
-            if nonempty and not valid:
-                if courier_like and not courier_col:
-                    courier_col = tracking_col  # 그 칸이 사실상 택배사 열
-                tracking_col = None
+            tracking_col = _resolve_misaligned_tracking_column(
+                ws,
+                tracking_col,
+                best_row,
+                start_row,
+            )
         return HaedalColumns(
-            start_row=best_row + 1,
+            start_row=start_row,
             name=best.get("name", 1),
             phone=best.get("phone", 2),
             address=best.get("address", 6),
             product=best.get("product", 14),
             tracking=tracking_col,
-            courier=courier_col,
+            courier=best.get("courier"),
         )
 
     a1 = _key(ws.cell(row=1, column=1).value)
