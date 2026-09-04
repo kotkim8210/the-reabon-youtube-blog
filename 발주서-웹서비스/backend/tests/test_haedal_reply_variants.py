@@ -42,7 +42,7 @@ def _hanjin_reply(rows: list[dict]) -> "Workbook":
         row[7] = "010-5700-7756"
         row[12] = 1
         row[13] = r.get("product", "꿀고구마 3Kg (중상)")
-        row[15] = "선불"
+        row[15] = r.get("col_p", "선불")   # 지불조건 칸
         row[16] = r.get("col_q", "")   # 출고번호 칸
         row[17] = r.get("col_r", "")   # 특기사항 칸
         row[18] = "문 앞"
@@ -154,3 +154,43 @@ def test_parse_live_adminplus_popup_with_extra_classes():
 
 def test_parse_old_adminplus_popup_fallback():
     assert _parse_adminplus_popup_prices(_OLD_POPUP) == {"명이나물(대명이) 3kg": 21000}
+
+
+# ── 사고 3 (2026-09-04 실사고): 지불조건 칸=송장, 출고번호 칸=택배사('한진') ──
+# 배포본에만 있던 _resolve_misaligned_tracking_column은 '출고번호(Q)가 비었을 때'만
+# P로 옮기게 돼 있어, Q에 '한진'이 적힌 이 회신에서 전 행이 빈값 처리됐다.
+def test_courier_in_q_and_tracking_in_p():
+    wb = _hanjin_reply([
+        {"name": "이태화", "col_p": "463207503463", "col_q": "한진"},
+        {"name": "김성희", "col_p": "463207503474", "col_q": "한진"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking is None      # Q는 송장 열이 아니다
+    assert cols.courier == 17         # Q = 택배사 열
+    assert find_tracking_in_row(ws, 2, cols.tracking) == "463207503463"
+    assert find_courier_in_row(ws, 2, cols.courier) == "한진"
+
+
+def test_parse_haedal_file_with_tracking_in_payment_column():
+    data = _bytes(_hanjin_reply([
+        {"name": "이태화", "col_p": "463207503463", "col_q": "한진"},
+        {"name": "신명희", "col_p": "463207503485", "col_q": "한진", "product": "꿀고구마 5Kg (중상)"},
+    ]))
+    entries = parse_haedal_file(data)
+    assert [(e["name"], e["tracking"], e["delivery_company_code"]) for e in entries] == [
+        ("이태화", "463207503463", "HANJIN"),
+        ("신명희", "463207503485", "HANJIN"),
+    ]
+
+
+# ── 배포본에서 회수한 대응: Q가 통째로 비고 P에만 송장이 있는 회신 ──
+def test_empty_q_with_tracking_in_p_uses_p_column():
+    wb = _hanjin_reply([
+        {"name": "정정순", "col_p": "463207503500"},
+        {"name": "박순임", "col_p": "463207503511"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 16
+    assert find_tracking_in_row(ws, 2, cols.tracking) == "463207503500"

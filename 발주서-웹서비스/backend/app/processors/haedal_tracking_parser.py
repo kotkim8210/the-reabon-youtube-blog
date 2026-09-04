@@ -120,6 +120,37 @@ def _resolve_misaligned_tracking_column(
     return expected_col
 
 
+def _drop_tracking_column_if_no_tracking(
+    ws,
+    tracking_col: int,
+    courier_col: int | None,
+    start_row: int,
+) -> tuple[int | None, int | None]:
+    """송장 열로 감지한 칸에 유효 송장이 하나도 없으면 감지를 버린다.
+
+    값이 전부 택배사명이면 그 칸을 택배사 열로 재해석한다. 송장 열이 None이 되면
+    find_tracking_in_row가 행 스캔 폴백으로 실제 송장이 있는 칸을 찾는다.
+    """
+    valid = 0
+    nonempty = 0
+    courier_like = 0
+    for row_idx in range(start_row, min(getattr(ws, "max_row", 1), start_row + 199) + 1):
+        value = ws.cell(row=row_idx, column=tracking_col).value
+        text = str(value).strip() if value is not None else ""
+        if not text:
+            continue
+        nonempty += 1
+        if _valid_tracking(value):
+            valid += 1
+        elif any(hint in re.sub(r"\s+", "", text).lower() for hint in _COURIER_HINTS):
+            courier_like += 1
+    if nonempty and not valid:
+        if courier_like and not courier_col:
+            courier_col = tracking_col  # 그 칸이 사실상 택배사 열
+        return None, courier_col
+    return tracking_col, courier_col
+
+
 def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
     """Find important columns from Korean headers, with legacy defaults.
 
@@ -178,11 +209,23 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
     if best:
         start_row = best_row + 1
         tracking_col = best.get("tracking")
+        courier_col = best.get("courier")
         if tracking_col:
+            # 1) 지불조건(P)/출고번호(Q) 한 칸 밀림 — Q가 통째로 비었을 때만 P로 옮긴다.
             tracking_col = _resolve_misaligned_tracking_column(
                 ws,
                 tracking_col,
                 best_row,
+                start_row,
+            )
+            # 2) 그래도 그 열에 유효 송장이 하나도 없으면 열 감지를 폐기한다.
+            #    해달이 '출고번호' 칸에 택배사(CJ대한통운·한진)를 적고 송장은 다른 칸
+            #    (특기사항·지불조건)에 넣어 회신한 사례(2026-08-03, 2026-09-04):
+            #    열만 믿으면 전 행이 빈값 → "운송장번호를 찾을 수 없습니다"로 죽는다.
+            tracking_col, courier_col = _drop_tracking_column_if_no_tracking(
+                ws,
+                tracking_col,
+                courier_col,
                 start_row,
             )
         return HaedalColumns(
@@ -192,7 +235,7 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
             address=best.get("address", 6),
             product=best.get("product", 14),
             tracking=tracking_col,
-            courier=best.get("courier"),
+            courier=courier_col,
         )
 
     a1 = _key(ws.cell(row=1, column=1).value)
