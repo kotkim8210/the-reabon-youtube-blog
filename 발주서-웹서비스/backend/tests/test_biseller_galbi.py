@@ -108,6 +108,16 @@ def test_event_prize_pack_notation_converts():
         biseller_order.convert_galbi_option("LA한입갈비 800g 1팩", "")
         == "양념LA한입갈비 800g (800G*1세트)"
     )
+    # 이벤트 당첨자만 1팩 -> 2세트 승급(비셀러에 1세트 상품이 없다, 2026-09-07)
+    assert (
+        biseller_order.convert_galbi_option("LA한입갈비 800g 1팩", "", promote_single=True)
+        == "양념LA한입갈비 800g+800g (800G*2세트)"
+    )
+    # 2팩 이상은 승급 대상이 아니다
+    assert (
+        biseller_order.convert_galbi_option("LA한입갈비 800g 2팩", "", promote_single=True)
+        == "양념LA한입갈비 800g+800g (800G*2세트)"
+    )
     assert (
         biseller_order.convert_galbi_option("LA한입갈비 800g 2팩", "")
         == "양념LA한입갈비 800g+800g (800G*2세트)"
@@ -124,7 +134,7 @@ def test_winners_csv_only_makes_order_sheet():
     assert filename.startswith("아이티소프트_비셀러발주서_")
     ws = load_workbook(BytesIO(out)).active
     assert ws.cell(2, 3).value == "제원희"
-    assert ws.cell(2, 7).value == "양념LA한입갈비 800g (800G*1세트)"
+    assert ws.cell(2, 7).value == "양념LA한입갈비 800g+800g (800G*2세트)"
     assert ws.cell(2, 8).value == 1
     assert ws.cell(2, 10).value == "(주)아이티소프트"
     assert ws.cell(3, 3).value == "김이정"
@@ -161,3 +171,10 @@ def test_requires_at_least_one_file():
         assert "하나는 올려야" in str(exc)
     else:
         raise AssertionError("파일 없이 처리되면 안 된다")
+
+
+def test_coupang_single_pack_is_not_promoted():
+    """승급은 이벤트 경로에만 — 쿠팡 1개 주문을 2세트로 늘려 보내면 안 된다."""
+    payload = _delivery([{"option": "800g 1개", "name": "쿠팡손님"}])
+    _out, _fn, stats = biseller_order.process(payload)
+    assert stats["options"][0]["vendor_option_name"] == "양념LA한입갈비 800g (800G*1세트)"

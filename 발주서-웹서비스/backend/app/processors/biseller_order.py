@@ -61,13 +61,25 @@ def _galbi_count(text: str) -> int | None:
     return count if count >= 1 else None
 
 
-def convert_galbi_option(product_name: object, option_text: object) -> str | None:
-    """쿠팡 옵션·이벤트 경품명 → 비셀러 상품명. 개수를 못 읽으면 None."""
+def convert_galbi_option(
+    product_name: object,
+    option_text: object,
+    *,
+    promote_single: bool = False,
+) -> str | None:
+    """쿠팡 옵션·이벤트 경품명 → 비셀러 상품명. 개수를 못 읽으면 None.
+
+    promote_single: 1팩짜리를 2세트로 올린다. 비셀러에 1세트 상품이 없어
+        라이브 이벤트 당첨자(경품 'LA한입갈비 800g 1팩')는 2세트로 발주한다
+        (2026-09-07 사용자 지시). 쿠팡 주문 경로는 그대로 둔다.
+    """
     if not is_biseller_galbi_order(product_name, option_text):
         return None
     count = _galbi_count(_compact(product_name, option_text))
     if not count:
         return None
+    if promote_single and count == 1:
+        count = 2
     return f"양념LA한입갈비 {'+'.join(['800g'] * count)} (800G*{count}세트)"
 
 
@@ -135,7 +147,7 @@ def _entries_from_winners(winners_bytes: bytes) -> tuple[list[dict], list[str]]:
     notes: list[str] = []
     for winner in winners:
         prize = normalize(winner.get("product"))
-        converted = convert_galbi_option(prize, "")
+        converted = convert_galbi_option(prize, "", promote_single=True)
         if not converted:
             notes.append(f"{winner.get('name') or '이름없음'}({prize or '경품미상'}) — 비셀러 발주 품목이 아님")
             continue
