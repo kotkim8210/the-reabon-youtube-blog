@@ -2005,14 +2005,18 @@ async def process_goguma_tracking(
 
 @app.post("/api/process/biseller-order")
 async def process_biseller_order(
-    delivery_file: UploadFile = File(...),
+    delivery_file: UploadFile | None = File(None),
+    winners_file: UploadFile | None = File(None),
     user: dict = Depends(verify_token),
 ):
     try:
-        delivery_bytes = await delivery_file.read()
-        output_bytes, filename, stats = biseller_order.process(delivery_bytes)
+        delivery_bytes = await delivery_file.read() if delivery_file else None
+        winners_bytes = await winners_file.read() if winners_file else None
+        output_bytes, filename, stats = biseller_order.process(delivery_bytes, winners_bytes)
         await record_sales_from_process_stats(
-            user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
+            user["user_id"],
+            stats,
+            ymd=_extract_ymd_from_filename(delivery_file.filename if delivery_file else None),
         )
         logger.info(f"비셀러 발주 처리 완료: {stats}")
         return make_excel_response(output_bytes, filename, stats)

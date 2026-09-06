@@ -86,7 +86,7 @@ export const TOOL_CATALOG: ToolConfig[] = [
   {
     id: 'biseller-order',
     title: '비셀러 (LA한입갈비)',
-    description: 'DeliveryList에서 한입 LA갈비 주문을 추출해 비셀러 발주서(아이티소프트 양식)를 만듭니다. 쿠팡 800g N개 → 비셀러 800G*N세트 표기로 변환.',
+    description: 'DeliveryList에서 한입 LA갈비 주문을 추출해 비셀러 발주서(아이티소프트 양식)를 만듭니다. 쿠팡 800g N개 → 비셀러 800G*N세트 표기로 변환. 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐집니다.',
     icon: '🥩',
     color: 'red',
     kind: 'order',

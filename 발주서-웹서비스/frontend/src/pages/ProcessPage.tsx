@@ -272,9 +272,18 @@ const toolConfigs: Record<string, ToolConfig> = {
   'biseller-order': {
     title: '비셀러 LA한입갈비 발주서 생성',
     description:
-      '쿠팡 DeliveryList에서 한입 LA갈비 주문을 추출해 비셀러 발주 양식으로 만듭니다. 옵션 800g N개 → 비셀러 상품명 800G*N세트로 변환합니다.',
+      '쿠팡 DeliveryList에서 한입 LA갈비 주문을 추출해 비셀러 발주 양식으로 만듭니다. 옵션 800g N개 → 비셀러 상품명 800G*N세트로 변환합니다. 라이브 이벤트 당첨자 CSV를 함께(또는 단독으로) 올리면 같은 발주서에 합쳐서 나옵니다.',
     icon: '🥩',
-    files: [{ key: 'delivery', label: 'DeliveryList 파일' }],
+    files: [
+      { key: 'delivery', label: '쿠팡 DeliveryList 파일 (당첨자 CSV만 있으면 비워도 됩니다)', optional: true },
+      {
+        key: 'winners',
+        label: '라이브 이벤트 당첨자 CSV (선택 — 발주서에 합쳐짐)',
+        optional: true,
+        accept: '.csv',
+        acceptLabel: '.csv 파일',
+      },
+    ],
     color: 'red',
     colorClasses: {
       bg: 'bg-red-50',
@@ -390,6 +399,10 @@ function ProcessPage() {
     if (!config) return false;
     if (toolId === 'temu-order') {
       return Boolean(files.order_file);
+    }
+    if (toolId === 'biseller-order') {
+      // 쿠팡 DeliveryList 또는 당첨자 CSV 중 하나만 있어도 발주서를 만든다
+      return Boolean(files.delivery) || Boolean(files.winners);
     }
     if (toolId === 'gaegeolmu-tracking') {
       // 택배발송 파일 또는 복붙 텍스트 중 하나 + DeliveryList 필수
