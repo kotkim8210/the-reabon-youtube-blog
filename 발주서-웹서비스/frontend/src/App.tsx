@@ -7,6 +7,7 @@ import PlaceholderTab from './components/mvp/PlaceholderTab';
 import AdminPanel from './pages/AdminPanel';
 import BatchTrackingPage from './pages/BatchTrackingPage';
 import BillingDashboard from './pages/BillingDashboard';
+import CsRefundTemplatePage from './pages/CsRefundTemplatePage';
 import GogumaAutoPage from './pages/GogumaAutoPage';
 import GogumaUnifiedPage from './pages/GogumaUnifiedPage';
 import Login from './pages/Login';
@@ -138,7 +139,7 @@ export default function App() {
           <Route path="process/:toolId" element={<ProcessPage />} />
           <Route path="pricing" element={<PricingDashboard />} />
           <Route path="inventory" element={<PlaceholderTab />} />
-          <Route path="cs" element={<PlaceholderTab />} />
+          <Route path="cs" element={<CsRefundTemplatePage />} />
           <Route path="ai-content" element={<PlaceholderTab />} />
           <Route path="my/products" element={<TenantProductConfig />} />
           <Route path="my/process" element={<TenantOrderPage />} />
