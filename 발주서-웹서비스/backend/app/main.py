@@ -46,6 +46,7 @@ from app.processors import (
     tomato_tracking,
     toss_auto,
     biseller_order,
+    biseller_tracking,
     tracking_input,
 )
 from app.sabang import client as sabang_client
@@ -2022,6 +2023,32 @@ async def process_biseller_order(
         return make_excel_response(output_bytes, filename, stats)
     except Exception as e:
         logger.exception("비셀러 발주 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/biseller-tracking")
+async def process_biseller_tracking(
+    delivery_file: UploadFile = File(...),
+    tracking_file: UploadFile | None = File(None),
+    tracking_file2: UploadFile | None = File(None),
+    user: dict = Depends(verify_token),
+):
+    try:
+        delivery_bytes = await delivery_file.read()
+        replies = []
+        for upload in (tracking_file, tracking_file2):
+            if upload:
+                replies.append(await upload.read())
+        output_bytes, filename, stats = biseller_tracking.process(delivery_bytes, replies)
+        logger.info(f"비셀러 운송장 입력 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("비셀러 운송장 입력 중 오류")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",

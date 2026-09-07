@@ -92,6 +92,14 @@ export const TOOL_CATALOG: ToolConfig[] = [
     kind: 'order',
   },
   {
+    id: 'biseller-tracking',
+    title: '비셀러 (LA한입갈비) 운송장번호 입력',
+    description: '비셀러 회신 파일(발주 양식에 택배사·송장번호가 채워진 것)을 DeliveryList와 매칭해 운송장번호를 입력합니다. 하루에 회신이 두 장이면 둘 다 올리면 됩니다.',
+    icon: '🥩📦',
+    color: 'red',
+    kind: 'tracking',
+  },
+  {
     id: 'gaegeolmu-order',
     title: '게걸무씨앗기름 발주서 생성',
     description: 'DeliveryList에서 게걸무씨앗기름 주문을 추출하여 발주서를 생성합니다.',

@@ -291,6 +291,23 @@ const toolConfigs: Record<string, ToolConfig> = {
       badge: 'bg-red-100 text-red-700',
     },
   },
+  'biseller-tracking': {
+    title: '비셀러 LA한입갈비 운송장번호 입력',
+    description:
+      '비셀러가 회신한 발주 양식(L열 택배사·M열 송장번호)을 쿠팡 DeliveryList와 매칭해 D열 택배사·E열 운송장번호를 채웁니다. 택배사는 쿠팡이 인식하는 표기로 자동 변환됩니다.',
+    icon: '🥩📦',
+    files: [
+      { key: 'tracking', label: '비셀러 회신 파일 (택배사·송장번호 포함)' },
+      { key: 'tracking2', label: '비셀러 회신 파일 2 (선택 — 추가 회신분)', optional: true },
+      { key: 'delivery', label: 'DeliveryList 파일' },
+    ],
+    color: 'red',
+    colorClasses: {
+      bg: 'bg-red-50',
+      text: 'text-red-700',
+      badge: 'bg-red-100 text-red-700',
+    },
+  },
   'gaegeolmu-order': {
     title: '게걸무씨앗기름 발주서 생성',
     description:

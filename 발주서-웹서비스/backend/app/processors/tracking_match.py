@@ -33,6 +33,10 @@ def coupang_courier_name(value: object, default: str = "") -> str:
     compact = match_key(courier)
     if "우체국" in compact or re.fullmatch(r"(?i)epost", compact):
         return "우체국"
+    # 비셀러는 '롯데(현대)택배'로 회신한다. 쿠팡이 아는 이름은 '롯데택배'뿐이라
+    # 괄호 표기 그대로 넣으면 택배사가 인식되지 않는다(2026-09-07).
+    if "롯데" in compact:
+        return "롯데택배"
     return courier
 
 
