@@ -48,7 +48,8 @@ const SUPPLIER_MONITOR_KEYS = [
   { key: 'watermelon-jewelry', accent: 'emerald' },
   { key: 'dureup-jbt', accent: 'amber' },
   { key: 'bamhobak-jewelry', accent: 'emerald' },
-  { key: 'potato-jeju', accent: 'sky' },
+  // potato-jeju(홍감자)는 2026-09-07 시즌 종료로 제거 — 거래처 옵션 0개.
+  // 재입고 시 여기 복구 + 백엔드 PAUSED_SUPPLIER_MONITOR_KEYS에서 제거.
   { key: 'hongro-jeju', accent: 'amber' },
 ] as const;
 
@@ -69,7 +70,6 @@ const SUPPLIER_MONITOR_LABELS: Record<SupplierMonitorKey, string> = {
   'dureup-jbt': '남해땅두릅',
   // 발주처가 옵션별로 갈리는 상품은 한 파일에 모아서 받는다(1kg 제주다팜 + 3·5·10kg 쥬얼리 등)
   'bamhobak-jewelry': '미니밤호박 1·3·5·10kg(제주다팜)',
-  'potato-jeju': '홍감자(제주다팜)',
   'hongro-jeju': '홍로사과·가을햇사과(제주다팜)',
 };
 

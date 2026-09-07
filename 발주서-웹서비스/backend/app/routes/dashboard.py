@@ -15,7 +15,7 @@ from app.auth import require_admin, verify_token
 from app.coupang.client import coupang_client
 from app.coupang.risk import calculate_all_risk_scores
 from app.supplier_price_monitor import (
-    is_supplier_monitor_paused,
+    active_supplier_monitor_keys,
     refresh_supplier_price_snapshots,
     run_kolrabi_monitor,
     run_myeongi_monitor,
@@ -157,7 +157,16 @@ async def get_myeongi_supplier_price_monitor(_token: dict = Depends(require_admi
 @router.get("/supplier-price-alerts")
 async def get_supplier_price_alerts(_token: dict = Depends(require_admin)):
     rows = await db.list_latest_supplier_price_monitor_runs()
-    rows = [row for row in rows if not is_supplier_monitor_paused(str(row.get("monitor_key") or ""))]
+    # 설정에 없는 '유령 키'는 버린다. DB에는 지금 운영하지 않는 옛 모니터의 마지막 실행이
+    # 그대로 남아 있는데(예: bamhobak-jeju — 2026-07 bamhobak-jewelry로 통합된 뒤
+    # 2026-09-04 오류 1건만 남음), 일시중지 목록에도 없으니 옛 필터를 통과해 알림 종에
+    # 오류가 영구히 떠 있었다. active_supplier_monitor_keys()는 MONITOR_CONFIGS에 있고
+    # 일시중지·기간만료도 아닌 키만 주므로 유령·품절·만료가 한 번에 걸러진다.
+    active_keys = set(active_supplier_monitor_keys())
+    rows = [
+        row for row in rows
+        if str(row.get("monitor_key") or "").replace("_", "-") in active_keys
+    ]
     active = [
         row for row in rows
         if (

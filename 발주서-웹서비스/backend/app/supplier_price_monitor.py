@@ -702,7 +702,10 @@ MONITOR_CONFIGS: dict[str, SupplierMonitorConfig] = {
 # 2026-08-27 거래처 어드민에서 옵션 0개(시즌 종료/품절) 확인 → 매일 오전 알림 오류 방지로 일시중지.
 #  - apple-jeju(청사과)·baekdo-jewelry(백도 딱딱이복숭아)·chamoe-jewelry(성주참외)
 #  재입고되면 여기서 제거 + 프론트 SUPPLIER_MONITOR_KEYS/라벨 복구.
-PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt", "apple-corn-jewelryfruit", "potato-jewelry", "apple-jeju", "baekdo-jewelry", "chamoe-jewelry"}
+# 2026-09-07 potato-jeju(홍감자) 추가 — 8/31~9/7 8일 연속 '옵션 공급가를 읽지 못했습니다'.
+#  거래처 페이지(pcode=10001051)를 직접 받아보니 200 응답 850바이트에 제품명만 있고 옵션 0개.
+#  같은 로그인·같은 사이트의 콜라비는 11개 정상 수집 → 로그인/화면변경이 아니라 시즌 종료.
+PAUSED_SUPPLIER_MONITOR_KEYS = {"myeongi", "dureup-jbt", "watermelon-jbt", "chamoe-jbt", "apple-corn-jewelryfruit", "potato-jewelry", "apple-jeju", "baekdo-jewelry", "chamoe-jewelry", "potato-jeju"}
 
 MONITOR_CONFIGS["dureup-jbt"] = replace(
     MONITOR_CONFIGS["dureup-jbt"],
