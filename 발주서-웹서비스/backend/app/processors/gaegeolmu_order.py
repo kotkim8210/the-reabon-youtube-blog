@@ -65,6 +65,9 @@ DELIVERY_HEADERS = [
 
 GAEGEOLMU_PRODUCT_NAME = "식품애착 게걸무씨앗기름 폐 기침 기관지"
 
+# 위탁발송 정산 단가 — 1병 4만원 (2026-09-07 사용자 확인). 바뀌면 여기만 고치면 된다.
+UNIT_PRICE_PER_BOTTLE = 40000
+
 
 def normalize(value) -> str:
     if value is None:
@@ -372,6 +375,66 @@ def _append_gmarket_rows(
     return output_row_index - start_index, option_totals
 
 
+def _bottle_count(option_name: str) -> int:
+    """'게걸무씨앗기름 2병' → 2. 못 읽으면 1병으로 본다."""
+    match = re.search(r"(\d+)\s*병", option_name or "")
+    return int(match.group(1)) if match else 1
+
+
+def _settlement_money_text(won: int) -> str:
+    """40000 → '4만원'. 만원 단위로 안 떨어지면 원 단위로 적는다.
+
+    (배송비 셀 표기용 _money_text와 이름이 겹치지 않게 분리 — 겹치면 지마켓 병합이 깨진다.)
+    """
+    if won and won % 10000 == 0:
+        return f"{won // 10000}만원"
+    return f"{won:,}원"
+
+
+def build_settlement_text(
+    option_totals: dict[str, dict],
+    source_counts: list[tuple[str, int]],
+    now: datetime,
+) -> str:
+    """거래처에 그대로 복붙할 위탁발송 정산 요약.
+
+    예)
+        9/7 게걸무 위탁발송
+        쿠팡 6건
+
+        1병. 2건= 8만원
+        2병. 4건= 32만원 송금예정
+
+        총 40만원 송금예정
+    """
+    lines = [f"{now.month}/{now.day} 게걸무 위탁발송"]
+    lines.extend(f"{label} {count}건" for label, count in source_counts if count)
+    lines.append("")
+
+    buckets = sorted(
+        (
+            (_bottle_count(bucket.get("coupang_option_keyword") or ""), int(bucket.get("quantity") or 0))
+            for bucket in option_totals.values()
+        ),
+        key=lambda item: item[0],
+    )
+    total_won = 0
+    option_lines: list[str] = []
+    for bottles, count in buckets:
+        if not count:
+            continue
+        won = bottles * count * UNIT_PRICE_PER_BOTTLE
+        total_won += won
+        option_lines.append(f"{bottles}병. {count}건= {_settlement_money_text(won)}")
+    if option_lines:
+        option_lines[-1] += " 송금예정"
+    lines.extend(option_lines)
+
+    lines.append("")
+    lines.append(f"총 {_settlement_money_text(total_won)} 송금예정")
+    return chr(10).join(lines)
+
+
 def process(
     delivery_file_bytes: bytes,
     gmarket_file_bytes: bytes | None = None,
@@ -427,5 +490,12 @@ def process(
     if gmarket_file_bytes:
         stats["gmarket"] = gmarket_added
         stats["coupang"] = total - gmarket_added
+
+    source_counts = (
+        [("쿠팡", total - gmarket_added), ("지마켓", gmarket_added)]
+        if gmarket_added
+        else [(sources[0], total)]
+    )
+    stats["copy_text"] = build_settlement_text(option_totals, source_counts, now)
 
     return output.read(), filename, stats

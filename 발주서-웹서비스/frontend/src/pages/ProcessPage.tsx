@@ -497,6 +497,8 @@ function ProcessPage() {
     }
   };
 
+  const [copied, setCopied] = useState(false);
+
   const handleReset = () => {
     setFiles({});
     if (config?.textArea) {
@@ -583,6 +585,7 @@ function ProcessPage() {
     };
     const lines: string[] = [];
     for (const [key, value] of Object.entries(stats)) {
+      if (key === 'copy_text') continue;   // 복붙용 정산 요약은 아래 전용 박스로 보여준다
       const label = statLabels[key] || key;
       if (typeof value === 'number') {
         lines.push(`${label}: ${value}건`);
@@ -1202,6 +1205,31 @@ function ProcessPage() {
                       {line}
                     </p>
                   ))}
+                </div>
+              )}
+              {typeof result.stats?.copy_text === 'string' && (
+                <div className="mb-3 rounded-xl border border-green-300 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-green-800">거래처 전달용 정산 요약</span>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(String(result.stats?.copy_text ?? ''));
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        } catch {
+                          setCopied(false);
+                        }
+                      }}
+                      className="rounded-lg border border-green-300 px-3 py-1 text-xs font-semibold
+                                 text-green-700 hover:bg-green-50"
+                    >
+                      {copied ? '복사됨' : '복사하기'}
+                    </button>
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
+                    {String(result.stats.copy_text)}
+                  </pre>
                 </div>
               )}
               <button
