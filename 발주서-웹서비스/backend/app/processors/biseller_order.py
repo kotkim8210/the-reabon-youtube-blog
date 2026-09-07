@@ -174,7 +174,8 @@ def process(delivery_file_bytes: bytes) -> tuple[bytes, str, dict]:
     tmpl_wb.save(output)
     output.seek(0)
 
-    filename = f"아이티소프트_비셀러발주서_{now.strftime('%Y%m%d')}.xlsx"
+    # 파일명 관례: {거래처}_{발주주체}_{상품}발주(YYYYMMDD) — 제주다팜/쥬얼리 발주서와 동일
+    filename = f"비셀러_아이티소프트_LA한입갈비발주({now.strftime('%Y%m%d')}).xlsx"
     stats = {
         "total": len(filtered_rows),
         "product": PRODUCT_LABEL,

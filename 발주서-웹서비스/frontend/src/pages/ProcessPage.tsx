@@ -322,6 +322,39 @@ const toolConfigs: Record<string, ToolConfig> = {
   },
 };
 
+interface OrderEmailCardConfig {
+  vendor: string;
+  to: string;
+  description: string;
+  notice?: string;
+  buttonClass: string;
+  fileButtonClass: string;
+  iconBg: string;
+}
+
+// 발주서 이메일 발송 카드를 붙일 도구들. vendor는 백엔드 send-order-email 의 발주처 키.
+const orderEmailCards: Record<string, OrderEmailCardConfig> = {
+  'goguma-order': {
+    vendor: 'haedal',
+    to: 'farmers2022@naver.com',
+    description:
+      '발주서 파일(여러 개 가능)을 올리고 클릭하면 shach457@gmail.com → farmers2022@naver.com로 첨부 발송합니다. 따로 뽑은 테무 해달 발주서나 수정본 재발송에 사용하세요.',
+    buttonClass: 'bg-orange-500 hover:bg-orange-600',
+    fileButtonClass: 'file:bg-orange-100 file:text-orange-700 hover:file:bg-orange-200',
+    iconBg: 'bg-orange-50',
+  },
+  'biseller-order': {
+    vendor: 'biseller',
+    to: 'naeun_order@naver.com',
+    description:
+      '발주서 파일(여러 개 가능)을 올리고 클릭하면 shach457@gmail.com → naeun_order@naver.com로 첨부 발송합니다.',
+    notice: '발주서 작성시 상품명은 비셀러 상품명으로 꼭 작성 부탁 드립니다.',
+    buttonClass: 'bg-red-500 hover:bg-red-600',
+    fileButtonClass: 'file:bg-red-100 file:text-red-700 hover:file:bg-red-200',
+    iconBg: 'bg-red-50',
+  },
+};
+
 function ProcessPage() {
   const { toolId } = useParams<{ toolId: string }>();
   const navigate = useNavigate();
@@ -371,14 +404,16 @@ function ProcessPage() {
   const [emailResult, setEmailResult] = useState('');
   const [emailError, setEmailError] = useState('');
 
+  const emailCard = toolId ? orderEmailCards[toolId] : undefined;
+
   const handleSendOrderEmail = async () => {
-    if (emailFiles.length === 0) return;
+    if (emailFiles.length === 0 || !emailCard) return;
     setEmailSending(true);
     setEmailResult('');
     setEmailError('');
     try {
-      const res = await sendOrderEmailFiles(emailFiles);
-      setEmailResult(`발송 완료 → ${res.to || 'farmers2022@naver.com'} · 제목 "${res.subject || ''}" · 첨부 ${res.files?.length ?? emailFiles.length}개`);
+      const res = await sendOrderEmailFiles(emailFiles, emailCard.vendor);
+      setEmailResult(`발송 완료 → ${res.to || emailCard.to} · 제목 "${res.subject || ''}" · 첨부 ${res.files?.length ?? emailFiles.length}개`);
     } catch (err) {
       setEmailError(err instanceof Error ? err.message : '이메일 발송에 실패했습니다.');
     } finally {
@@ -999,18 +1034,20 @@ function ProcessPage() {
         </div>
       )}
 
-      {toolId === 'goguma-order' && (
+      {emailCard && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6 animate-slide-up">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-xl">📧</div>
+            <div className={`w-10 h-10 ${emailCard.iconBg} rounded-xl flex items-center justify-center text-xl`}>📧</div>
             <div>
               <h3 className="text-base font-bold text-gray-900">발주서 이메일 발송</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                발주서 파일(여러 개 가능)을 올리고 클릭하면 shach457@gmail.com → farmers2022@naver.com로 첨부 발송합니다.
-                따로 뽑은 테무 해달 발주서나 수정본 재발송에 사용하세요.
-              </p>
+              <p className="text-xs text-gray-500 mt-0.5">{emailCard.description}</p>
             </div>
           </div>
+          {emailCard.notice && (
+            <p className="mb-3 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-800">
+              ⚠️ {emailCard.notice}
+            </p>
+          )}
           <input
             type="file"
             multiple
@@ -1020,7 +1057,7 @@ function ProcessPage() {
               setEmailResult('');
               setEmailError('');
             }}
-            className="block w-full text-sm text-gray-600 mb-3 file:mr-3 file:rounded-lg file:border-0 file:bg-orange-100 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-orange-700 hover:file:bg-orange-200"
+            className={`block w-full text-sm text-gray-600 mb-3 file:mr-3 file:rounded-lg file:border-0 file:px-4 file:py-2 file:text-sm file:font-semibold ${emailCard.fileButtonClass}`}
           />
           {emailFiles.length > 0 && (
             <p className="text-xs text-gray-500 mb-3">첨부 {emailFiles.length}개: {emailFiles.map((f) => f.name).join(', ')}</p>
@@ -1028,7 +1065,7 @@ function ProcessPage() {
           <button
             onClick={handleSendOrderEmail}
             disabled={emailFiles.length === 0 || emailSending}
-            className="bg-orange-500 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            className={`${emailCard.buttonClass} text-white px-5 py-2.5 rounded-xl font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all`}
           >
             {emailSending ? '발송 중...' : '📧 이메일 발송'}
           </button>

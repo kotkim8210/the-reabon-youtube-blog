@@ -1,5 +1,6 @@
 """비셀러 LA한입갈비 발주 (2026-09 신규)."""
 
+import re
 from io import BytesIO
 
 from openpyxl import Workbook, load_workbook
@@ -53,7 +54,8 @@ def test_process_fills_template():
     ])
     out, filename, stats = biseller_order.process(payload)
     assert stats["total"] == 2
-    assert filename.startswith("아이티소프트_비셀러발주서_")
+    # 파일명 관례: {거래처}_{발주주체}_{상품}발주(YYYYMMDD)
+    assert re.fullmatch(r"비셀러_아이티소프트_LA한입갈비발주\(\d{8}\)\.xlsx", filename), filename
     ws = load_workbook(BytesIO(out)).active
 
     assert ws.cell(1, 7).value == "상품명 (비셀러 상품명)"

@@ -17,6 +17,21 @@ KST = timezone(timedelta(hours=9))
 GMAIL_USER = os.getenv("GMAIL_USER", "shach457@gmail.com")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 HAEDAL_ORDER_EMAIL_TO = os.getenv("HAEDAL_ORDER_EMAIL_TO", "farmers2022@naver.com")
+BISELLER_ORDER_EMAIL_TO = os.getenv("BISELLER_ORDER_EMAIL_TO", "naeun_order@naver.com")
+
+# 발주처별 수신 주소와 제목에 쓰는 발주 주체명.
+# 기본은 해달(고구마)이라 기존 호출부는 인자 없이 그대로 동작한다.
+DEFAULT_VENDOR = "haedal"
+VENDORS: dict[str, dict[str, str]] = {
+    "haedal": {"to": HAEDAL_ORDER_EMAIL_TO, "company": "알제이시스템"},
+    "biseller": {"to": BISELLER_ORDER_EMAIL_TO, "company": "아이티소프트"},
+}
+
+
+def vendor_config(vendor: str = DEFAULT_VENDOR) -> dict[str, str]:
+    """발주처 설정. 모르는 값이면 기본(해달)으로 떨어뜨린다."""
+    return VENDORS.get(vendor) or VENDORS[DEFAULT_VENDOR]
+
 
 _XLSX_MAINTYPE = "application"
 _XLSX_SUBTYPE = "vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -27,14 +42,20 @@ def send_haedal_order_email(xlsx_bytes: bytes, filename: str) -> dict:
     return send_order_files_email([(xlsx_bytes, filename)])
 
 
-def send_order_files_email(attachments: list[tuple[bytes, str]]) -> dict:
-    """발주서 파일(1개 이상)을 첨부해 발송. 결과 dict(sent/to/subject/error) 반환 — 예외를 밖으로 던지지 않는다.
+def send_order_files_email(
+    attachments: list[tuple[bytes, str]],
+    vendor: str = DEFAULT_VENDOR,
+) -> dict:
+    """발주서 파일(1개 이상)을 발주처로 첨부 발송.
 
-    제목은 기존 수동 발송 관례를 따른다: 'YYMMDD 알제이시스템 발주서'.
+    결과 dict(sent/to/subject/error) 반환 — 예외를 밖으로 던지지 않는다.
+    제목은 기존 수동 발송 관례를 따른다: 'YYMMDD {발주주체} 발주서'.
     """
+    conf = vendor_config(vendor)
+    email_to = conf["to"]
     now = datetime.now(KST)
-    subject = f"{now.strftime('%y%m%d')} 알제이시스템 발주서"
-    result = {"sent": False, "to": HAEDAL_ORDER_EMAIL_TO, "subject": subject, "error": None}
+    subject = f"{now.strftime('%y%m%d')} {conf['company']} 발주서"
+    result = {"sent": False, "to": email_to, "subject": subject, "error": None}
 
     if not attachments:
         result["error"] = "첨부할 발주서 파일이 없습니다."
@@ -47,7 +68,7 @@ def send_order_files_email(attachments: list[tuple[bytes, str]]) -> dict:
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = f"Shach <{GMAIL_USER}>"
-    msg["To"] = HAEDAL_ORDER_EMAIL_TO
+    msg["To"] = email_to
     msg.set_content("발주서 첨부합니다.\n감사합니다.")
     for file_bytes, filename in attachments:
         msg.add_attachment(
@@ -64,7 +85,7 @@ def send_order_files_email(attachments: list[tuple[bytes, str]]) -> dict:
         result["sent"] = True
         logger.info(
             "발주서 이메일 발송 완료: %s -> %s (%s)",
-            GMAIL_USER, HAEDAL_ORDER_EMAIL_TO, ", ".join(name for _, name in attachments),
+            GMAIL_USER, email_to, ", ".join(name for _, name in attachments),
         )
     except smtplib.SMTPAuthenticationError:
         result["error"] = "Gmail 인증 실패 — 앱 비밀번호(GMAIL_APP_PASSWORD)를 확인하세요"

@@ -588,11 +588,13 @@ export async function processGogumaAuto(
 
 export async function sendOrderEmailFiles(
   files: File[],
+  vendor: string = 'haedal',
 ): Promise<{ status: string; to?: string; subject?: string; files?: string[] }> {
   const formData = new FormData();
   for (const f of files) {
     formData.append('files', f);
   }
+  formData.append('vendor', vendor);
   const res = await fetch(`${BASE_URL}/process/send-order-email`, {
     method: 'POST',
     headers: authHeaders(),
