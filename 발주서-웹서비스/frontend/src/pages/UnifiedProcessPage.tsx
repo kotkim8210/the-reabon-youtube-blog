@@ -76,7 +76,7 @@ function EditableTitle({
 }
 
 // ── 타입 ──────────────────────────────────────────────────────────
-interface FileConfig { key: string; label: string; accept?: string; acceptLabel?: string; }
+interface FileConfig { key: string; label: string; accept?: string; acceptLabel?: string; optional?: boolean; }
 
 interface SectionConfig {
   title: string;
@@ -102,6 +102,39 @@ interface ProductConfig {
 
 // ── 제품별 설정 ───────────────────────────────────────────────────
 const productConfigs: Record<string, ProductConfig> = {
+  biseller: {
+    title: '비셀러 (LA한입갈비)',
+    description: '취급품목: 양념LA한입갈비 800g 세트 — 비셀러 발주서 생성 + 운송장번호 입력 · 쿠팡 옵션 800g N개 → 비셀러 800G*N세트 표기로 변환 · 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐지고, 당첨 1팩은 2세트로 발주',
+    icon: '🥩',
+    bgClass: 'bg-red-50',
+    order: {
+      title: '비셀러 LA한입갈비 발주서 생성',
+      icon: '📋',
+      apiToolId: 'biseller-order',
+      files: [
+        { key: 'delivery', label: '쿠팡 DeliveryList 파일 (당첨자 CSV만 있으면 비워도 됩니다)', optional: true },
+        {
+          key: 'winners',
+          label: '라이브 이벤트 당첨자 CSV (선택 — 발주서에 합쳐짐)',
+          optional: true,
+          accept: '.csv',
+          acceptLabel: '.csv 파일',
+        },
+      ],
+      buttonLabel: '발주서 생성',
+    },
+    tracking: {
+      title: '비셀러 LA한입갈비 운송장번호 입력',
+      icon: '📦',
+      apiToolId: 'biseller-tracking',
+      files: [
+        { key: 'tracking', label: '비셀러 회신 파일 (택배사·송장번호 포함)' },
+        { key: 'tracking2', label: '비셀러 회신 파일 2 (선택 — 추가 회신분)', optional: true },
+        { key: 'delivery', label: 'DeliveryList 파일' },
+      ],
+      buttonLabel: '운송장 입력',
+    },
+  },
   chamdureup: {
     title: '참두릅',
     description: '발주서 생성 + 운송장번호 입력',
@@ -279,7 +312,12 @@ function ProcessSection({
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [error, setError] = useState('');
 
-  const allUploaded = section.files.every((f) => files[f.key] != null);
+  const requiredFiles = section.files.filter((f) => !f.optional);
+  // 필수 파일이 하나도 없는 섹션(예: 비셀러 발주 = DeliveryList 또는 당첨자 CSV)은
+  // 둘 중 하나만 올려도 실행할 수 있어야 한다.
+  const allUploaded = requiredFiles.length > 0
+    ? requiredFiles.every((f) => files[f.key] != null)
+    : section.files.some((f) => files[f.key] != null);
 
   const handleFileSelect = (key: string) => (file: File) => {
     setFiles((prev) => ({ ...prev, [key]: file || null }));

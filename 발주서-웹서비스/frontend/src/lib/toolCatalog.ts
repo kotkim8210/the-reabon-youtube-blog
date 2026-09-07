@@ -84,20 +84,12 @@ export const TOOL_CATALOG: ToolConfig[] = [
     kind: 'order',
   },
   {
-    id: 'biseller-order',
+    id: 'biseller-unified',
     title: '비셀러 (LA한입갈비)',
-    description: 'DeliveryList에서 한입 LA갈비 주문을 추출해 비셀러 발주서(아이티소프트 양식)를 만듭니다. 쿠팡 800g N개 → 비셀러 800G*N세트 표기로 변환. 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐집니다.',
+    description: '취급품목: 양념LA한입갈비 800g 세트 — 발주서 생성 + 운송장번호 입력. 쿠팡 800g N개 → 비셀러 800G*N세트 변환, 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐집니다.',
     icon: '🥩',
     color: 'red',
-    kind: 'order',
-  },
-  {
-    id: 'biseller-tracking',
-    title: '비셀러 (LA한입갈비) 운송장번호 입력',
-    description: '비셀러 회신 파일(발주 양식에 택배사·송장번호가 채워진 것)을 DeliveryList와 매칭해 운송장번호를 입력합니다. 하루에 회신이 두 장이면 둘 다 올리면 됩니다.',
-    icon: '🥩📦',
-    color: 'red',
-    kind: 'tracking',
+    kind: 'unified',
   },
   {
     id: 'gaegeolmu-order',

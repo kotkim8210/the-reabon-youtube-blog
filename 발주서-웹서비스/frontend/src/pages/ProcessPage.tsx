@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import FileUpload from '../components/FileUpload';
 import { processFile, processTossWatermelonTracking, sendOrderEmailFiles, downloadBlob, ProcessResult } from '../api';
@@ -351,6 +351,14 @@ const toolConfigs: Record<string, ToolConfig> = {
 function ProcessPage() {
   const { toolId } = useParams<{ toolId: string }>();
   const navigate = useNavigate();
+
+  // 비셀러는 발주 + 운송장 입력을 한 페이지(통합)에서 처리한다.
+  // 예전 링크(/process/biseller-order·biseller-tracking)로 들어와도 통합 페이지로 보낸다.
+  useEffect(() => {
+    if (toolId === 'biseller-order' || toolId === 'biseller-tracking') {
+      navigate('/process/unified/biseller', { replace: true });
+    }
+  }, [toolId, navigate]);
 
   const config = toolId ? toolConfigs[toolId] : undefined;
 
