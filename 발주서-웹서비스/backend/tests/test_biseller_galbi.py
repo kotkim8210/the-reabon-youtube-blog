@@ -178,3 +178,65 @@ def test_coupang_single_pack_is_not_promoted():
     payload = _delivery([{"option": "800g 1개", "name": "쿠팡손님"}])
     _out, _fn, stats = biseller_order.process(payload)
     assert stats["options"][0]["vendor_option_name"] == "양념LA한입갈비 800g (800G*1세트)"
+
+
+# ── 중복발주 방지 (2026-09-07) ──
+def test_issued_keys_block_coupang_rerun():
+    """어제 발주한 쿠팡 주문은 오늘 발주서에서 빠져야 한다."""
+    from app.processors import issued_orders
+
+    payload = _delivery([
+        {"option": "800g 4개", "name": "어제손님", "order_no": "1111"},
+        {"option": "800g 2개", "name": "오늘손님", "order_no": "2222"},
+    ])
+    _out, _fn, stats = biseller_order.process(payload)
+    assert stats["total"] == 2
+
+    # 발주 이력에 기록되는 키(주문번호|옵션)
+    keys = set(issued_orders.order_ids_from_stats(stats))
+    yesterday = {k for k in keys if k.startswith("1111")}
+    names: list[str] = []
+    filtered, dropped = issued_orders.filter_delivery_by_issued(payload, yesterday, skipped_names=names)
+    assert dropped == 1 and names == ["어제손님"]
+
+    _out2, _fn2, stats2 = biseller_order.process(filtered)
+    assert stats2["total"] == 1
+    assert stats2["options"][0]["orders"][0]["order_id"] == "2222"
+
+
+def test_issued_keys_block_winner_rerun():
+    """같은 당첨자 CSV를 다시 올려도 이미 발주된 건은 빠진다."""
+    from app.processors import issued_orders
+
+    winners = _winners_csv([
+        "LA한입갈비 800g 1팩,닉,2026/09/05 21:03,제원희,010-1111-2222,강원도 양구군 어딘가,5102761902313,55800,0,",
+        "LA한입갈비 800g 1팩,닉,2026/09/05 21:03,김이정,010-3333-4444,서울시 성북구 어딘가,7102761791873,30800,0,",
+    ])
+    _out, _fn, stats = biseller_order.process(winners_bytes=winners)
+    assert stats["total"] == 2
+
+    keys = set(issued_orders.order_ids_from_stats(stats))
+    names: list[str] = []
+    _out2, _fn2, stats2 = biseller_order.process(
+        winners_bytes=winners, issued_keys=keys, duplicate_names=names
+    )
+    assert stats2["total"] == 0
+    assert stats2["duplicate_skipped"] == 2
+    assert sorted(names) == ["김이정", "제원희"]
+
+
+def test_issued_keys_do_not_block_new_winner():
+    from app.processors import issued_orders
+
+    first = _winners_csv([
+        "LA한입갈비 800g 1팩,닉,2026/09/05 21:03,제원희,010-1111-2222,강원도 양구군 어딘가,5102761902313,55800,0,",
+    ])
+    second = _winners_csv([
+        "LA한입갈비 800g 1팩,닉,2026/09/05 21:03,제원희,010-1111-2222,강원도 양구군 어딘가,5102761902313,55800,0,",
+        "LA한입갈비 800g 2팩,닉,2026/09/06 21:03,새당첨자,010-5555-6666,부산시 어딘가,8102761791999,30800,0,",
+    ])
+    _out, _fn, stats = biseller_order.process(winners_bytes=first)
+    keys = set(issued_orders.order_ids_from_stats(stats))
+    _out2, _fn2, stats2 = biseller_order.process(winners_bytes=second, issued_keys=keys)
+    assert stats2["total"] == 1 and stats2["duplicate_skipped"] == 1
+    assert stats2["options"][0]["orders"][0]["order_id"] == "8102761791999"

@@ -172,14 +172,36 @@ def _entries_from_winners(winners_bytes: bytes) -> tuple[list[dict], list[str]]:
     return entries, notes
 
 
+def _drop_issued_winners(
+    event_entries: list[dict],
+    issued_keys: set[str],
+    duplicate_names: list[str] | None = None,
+) -> tuple[list[dict], int]:
+    """이미 발주된 당첨자(주문번호+경품명)를 걸러낸다 — 같은 CSV 재업로드 시 중복발주 방지."""
+    from app.processors import issued_orders
+
+    wrapped = [
+        {"order_id": e["order_no"], "option": e["source_option"], "name": e["name"], "_entry": e}
+        for e in event_entries
+    ]
+    kept, dropped = issued_orders.filter_entries_by_issued(
+        wrapped, issued_keys, skipped_names=duplicate_names
+    )
+    return [item["_entry"] for item in kept], dropped
+
+
 def process(
     delivery_file_bytes: bytes | None = None,
     winners_bytes: bytes | None = None,
+    issued_keys: set[str] | None = None,
+    duplicate_names: list[str] | None = None,
 ) -> tuple[bytes, str, dict]:
     """비셀러 발주서 생성.
 
     winners_bytes: 라이브 이벤트 당첨자 CSV(선택) — 쿠팡 주문 뒤에 이어붙여 한 장으로 낸다
         (2026-09-07 요청: 당첨자 명단도 같은 비셀러 양식으로).
+    issued_keys: 이미 발주된 '주문번호|옵션' 키. 당첨자 CSV 쪽 중복발주를 막는다
+        (DeliveryList 쪽은 main.py의 filter_delivery_by_issued가 미리 걸러낸다).
     """
     if not delivery_file_bytes and not winners_bytes:
         raise ValueError("DeliveryList 또는 라이브 이벤트 당첨자 CSV 중 하나는 올려야 합니다.")
@@ -188,6 +210,7 @@ def process(
     needs_check: list[str] = []
     coupang_count = 0
     event_count = 0
+    event_duplicate_skipped = 0
 
     if delivery_file_bytes:
         dl_entries, unmatched = _entries_from_delivery(delivery_file_bytes)
@@ -197,6 +220,10 @@ def process(
 
     if winners_bytes:
         event_entries, notes = _entries_from_winners(winners_bytes)
+        if issued_keys:
+            event_entries, event_duplicate_skipped = _drop_issued_winners(
+                event_entries, issued_keys, duplicate_names
+            )
         entries.extend(event_entries)
         needs_check.extend(notes)
         event_count = len(event_entries)
@@ -281,6 +308,8 @@ def process(
     if winners_bytes:
         stats["coupang"] = coupang_count
         stats["event"] = event_count
+    if event_duplicate_skipped:
+        stats["duplicate_skipped"] = event_duplicate_skipped
     if needs_check:
         stats["needs_check"] = needs_check
 

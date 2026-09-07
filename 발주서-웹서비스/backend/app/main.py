@@ -2008,12 +2008,28 @@ async def process_goguma_tracking(
 async def process_biseller_order(
     delivery_file: UploadFile | None = File(None),
     winners_file: UploadFile | None = File(None),
+    exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read() if delivery_file else None
         winners_bytes = await winners_file.read() if winners_file else None
-        output_bytes, filename, stats = biseller_order.process(delivery_bytes, winners_bytes)
+        issued_excluded = await _issued_exclusions("biseller", exclude_issued)
+        dup_names: list[str] = []
+        dup_skipped = 0
+        if delivery_bytes:
+            delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
+                delivery_bytes, issued_excluded, skipped_names=dup_names
+            )
+        output_bytes, filename, stats = biseller_order.process(
+            delivery_bytes, winners_bytes, issued_excluded, dup_names
+        )
+        await _record_issued("biseller", filename, stats)
+        dup_skipped += int((stats or {}).pop("duplicate_skipped", 0) or 0)
+        if dup_skipped:
+            stats = {**(stats or {}), "duplicate_skipped": dup_skipped}
+            if dup_names:
+                stats["duplicate_skipped_names"] = ", ".join(n for n in dup_names if n)
         await record_sales_from_process_stats(
             user["user_id"],
             stats,
