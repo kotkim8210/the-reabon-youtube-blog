@@ -4,6 +4,7 @@ import { Pencil, Check, X } from 'lucide-react';
 import FileUpload from '../components/FileUpload';
 import {
   processFile, downloadBlob, ProcessResult, processTossWatermelonTracking, processDaangnOrder,
+  sendOrderEmailFiles,
   fetchSabangStatus, testSabangConnection, processSabangFruitOrder, processSabangFruitTracking,
   fetchSabangCourierCodes, SabangCourierCode,
   SabangStatus, SabangTrackingResult,
@@ -88,6 +89,8 @@ interface SectionConfig {
   tossDateTitle?: string;
   tossDateHint?: string;
   tossDefaultDays?: number;  // 기본 수집 기간(며칠 전부터). 0=오늘만, 1=2일(어제~오늘)
+  emailSupplier?: string;    // 설정하면 결과에 '발주서 이메일 발송' 버튼이 뜬다(백엔드 supplier 키)
+  emailTo?: string;          // 화면 안내용 수신 주소
 }
 
 interface ProductConfig {
@@ -111,6 +114,8 @@ const productConfigs: Record<string, ProductConfig> = {
       title: '비셀러 LA한입갈비 발주서 생성',
       icon: '📋',
       apiToolId: 'biseller-order',
+      emailSupplier: 'biseller',
+      emailTo: 'naeun_order@naver.com',
       files: [
         { key: 'delivery', label: '쿠팡 DeliveryList 파일 (당첨자 CSV만 있으면 비워도 됩니다)', optional: true },
         {
@@ -311,6 +316,25 @@ function ProcessSection({
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ProcessResult | null>(null);
   const [error, setError] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailMessage, setEmailMessage] = useState('');
+  const [emailError, setEmailError] = useState('');
+
+  const handleSendEmail = async () => {
+    if (!result || !section.emailSupplier) return;
+    setEmailSending(true);
+    setEmailMessage('');
+    setEmailError('');
+    try {
+      const file = new File([result.blob], result.filename, { type: result.blob.type });
+      const res = await sendOrderEmailFiles([file], section.emailSupplier);
+      setEmailMessage(`발송 완료 → ${res.to || section.emailTo || ''} · 제목 "${res.subject || ''}"`);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : '이메일 발송에 실패했습니다.');
+    } finally {
+      setEmailSending(false);
+    }
+  };
 
   const requiredFiles = section.files.filter((f) => !f.optional);
   // 필수 파일이 하나도 없는 섹션(예: 비셀러 발주 = DeliveryList 또는 당첨자 CSV)은
@@ -543,6 +567,24 @@ function ProcessSection({
             </svg>
             {result.filename} 다운로드
           </button>
+          {section.emailSupplier && (
+            <div className="mt-3 border-t border-green-200 pt-3">
+              <button
+                onClick={handleSendEmail}
+                disabled={emailSending}
+                className="inline-flex items-center gap-2 rounded-xl border border-green-600 bg-white
+                           px-4 py-2 text-sm font-semibold text-green-700
+                           hover:bg-green-50 disabled:opacity-60 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                {emailSending ? '발송 중...' : `발주서 이메일 발송${section.emailTo ? ` (${section.emailTo})` : ''}`}
+              </button>
+              {emailMessage && <p className="mt-2 text-sm text-green-700">{emailMessage}</p>}
+              {emailError && <p className="mt-2 text-sm text-red-600">{emailError}</p>}
+            </div>
+          )}
         </div>
       )}
     </div>

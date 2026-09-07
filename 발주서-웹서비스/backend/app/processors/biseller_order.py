@@ -299,7 +299,9 @@ def process(
     tmpl_wb.save(output)
     output.seek(0)
 
-    filename = f"아이티소프트_비셀러발주서_{datetime.now(KST).strftime('%Y%m%d')}.xlsx"
+    # 파일명은 거래처(리앤유커머스) 회신 파일과 같은 규칙 — 담당자가 바로 알아본다.
+    # 예: 나은_260907_리앤유커머스(아이티소프트).xlsx
+    filename = f"나은_{datetime.now(KST).strftime('%y%m%d')}_리앤유커머스(아이티소프트).xlsx"
     stats = {
         "total": len(entries),
         "product": PRODUCT_LABEL,

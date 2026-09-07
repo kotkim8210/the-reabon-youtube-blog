@@ -1115,10 +1115,13 @@ async def process_goguma_order(
 @app.post("/api/process/send-order-email")
 async def send_order_email(
     files: list[UploadFile] = File(...),
+    supplier: str = Form("haedal"),
     _token: dict = Depends(verify_token),
 ):
-    """업로드한 발주서 파일(1개 이상)을 farmers2022@naver.com로 첨부 발송.
+    """업로드한 발주서 파일(1개 이상)을 발주처 메일로 첨부 발송.
 
+    supplier=haedal(기본) → farmers2022@naver.com,
+    supplier=biseller → naeun_order@naver.com (비셀러/리앤유커머스).
     테무 해달 발주서를 따로 뽑았거나 발주서를 수정해서 재발송할 때 사용.
     """
     attachments: list[tuple[bytes, str]] = []
@@ -1128,13 +1131,13 @@ async def send_order_email(
             attachments.append((data, upload.filename or "발주서.xlsx"))
     if not attachments:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="첨부할 발주서 파일이 없습니다.")
-    result = email_service.send_order_files_email(attachments)
+    result = email_service.send_order_files_email(attachments, supplier)
     if not result.get("sent"):
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"이메일 발송 실패: {result.get('error')}",
         )
-    logger.info(f"발주서 수동 이메일 발송: {[name for _, name in attachments]}")
+    logger.info(f"발주서 수동 이메일 발송({supplier}): {[name for _, name in attachments]}")
     return {"status": "ok", **result, "files": [name for _, name in attachments]}
 
 
