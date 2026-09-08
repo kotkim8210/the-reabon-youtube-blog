@@ -1,0 +1,16 @@
+# DuckDNS 등으로 받은 무료 도메인을 SITE_DOMAIN에 넣으면
+# Let's Encrypt 인증서를 자동으로 받아 갱신까지 해준다(무료).
+{$SITE_DOMAIN} {
+	encode gzip
+	# 발주서·운송장 파일 업로드가 커질 수 있어 넉넉히
+	request_body {
+		max_size 100MB
+	}
+	reverse_proxy app:8000 {
+		# 엑셀 변환·API 수집이 오래 걸리는 요청 대비
+		transport http {
+			read_timeout 600s
+			write_timeout 600s
+		}
+	}
+}

@@ -1,0 +1,37 @@
+# 오라클 클라우드 Always Free VM용 구성 (서버비 0원).
+# Fly.io와 동일하게: 앱 1개 + 영구 데이터(/data) + HTTPS.
+#   docker compose up -d --build
+services:
+  app:
+    build:
+      context: ../..          # 발주서-웹서비스 폴더(Dockerfile 위치)
+    restart: always
+    env_file: .env
+    environment:
+      DATABASE_PATH: /data/suyikolla.db
+      TZ: Asia/Seoul
+    volumes:
+      - appdata:/data         # Fly의 볼륨과 같은 역할 (SQLite·백업 보관)
+    expose:
+      - "8000"
+
+  # 무료 HTTPS 인증서(Let's Encrypt) 자동 발급·갱신
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on:
+      - app
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+volumes:
+  appdata:
+  caddydata:
+  caddyconfig:
