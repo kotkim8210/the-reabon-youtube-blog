@@ -53,7 +53,7 @@ def test_process_fills_template():
     ])
     out, filename, stats = biseller_order.process(payload)
     assert stats["total"] == 2
-    assert filename.startswith("나은_") and filename.endswith("_리앤유커머스(아이티소프트).xlsx")
+    assert filename.startswith("LA한입갈비(") and filename.endswith(").xlsx")
     ws = load_workbook(BytesIO(out)).active
 
     assert ws.cell(1, 7).value == "상품명 (비셀러 상품명)"
@@ -131,7 +131,7 @@ def test_winners_csv_only_makes_order_sheet():
     ])
     out, filename, stats = biseller_order.process(winners_bytes=data)
     assert stats["total"] == 2 and stats["event"] == 2 and stats["coupang"] == 0
-    assert filename.startswith("나은_") and filename.endswith("_리앤유커머스(아이티소프트).xlsx")
+    assert filename.startswith("LA한입갈비(") and filename.endswith(").xlsx")
     ws = load_workbook(BytesIO(out)).active
     assert ws.cell(2, 3).value == "제원희"
     assert ws.cell(2, 7).value == "양념LA한입갈비 800g+800g (800G*2세트)"
@@ -243,13 +243,13 @@ def test_issued_keys_do_not_block_new_winner():
 
 
 # ── 발주 파일명·이메일 (2026-09-07) ──
-def test_filename_follows_vendor_convention():
-    """거래처 회신 파일과 같은 규칙: 나은_YYMMDD_리앤유커머스(아이티소프트).xlsx"""
+def test_filename_is_product_name_plus_date():
+    """파일명 = 상품명 + 날짜 (2026-09-09 사용자 요청): LA한입갈비(YYYYMMDD).xlsx"""
     import re
 
     payload = _delivery([{"option": "800g 4개", "name": "김철수"}])
     _out, filename, _stats = biseller_order.process(payload)
-    assert re.fullmatch(r"나은_\d{6}_리앤유커머스\(아이티소프트\)\.xlsx", filename), filename
+    assert re.fullmatch(r"LA한입갈비\(\d{8}\)\.xlsx", filename), filename
 
 
 def test_biseller_email_target():

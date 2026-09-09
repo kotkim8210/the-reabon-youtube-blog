@@ -24,6 +24,8 @@ TEMPLATE_NAME = "비셀러_발주서_원본.xlsx"
 SENDER_NAME = "(주)아이티소프트"
 SENDER_PHONE = "010-5700-7756"
 PRODUCT_LABEL = "LA한입갈비(비셀러)"
+# 발주서 파일명에 쓰는 상품명(거래처 표기 없이 상품만)
+ORDER_PRODUCT_NAME = "LA한입갈비"
 
 
 def normalize(value) -> str:
@@ -299,9 +301,8 @@ def process(
     tmpl_wb.save(output)
     output.seek(0)
 
-    # 파일명은 거래처(리앤유커머스) 회신 파일과 같은 규칙 — 담당자가 바로 알아본다.
-    # 예: 나은_260907_리앤유커머스(아이티소프트).xlsx
-    filename = f"나은_{datetime.now(KST).strftime('%y%m%d')}_리앤유커머스(아이티소프트).xlsx"
+    # 파일명은 상품명 + 날짜 (2026-09-09 사용자 요청). 예: LA한입갈비(20260909).xlsx
+    filename = f"{ORDER_PRODUCT_NAME}({datetime.now(KST).strftime('%Y%m%d')}).xlsx"
     stats = {
         "total": len(entries),
         "product": PRODUCT_LABEL,
