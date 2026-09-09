@@ -163,11 +163,16 @@ async def process_from_api(
     orders = await collect_orders(from_date, to_date)
 
     toss_entries = []
+    toss_error = ""
     if include_toss:
         try:
             toss_entries = await goguma_order.collect_toss_orders(from_date, to_date)
         except Exception as e:
-            logger.warning(f"토스 주문 수집 실패 (계속 진행): {e}")
+            # 조용히 0건으로 넘기면 "토스 주문이 없다"로 오해한다 — 실패 사유를 화면에 띄운다
+            toss_error = str(e) or type(e).__name__
+            if "IP" in toss_error.upper():
+                toss_error += " (토스 파트너센터 > API 허용 IP에 이 PC의 공인 IP를 등록해야 합니다)"
+            logger.warning(f"토스 주문 수집 실패 (쿠팡분만 계속 진행): {e}")
 
     # 이전 영업일 발주분 자동 제외 (중복발주 방지)
     duplicate_skipped = 0
@@ -311,5 +316,8 @@ async def process_from_api(
         "product": "고구마",
         "options": list(option_totals.values()),
     }
+    if toss_error:
+        stats["toss"] = "수집 실패"
+        stats["needs_check"] = ["토스 주문 수집 실패 — " + toss_error]
 
     return output.read(), filename, stats
