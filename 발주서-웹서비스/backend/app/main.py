@@ -448,6 +448,7 @@ async def process_kolrabi_order(
         toss_bamhobak_entries = []
         toss_potato_entries = []
         toss_baekdo_entries = []
+        toss_hongro_entries = []
         toss_error = ""
         collect_dates = None
         if toss_from_date and toss_to_date:
@@ -474,10 +475,14 @@ async def process_kolrabi_order(
                 toss_baekdo_entries, _dup_bd = issued_orders.filter_entries_by_issued(
                     toss_baekdo_entries, issued_excluded, skipped_names=dup_names
                 )
-                dup_skipped += _dup_c + _dup_b + _dup_p + _dup_bd
+                toss_hongro_entries = toss_jeju.get("hongro", [])
+                toss_hongro_entries, _dup_h = issued_orders.filter_entries_by_issued(
+                    toss_hongro_entries, issued_excluded, skipped_names=dup_names
+                )
+                dup_skipped += _dup_c + _dup_b + _dup_p + _dup_bd + _dup_h
             except Exception as toss_exc:
                 toss_error = str(toss_exc)
-                logger.warning(f"토스 제주다팜(콜라비·미니밤호박) 수집 실패(발주는 계속): {toss_exc}")
+                logger.warning(f"토스 제주다팜(콜라비·미니밤호박·홍감자·백도·홍로) 수집 실패(발주는 계속): {toss_exc}")
 
         results = kolrabi_order.process_outputs(
             delivery_bytes,
@@ -485,12 +490,13 @@ async def process_kolrabi_order(
             toss_bamhobak_entries=toss_bamhobak_entries,
             toss_potato_entries=toss_potato_entries,
             toss_baekdo_entries=toss_baekdo_entries,
+            toss_hongro_entries=toss_hongro_entries,
         )
         if not results:
             dup_note = f" (이전 발주분 {dup_skipped}건 자동 제외됨)" if dup_skipped else ""
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자·백도딱딱이복숭아 주문을 찾지 못했습니다.{dup_note}",
+                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자·백도딱딱이복숭아·홍로사과 주문을 찾지 못했습니다.{dup_note}",
             )
 
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)

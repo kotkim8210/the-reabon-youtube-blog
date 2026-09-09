@@ -852,6 +852,7 @@ def process_outputs(
     toss_bamhobak_entries: list[dict] | None = None,
     toss_potato_entries: list[dict] | None = None,
     toss_baekdo_entries: list[dict] | None = None,
+    toss_hongro_entries: list[dict] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
     """제주다팜 발주서 목록 반환 — 콜라비 + 미니밤호박 + 홍감자.
 
@@ -890,7 +891,7 @@ def process_outputs(
     # 청사과(아오리)는 2026-08-27 제이비티로 발주 이관 — 제주다팜 발주서에서 제외.
     # (process_apple/convert_apple_option 함수는 이력·이벤트 참조용으로 남겨둔다)
 
-    hongro_result = process_hongro(delivery_file_bytes)
+    hongro_result = process_hongro(delivery_file_bytes, toss_entries=toss_hongro_entries)
     if hongro_result and _has_content(hongro_result[2]):
         results.append(hongro_result)
 

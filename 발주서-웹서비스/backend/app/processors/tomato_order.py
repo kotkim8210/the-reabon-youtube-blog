@@ -330,7 +330,7 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
 async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     """토스 API에서 제주다팜 발주 대상(콜라비 + 미니밤호박 전 옵션 + 홍감자) 주문을 수집.
 
-    반환: {"colrabi": [...], "bamhobak": [...], "potato": [...]} — 각 entry에
+    반환: {"colrabi": [...], "bamhobak": [...], "potato": [...], "baekdo": [...], "hongro": [...]} — 각 entry에
     'product'(제주다팜 발주 품목명) 포함.
     콜라비는 3/5/10kg('콜라비 정품 {kg}kg'), 미니밤호박은 전 옵션(2026-08-17 쥬얼리→제주다팜 통합),
     홍감자는 2026-07 쥬얼리 품절로 제주다팜 이관(중1→중2, 대3→특3, 대5→특5).
@@ -339,9 +339,11 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     from app.toss.client import toss_client
     from app.processors.kolrabi_order import (
         convert_bamhobak_option,
+        convert_hongro_option,
         convert_jeju_baekdo_option,
         convert_potato_option,
         convert_quantity,
+        is_jeju_hongro_order,
     )
 
     orders = await toss_client.get_orders(start_date=from_date, end_date=to_date, status=None)
@@ -350,11 +352,13 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     bamhobak: list[dict] = []
     potato: list[dict] = []
     baekdo: list[dict] = []
+    hongro: list[dict] = []
     for item in orders:
         text = _toss_item_text(item)
         compact = text.replace(" ", "")
         if ("콜라비" not in compact and "밤호박" not in compact
-                and "홍감자" not in compact and "백도" not in compact):
+                and "홍감자" not in compact and "백도" not in compact
+                and not is_jeju_hongro_order(compact, "")):
             continue
         order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
         if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
@@ -404,8 +408,13 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
             product = convert_jeju_baekdo_option(product_name, option)  # 2·4kg만(1kg은 쥬얼리)
             if product:
                 baekdo.append(_entry(product, "toss-baekdo"))
+        elif is_jeju_hongro_order(product_name, option):
+            # 홍로사과(가을햇사과) — 청사과(제이비티)와는 배타 판정
+            product = convert_hongro_option(product_name, option)
+            if product:
+                hongro.append(_entry(product, "toss-hongro"))
 
-    return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato, "baekdo": baekdo}
+    return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato, "baekdo": baekdo, "hongro": hongro}
 
 
 async def process_toss_watermelon_order(
