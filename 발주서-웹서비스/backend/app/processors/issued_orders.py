@@ -62,6 +62,7 @@ def filter_delivery_by_issued(
     delivery_bytes: bytes,
     exclude_order_ids: set[str],
     skipped_names: list[str] | None = None,
+    skipped_keys: list[str] | None = None,
 ) -> tuple[bytes, int]:
     """DeliveryList에서 이미 발주된 주문번호(C열) 행을 제거한 bytes와 제거 건수를 반환.
 
@@ -82,11 +83,14 @@ def filter_delivery_by_issued(
         if not normalize_option(option):
             option = ws.cell(row=row_idx, column=11).value  # 옵션이 비면 K열 상품명
         # 복합키(주문번호+옵션)가 맞거나, 과거 주문번호 단독 기록이면 제외
-        if make_order_key(order_id, option) in composite or order_id in legacy:
+        key = make_order_key(order_id, option)
+        if key in composite or order_id in legacy:
             to_delete.append(row_idx)
             if skipped_names is not None:
                 name = str(ws.cell(row=row_idx, column=27).value or "").strip()  # AA열 = 수취인이름
                 skipped_names.append(name or order_id)
+            if skipped_keys is not None:
+                skipped_keys.append(key if key in composite else order_id)
     if not to_delete:
         return delivery_bytes, 0
     for row_idx in reversed(to_delete):

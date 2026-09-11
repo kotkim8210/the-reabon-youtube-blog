@@ -1545,6 +1545,20 @@ async def issued_order_ids_before(section: str, today_ymd: str) -> set[str]:
     return {str(row["order_key"]) for row in rows}
 
 
+async def issued_order_dates_before(section: str, today_ymd: str) -> dict[str, str]:
+    """오늘 이전에 발주서에 포함됐던 주문키 → 최초 발주일(YYYY-MM-DD).
+
+    "며칠 전 발주분인데 아직 미출고" 경고용. 같은 키가 여러 번 기록됐으면 가장 이른 날짜.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT order_key, MIN(issued_on) AS first_issued FROM issued_order_items "
+        "WHERE section = ? AND issued_on < ? GROUP BY order_key",
+        (section, today_ymd),
+    )
+    rows = await cursor.fetchall()
+    return {str(row["order_key"]): str(row["first_issued"]) for row in rows}
+
 async def record_issued_orders(section: str, order_ids: list[str], filename: str, today_ymd: str) -> None:
     """발주서에 포함된 주문번호를 기록. 재발주 시 issued_on을 최신 날짜로 갱신."""
     if not order_ids:
