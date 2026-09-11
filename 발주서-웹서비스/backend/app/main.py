@@ -495,7 +495,9 @@ async def process_kolrabi_order(
         delivery_bytes = await delivery_file.read()
         _require_xlsx(delivery_bytes)
         issued_excluded = await _issued_exclusions("kolrabi", exclude_issued)
+        issued_dates = await _issued_exclusion_dates("kolrabi", exclude_issued)
         dup_names: list[str] = []
+        dup_keys: list[str] = []
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
             delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
         )
