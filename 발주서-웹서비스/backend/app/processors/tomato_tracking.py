@@ -266,9 +266,11 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
     for item in toss_orders_raw:
         text = _toss_item_text(item)
         # 우리 취급 토스 주문에 송장 등록 (회신 수령인명으로 매칭).
-        # 쥬얼리(수박·참외·복숭아·감자) + 제주다팜(밤호박·콜라비·초당옥수수)까지 포함해야
-        # 제주다팜 페이지에서도 토스 주문(밤호박 1kg 등)이 끌려와 운송장이 등록된다.
-        if not any(k in text for k in ("수박", "참외", "복숭아", "감자", "밤호박", "콜라비", "옥수수")):
+        # 쥬얼리(수박·참외·복숭아·감자) + 제주다팜(밤호박·콜라비·초당옥수수·홍로사과)
+        # + 제이비티(청사과)까지 포함해야 각 페이지에서 토스 주문이 끌려와 운송장이 등록된다.
+        # '사과'는 홍로사과·가을햇사과(제주다팜)와 청사과(제이비티)를 모두 덮는다 —
+        # 2026-09-11 홍로 주문 2건이 여기서 걸러져 송장이 안 들어가던 사고.
+        if not any(k in text for k in ("수박", "참외", "복숭아", "감자", "밤호박", "콜라비", "옥수수", "사과")):
             continue
 
         option = str(item.get("optionName") or "")
