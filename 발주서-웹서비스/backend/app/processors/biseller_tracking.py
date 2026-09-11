@@ -44,17 +44,25 @@ def _tracking_text(value) -> str:
 
 
 def _reply_columns(ws) -> dict[str, int]:
-    """비셀러 발주 양식 헤더에서 열 위치를 찾는다(열 순서가 바뀌어도 동작)."""
+    """비셀러 회신 헤더에서 열 위치를 찾는다(열 순서가 바뀌어도 동작).
+
+    회신 양식은 두 가지다:
+    - 발주 양식 되돌려주기: 수취인명 / 수취인연락처 / 주소 / 택배사 / 송장번호
+    - 주문 상품목록 내보내기(2026-09-11): 수취인 성명 / 수취인 전화번호 / 수취인 주소 /
+      택배사 / 송장번호 — 주문자 성명·주문자 전화번호 열이 앞에 따로 있어 그쪽을 잡으면 안 된다.
+    """
     found: dict[str, int] = {}
     for col in range(1, ws.max_column + 1):
         header = normalize(ws.cell(row=1, column=col).value)
         if not header:
             continue
-        if "수취인명" in header or header == "수취인":
+        recipient = ("수취인" in header or "수령인" in header or "받는분" in header) and "주문자" not in header
+        contact = "전화" in header or "연락처" in header or "휴대폰" in header
+        if recipient and not contact and "주소" not in header and "우편" not in header:
             found.setdefault("name", col)
-        elif "수취인연락처" in header or "연락처" in header and "주문자" not in header:
+        elif recipient and contact:
             found.setdefault("phone", col)
-        elif "주소" in header:
+        elif "주소" in header and "주문자" not in header and "보내" not in header:
             found.setdefault("address", col)
         elif "상품명" in header:
             found.setdefault("product", col)
@@ -129,6 +137,10 @@ def process(
     for row_idx in range(2, dl_ws.max_row + 1):
         name = normalize(dl_ws.cell(row=row_idx, column=27).value)   # AA 수취인이름
         if not name:
+            continue
+        # 이미 송장이 들어간 행은 건드리지 않는다 — 주문목록 내보내기는 3개월치 누적이라
+        # 같은 이름의 옛 송장이 새 주문에 덮어써질 수 있다.
+        if normalize(dl_ws.cell(row=row_idx, column=5).value):
             continue
         dl_rows[name].append({
             "row": row_idx,

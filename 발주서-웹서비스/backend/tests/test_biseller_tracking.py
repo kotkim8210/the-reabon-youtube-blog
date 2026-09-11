@@ -118,3 +118,65 @@ def test_reply_without_tracking_raises():
         assert "송장번호" in str(exc)
     else:
         raise AssertionError("송장 없는 회신이 통과되면 안 된다")
+
+
+# ── 주문 상품목록 내보내기 양식 (2026-09-11) ──
+_EXPORT_HEADERS = [
+    "주문일", "주문번호", "배송번호", "상품명", "옵션명", "수량", "결제금액",
+    "주문자 성명", "주문자 전화번호", "수취인 성명", "수취인 전화번호", "수취인 주소",
+    "배송메시지", "택배사", "송장번호",
+]
+
+
+def _export(rows: list[dict]) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(_EXPORT_HEADERS)
+    for r in rows:
+        ws.append([
+            "2026/09/11", "20260911081929-500", "S-26091108-3943702",
+            r.get("product", "양념LA한입갈비 800g+800g"), "", 1, "20,480",
+            "아이티소프트", "010-9506-8845",
+            r["name"], r.get("phone", "0502-1111-2222"), r.get("address", "서울시 어딘가 1-2"),
+            "", r.get("courier", "롯데택배"), r.get("tracking", ""),
+        ])
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_order_export_format_is_recognized():
+    """수취인 성명/수취인 전화번호 헤더 — 주문자 열을 잡으면 안 된다."""
+    reply = _export([{"name": "김병남", "phone": "0504-4927-6309", "tracking": "411722452923"}])
+    entries = biseller_tracking.parse_reply(reply)
+    assert len(entries) == 1
+    assert entries[0]["name"] == "김병남"
+    assert entries[0]["phone"] == "05044927 6309".replace(" ", "")
+    assert entries[0]["tracking"] == "411722452923"
+
+
+def test_order_export_fills_delivery_list():
+    delivery = _delivery([{"name": "김병남", "phone": "0504-4927-6309"}, {"name": "최진오"}])
+    reply = _export([
+        {"name": "김병남", "phone": "0504-4927-6309", "tracking": "411722452923"},
+        {"name": "최진오", "tracking": "411722453052", "courier": "CJ대한통운"},
+        {"name": "옛주문", "tracking": "411141058355"},   # 3개월 누적분 — 오늘 DL에 없음
+    ])
+    out, _fn, stats = biseller_tracking.process(delivery, [reply])
+    assert stats["filled"] == 2 and stats["skipped"] == 1
+    ws = load_workbook(BytesIO(out)).active
+    assert ws.cell(2, 5).value == "411722452923" and ws.cell(2, 4).value == "롯데택배"
+    assert ws.cell(3, 5).value == "411722453052" and ws.cell(3, 4).value == "CJ 대한통운"
+
+
+def test_already_filled_rows_are_not_overwritten():
+    """누적 내보내기의 옛 송장이 이미 입력된 행을 덮어쓰면 안 된다."""
+    delivery = _delivery([{"name": "이만형"}])
+    from openpyxl import load_workbook as _lw
+    wb = _lw(BytesIO(delivery)); ws = wb.active
+    ws.cell(2, 5, "411722398695")   # 이미 입력된 송장
+    buf = BytesIO(); wb.save(buf)
+    reply = _export([{"name": "이만형", "tracking": "411141058355"}])
+    out, _fn, stats = biseller_tracking.process(buf.getvalue(), [reply])
+    assert stats["filled"] == 0
+    assert load_workbook(BytesIO(out)).active.cell(2, 5).value == "411722398695"
