@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MessageSquare,
   RefreshCw,
   Search,
   Settings,
@@ -25,6 +26,7 @@ import SidebarItem from './mvp/SidebarItem';
 const adminNavItems = [
   { icon: LayoutDashboard, label: '자동화 대시보드', path: '/' },
   { icon: ShoppingCart, label: '발주 도구', path: '/orders' },
+  { icon: MessageSquare, label: 'CS 환불 템플릿', path: '/cs' },
   { icon: CreditCard, label: '구독 & 사용량', path: '/billing' },
 ];
 
@@ -32,6 +34,7 @@ const tenantNavItems = [
   { icon: LayoutDashboard, label: '자동화 대시보드', path: '/' },
   { icon: ShoppingCart, label: '내 발주 자동화', path: '/my/process' },
   { icon: Settings, label: '상품/양식 설정', path: '/my/products' },
+  { icon: MessageSquare, label: 'CS 환불 템플릿', path: '/cs' },
   { icon: CreditCard, label: '구독 & 사용량', path: '/billing' },
 ];
 
