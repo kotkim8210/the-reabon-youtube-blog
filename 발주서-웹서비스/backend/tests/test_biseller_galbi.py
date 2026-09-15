@@ -47,6 +47,7 @@ def test_non_galbi_orders_are_ignored():
 
 
 def test_process_fills_template():
+    """메이크샵 발주용 양식: 1~3행 헤더 유지, 4행부터 상품번호·수량·주문자·수취인."""
     payload = _delivery([
         {"option": "800g 4개", "name": "김철수", "qty": 1, "zipcode": "06236"},
         {"option": "800g 2개", "name": "이영희", "qty": 2, "memo": "부재시 경비실"},
@@ -55,32 +56,29 @@ def test_process_fills_template():
     assert stats["total"] == 2
     assert filename.startswith("LA한입갈비(") and filename.endswith(").xlsx")
     ws = load_workbook(BytesIO(out)).active
+    assert ws.title == "발주용 양식"
+    assert [ws.cell(1, c).value for c in (1, 2, 5, 9, 12, 14)] == ["순서", "상품번호", "옵션번호", "수량", "수취인 성명", "우편번호"]
+    assert ws.cell(2, 2).value == "goods_no" and ws.cell(3, 2).value == "필수 입력값"
+    # 4행: 4세트 → 상품번호 6121
+    assert ws.cell(4, 1).value == 1
+    assert ws.cell(4, 2).value == 6121 and ws.cell(4, 3).value == "PL0006033"
+    assert ws.cell(4, 4).value == "양념LA한입갈비 800g+800g+800g+800g (800G*4세트)"
+    assert ws.cell(4, 5).value == 0 and ws.cell(4, 7).value == "무료배송" and ws.cell(4, 8).value == 37800
+    assert ws.cell(4, 9).value == 1
+    assert ws.cell(4, 10).value == "(주)아이티소프트" and ws.cell(4, 11).value == "010-5700-7756"
+    assert ws.cell(4, 12).value == "김철수" and ws.cell(4, 14).value == "06236"
+    # 5행: 2세트 → 상품번호 6120, 수량 2, 배송메시지
+    assert ws.cell(5, 2).value == 6120 and ws.cell(5, 8).value == 20480
+    assert ws.cell(5, 9).value == 2 and ws.cell(5, 12).value == "이영희"
+    assert ws.cell(5, 16).value == "부재시 경비실"
 
-    assert ws.cell(1, 7).value == "상품명 (비셀러 상품명)"
-    assert ws.cell(2, 1).value == 1 and ws.cell(3, 1).value == 2
-    assert ws.cell(2, 3).value == "김철수"
-    assert ws.cell(2, 5).value == "06236"
-    assert ws.cell(2, 7).value == "양념LA한입갈비 800g+800g+800g+800g (800G*4세트)"
-    assert ws.cell(2, 8).value == 1
-    assert ws.cell(2, 10).value == "(주)아이티소프트"
-    assert ws.cell(2, 11).value == "010-5700-7756"
-    assert ws.cell(3, 7).value == "양념LA한입갈비 800g+800g (800G*2세트)"
-    assert ws.cell(3, 8).value == 2
-    assert ws.cell(3, 9).value == "부재시 경비실"
-    # 택배사·송장번호는 거래처가 채우는 칸 → 비어 있어야 한다
-    assert ws.cell(2, 12).value in (None, "")
-    assert ws.cell(2, 13).value in (None, "")
 
-
-def test_sum_formula_follows_row_count():
-    payload = _delivery([{"option": "800g 4개"} for _ in range(40)])
+def test_many_rows_are_written_sequentially():
+    payload = _delivery([{"option": "800g 4개"} for _ in range(60)])
     out, _fn, stats = biseller_order.process(payload)
-    assert stats["total"] == 40
+    assert stats["total"] == 60
     ws = load_workbook(BytesIO(out)).active
-    total_row = next(r for r in range(2, ws.max_row + 1) if ws.cell(r, 7).value == "합계")
-    assert total_row == 42  # 2행부터 40건 + 합계
-    assert ws.cell(total_row, 8).value == "=SUM(H2:H41)"
-    assert ws.cell(41, 7).value == "양념LA한입갈비 800g+800g+800g+800g (800G*4세트)"
+    assert ws.cell(4 + 59, 1).value == 60 and ws.cell(4 + 59, 2).value == 6121
 
 
 def test_unreadable_quantity_is_reported():
@@ -133,11 +131,14 @@ def test_winners_csv_only_makes_order_sheet():
     assert stats["total"] == 2 and stats["event"] == 2 and stats["coupang"] == 0
     assert filename.startswith("LA한입갈비(") and filename.endswith(").xlsx")
     ws = load_workbook(BytesIO(out)).active
-    assert ws.cell(2, 3).value == "제원희"
-    assert ws.cell(2, 7).value == "양념LA한입갈비 800g+800g (800G*2세트)"
-    assert ws.cell(2, 8).value == 1
-    assert ws.cell(2, 10).value == "(주)아이티소프트"
-    assert ws.cell(3, 3).value == "김이정"
+    # 당첨 1팩 → 2세트(상품번호 6120)
+    assert ws.cell(4, 12).value == "제원희" and ws.cell(4, 2).value == 6120
+    assert ws.cell(4, 4).value == "양념LA한입갈비 800g+800g (800G*2세트)"
+    assert ws.cell(4, 9).value == 1 and ws.cell(4, 10).value == "(주)아이티소프트"
+    assert ws.cell(5, 12).value == "김이정"
+    # 당첨자 CSV엔 우편번호가 없다 → 메이크샵 필수값이라 확인 필요로 알린다
+    notes = " / ".join(stats["needs_check"])
+    assert "우편번호 없음" in notes and "제원희" in notes
 
 
 def test_winners_merge_with_coupang_orders_into_one_sheet():
@@ -148,8 +149,8 @@ def test_winners_merge_with_coupang_orders_into_one_sheet():
     out, _fn, stats = biseller_order.process(delivery, winners)
     assert stats["total"] == 2 and stats["coupang"] == 1 and stats["event"] == 1
     ws = load_workbook(BytesIO(out)).active
-    assert [ws.cell(r, 3).value for r in (2, 3)] == ["쿠팡손님", "이벤트손님"]
-    assert [ws.cell(r, 1).value for r in (2, 3)] == [1, 2]
+    assert [ws.cell(r, 12).value for r in (4, 5)] == ["쿠팡손님", "이벤트손님"]
+    assert [ws.cell(r, 1).value for r in (4, 5)] == [1, 2]
 
 
 def test_refunded_and_other_prizes_are_reported_not_dropped():
@@ -174,13 +175,13 @@ def test_requires_at_least_one_file():
 
 
 def test_coupang_single_pack_is_not_promoted():
-    """승급은 이벤트 경로에만 — 쿠팡 1개 주문을 2세트로 늘려 보내면 안 된다."""
+    """승급은 이벤트 경로에만 — 쿠팡 1개 주문은 2세트로 늘리지 않고, 상품번호가 없으니 확인 필요로 알린다."""
     payload = _delivery([{"option": "800g 1개", "name": "쿠팡손님"}])
     _out, _fn, stats = biseller_order.process(payload)
-    assert stats["options"][0]["vendor_option_name"] == "양념LA한입갈비 800g (800G*1세트)"
+    assert stats["total"] == 0
+    assert any("쿠팡손님" in m and "1세트" in m for m in stats["needs_check"])
 
 
-# ── 중복발주 방지 (2026-09-07) ──
 def test_issued_keys_block_coupang_rerun():
     """어제 발주한 쿠팡 주문은 오늘 발주서에서 빠져야 한다."""
     from app.processors import issued_orders

@@ -107,7 +107,7 @@ interface ProductConfig {
 const productConfigs: Record<string, ProductConfig> = {
   biseller: {
     title: '비셀러 (LA한입갈비)',
-    description: '취급품목: 양념LA한입갈비 800g 세트 — 비셀러 발주서 생성 + 운송장번호 입력 · 쿠팡 옵션 800g N개 → 비셀러 800G*N세트 표기로 변환 · 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐지고, 당첨 1팩은 2세트로 발주',
+    description: '취급품목: 양념LA한입갈비 800g 세트 — 비셀러 발주서 생성 + 운송장번호 입력 · 2026-09-15부터 메이크샵 발주용 양식(상품번호 2세트 6120·4세트 6121, 4행부터 데이터)으로 출력 · 쿠팡 옵션 800g N개 → 세트 수로 변환 · 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐지고 당첨 1팩은 2세트로 발주(우편번호는 직접 입력)',
     icon: '🥩',
     bgClass: 'bg-red-50',
     order: {
