@@ -64,7 +64,7 @@ def test_courier_in_tracking_column_falls_back_to_row_scan():
     ])
     ws = wb.active
     cols = detect_haedal_columns(ws)
-    assert cols.tracking is None            # 전 행 무효 → 열 감지 폐기
+    assert cols.tracking == 18              # Q 폐기 → 값 형태로 특기사항(R) 열을 다시 찾음
     assert cols.courier == 17               # 그 칸은 택배사 열로 재해석
     assert find_tracking_in_row(ws, 2, cols.tracking) == "699444118913"
     assert find_courier_in_row(ws, 2, cols.courier) == "CJ대한통운"
@@ -166,7 +166,7 @@ def test_courier_in_q_and_tracking_in_p():
     ])
     ws = wb.active
     cols = detect_haedal_columns(ws)
-    assert cols.tracking is None      # Q는 송장 열이 아니다
+    assert cols.tracking == 16        # Q는 송장 열이 아니다 → 값 형태로 P를 찾음
     assert cols.courier == 17         # Q = 택배사 열
     assert find_tracking_in_row(ws, 2, cols.tracking) == "463207503463"
     assert find_courier_in_row(ws, 2, cols.courier) == "한진"
@@ -210,3 +210,69 @@ def test_status_text_in_tracking_column_does_not_shift_columns():
     cols = detect_haedal_columns(ws)
     assert cols.tracking == 17
     assert find_tracking_in_row(ws, 2, cols.tracking) == ""
+
+
+# ── 사고 4 (2026-09-16 실사고): 송장이 '운임Type'(O) 칸, 지불조건(P)='선불', 출고번호(Q) 통째로 빈칸 ──
+# 헤더 '출고번호'는 있는데 그 열이 전부 비어 있어 전 행 skip → "운송장번호를 찾을 수 없습니다".
+def _hanjin_reply_tracking_in_o(rows: list[dict]) -> "Workbook":
+    wb = _hanjin_reply(rows)
+    ws = wb.active
+    for row_idx, r in enumerate(rows, start=2):
+        ws.cell(row=row_idx, column=15).value = r["col_o"]   # 운임Type 칸에 송장
+    return wb
+
+
+def test_tracking_in_freight_type_column_is_found_by_shape():
+    wb = _hanjin_reply_tracking_in_o([
+        {"name": "문유금", "col_o": "463319275871", "product": "꿀고구마 10Kg (한입)"},
+        {"name": "최예정", "col_o": 463319275882},           # 숫자 셀로 저장된 경우
+        {"name": "김영리", "col_o": "463319275893", "address": "대구광역시 수성구 청호로46길 16 201동1505호"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 15
+    assert [find_tracking_in_row(ws, r, cols.tracking) for r in (2, 3, 4)] == [
+        "463319275871", "463319275882", "463319275893",
+    ]
+
+
+def test_parse_haedal_file_with_tracking_in_freight_type_column():
+    data = _bytes(_hanjin_reply_tracking_in_o([
+        {"name": "문유금", "col_o": "463319275871", "product": "꿀고구마 10Kg (한입)"},
+        {"name": "김대운", "col_o": "463319275904"},
+    ]))
+    entries = parse_haedal_file(data)
+    # 택배사 칸이 없으니 해달 기본(한진)
+    assert [(e["name"], e["tracking"], e["delivery_company_code"]) for e in entries] == [
+        ("문유금", "463319275871", "HANJIN"),
+        ("김대운", "463319275904", "HANJIN"),
+    ]
+
+
+def test_shape_detection_ignores_non_tracking_number_columns():
+    """송장 열이 비었고 14자리 주문번호·안심번호·우편번호만 있으면 추측하지 않는다.
+
+    쿠팡 주문번호를 송장으로 등록하면 출고지연 사고 — 12자리 형태가 아닌 숫자 열은 후보가 아니다.
+    """
+    wb = _hanjin_reply([
+        {"name": "홍길동"},
+        {"name": "김철수"},
+    ])
+    ws = wb.active
+    ws.cell(row=1, column=18).value = "주문번호"
+    ws.cell(row=2, column=18).value = "28000123456789"
+    ws.cell(row=3, column=18).value = "28000123456790"
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 17                       # 출고번호(Q) 그대로 — 빈 행은 건너뜀
+    assert find_tracking_in_row(ws, 2, cols.tracking) == ""
+
+
+def test_shape_detection_refuses_ambiguous_columns():
+    """12자리 숫자 열이 둘이면 어느 쪽이 송장인지 추측하지 않는다(기존 행 스캔 폴백 유지)."""
+    wb = _hanjin_reply_tracking_in_o([
+        {"name": "홍길동", "col_o": "463319275871", "col_r": "512345678901"},
+        {"name": "김철수", "col_o": "463319275882", "col_r": "512345678912"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 17

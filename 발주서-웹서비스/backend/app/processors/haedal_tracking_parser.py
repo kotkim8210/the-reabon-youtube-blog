@@ -152,6 +152,79 @@ def _drop_tracking_column_if_no_tracking(
     return tracking_col, courier_col
 
 
+def _strict_tracking_cell(value: object) -> str:
+    """셀 값 자체가 송장번호 하나일 때만 반환한다 (열 단위 형태 감지용).
+
+    _valid_tracking은 글자 사이 숫자를 모아 판정하므로 주소·비고 셀도 통과할 수 있다.
+    여기서는 숫자·하이픈·공백만으로 된 12자리(0으로 시작 안 함 = 전화/안심번호 제외)만 인정한다.
+    한진·CJ·롯데 송장이 모두 12자리고, 쿠팡 주문번호(14자리)·옵션ID(11자리)는 걸러진다.
+    """
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if re.fullmatch(r"\d+\.0", text):
+        text = text[:-2]
+    compact = re.sub(r"[\s\-]", "", text)
+    if re.fullmatch(r"[1-9]\d{11}", compact):
+        return compact
+    return ""
+
+
+def _is_status_text(text: str) -> bool:
+    """'미출고'·'선불'·'한진'처럼 숫자 없는 짧은 값 — 송장 열에 섞여 있어도 열 판정을 깨지 않는다."""
+    compact = re.sub(r"\s+", "", text)
+    return bool(compact) and len(compact) <= 8 and not re.search(r"\d", compact)
+
+
+def _column_is_blank(ws, col_idx: int, start_row: int) -> bool:
+    last_row = min(getattr(ws, "max_row", 1), start_row + 199)
+    return all(
+        ws.cell(row=row_idx, column=col_idx).value in (None, "")
+        for row_idx in range(start_row, last_row + 1)
+    )
+
+
+# 이 말이 헤더에 들어간 열은 값이 12자리여도 송장 열로 보지 않는다 (주문번호·연락처·우편번호 등)
+_NON_TRACKING_HEADER_HINTS = ("주문", "전화", "연락처", "핸드폰", "휴대", "hp", "우편", "수량", "금액", "가격", "단가")
+
+
+def _find_tracking_column_by_content(
+    ws,
+    header_row: int,
+    start_row: int,
+    exclude_cols: set[int],
+) -> int | None:
+    """헤더로 못 찾은(또는 헤더 열이 통째로 빈) 송장 열을 값 형태로 찾는다.
+
+    해달이 송장을 '운임Type'(O) 같은 엉뚱한 헤더 아래 적어 보낸 회신(2026-09-16):
+    '출고번호'(Q) 헤더는 있는데 전부 빈칸이라 열만 믿으면 전 행이 skip됐다.
+    비어 있지 않은 값이 전부 12자리 송장 형태인 열이 **정확히 하나**일 때만 그 열을 쓴다.
+    '미출고' 같은 숫자 없는 짧은 상태값은 허용(그 행만 송장 없음). 후보가 둘 이상이면 추측하지 않는다.
+    """
+    last_row = min(getattr(ws, "max_row", 1), start_row + 199)
+    hits: list[int] = []
+    for col_idx in range(1, getattr(ws, "max_column", 1) + 1):
+        if col_idx in exclude_cols:
+            continue
+        header = _key(ws.cell(row=header_row, column=col_idx).value) if header_row else ""
+        if header and _contains_any(header, _NON_TRACKING_HEADER_HINTS):
+            continue
+        valid = 0
+        for row_idx in range(start_row, last_row + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            text = str(value).strip() if value is not None else ""
+            if not text:
+                continue
+            if _strict_tracking_cell(value):
+                valid += 1
+            elif not _is_status_text(text):
+                valid = 0
+                break
+        if valid:
+            hits.append(col_idx)
+    return hits[0] if len(hits) == 1 else None
+
+
 def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
     """Find important columns from Korean headers, with legacy defaults.
 
@@ -229,6 +302,28 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
                 courier_col,
                 start_row,
             )
+        # 3) 송장 열이 없거나(헤더 없음·2에서 폐기) 통째로 비어 있으면 값 형태로 열을 찾는다.
+        #    '미출고' 등 값이 하나라도 있는 열은 그대로 믿는다 — 미발송 행에 옆 칸 숫자를
+        #    송장으로 잘못 등록하면 안 되기 때문.
+        if tracking_col is None or _column_is_blank(ws, tracking_col, start_row):
+            content_col = _find_tracking_column_by_content(
+                ws,
+                best_row,
+                start_row,
+                exclude_cols={
+                    col_idx
+                    for col_idx in (
+                        best.get("name", 1),
+                        best.get("phone", 2),
+                        best.get("address", 6),
+                        best.get("product", 14),
+                        courier_col,
+                    )
+                    if col_idx
+                },
+            )
+            if content_col:
+                tracking_col = content_col
         return HaedalColumns(
             start_row=start_row,
             name=best.get("name", 1),
