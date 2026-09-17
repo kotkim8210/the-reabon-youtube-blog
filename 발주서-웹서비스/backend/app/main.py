@@ -2134,12 +2134,23 @@ async def process_biseller_tracking(
 async def process_gaegeolmu_order(
     delivery_file: UploadFile = File(...),
     gmarket_file: UploadFile | None = File(None),
+    exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
     try:
         delivery_bytes = await delivery_file.read()
         gmarket_bytes = await gmarket_file.read() if gmarket_file else None
-        output_bytes, filename, stats = gaegeolmu_order.process(delivery_bytes, gmarket_bytes)
+        issued_excluded = await _issued_exclusions("gaegeolmu", exclude_issued)
+        issued_dates = await _issued_exclusion_dates("gaegeolmu", exclude_issued)
+        dup_names: list[str] = []
+        dup_keys: list[str] = []
+        output_bytes, filename, stats = gaegeolmu_order.process(
+            delivery_bytes, gmarket_bytes,
+            exclude_keys=issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+        )
+        await _record_issued("gaegeolmu", filename, stats)
+        dup_skipped = int((stats or {}).pop("duplicate_skipped", 0) or 0)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
         )

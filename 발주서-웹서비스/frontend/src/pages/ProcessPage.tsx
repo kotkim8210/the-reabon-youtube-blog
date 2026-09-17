@@ -317,6 +317,14 @@ const toolConfigs: Record<string, ToolConfig> = {
       { key: 'delivery', label: '쿠팡 DeliveryList 파일 (지마켓 파일만 있으면 여기에 올려도 됩니다)' },
       { key: 'gmarket', label: '지마켓 신규주문 파일 (선택 — 올리면 발주서에 합쳐짐)', optional: true },
     ],
+    extraCheckboxes: [
+      {
+        key: 'exclude_issued',
+        label: '🚫 이전 발주분 자동 제외',
+        description: '직전 영업일까지 발주서에 넣은 주문은 건너뜁니다 (같은 날 재생성은 그대로). 제외된 건은 결과에 받는분 이름으로 표시됩니다.',
+        defaultValue: true,
+      },
+    ],
     color: 'amber',
     colorClasses: {
       bg: 'bg-amber-50',
@@ -582,6 +590,8 @@ function ProcessPage() {
   const formatStats = (stats: Record<string, unknown>): string[] => {
     const statLabels: Record<string, string> = {
       needs_check: '⚠️ 확인 필요(발주서에 못 넣음)',
+      duplicate_skipped: '🚫 이전 발주분 제외',
+      duplicate_skipped_names: '제외된 주문(받는분)',
     };
     const lines: string[] = [];
     for (const [key, value] of Object.entries(stats)) {

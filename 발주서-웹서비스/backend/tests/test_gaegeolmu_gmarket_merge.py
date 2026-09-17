@@ -167,6 +167,84 @@ def test_settlement_text_lists_gmarket_separately():
     assert "총 12만원 송금예정" in text
 
 
+# ── 이전 발주분 자동 제외 (2026-09-17) ──
+def test_excludes_previously_issued_coupang_order():
+    """exclude_keys에 든 주문은 발주서에서 빠지고 받는분 이름이 skipped로 기록된다."""
+    from app.processors.issued_orders import order_ids_from_stats
+
+    data = _coupang([
+        {"order_no": "C1", "name": "어제손님", "option": "1병"},
+        {"order_no": "C2", "name": "오늘손님", "option": "2병"},
+    ])
+    # 1차 발주에서 기록됐을 키를 재현
+    _o, _f, first_stats = G.process(data)
+    issued = set(order_ids_from_stats(first_stats))
+
+    # C1만 이미 발주됐다고 가정하고 제외
+    c1_key = next(k for k in issued if k.startswith("C1"))
+    dup_names: list[str] = []
+    dup_keys: list[str] = []
+    out, _fn, stats = G.process(
+        data, exclude_keys={c1_key}, skipped_names=dup_names, skipped_keys=dup_keys
+    )
+    assert stats["total"] == 1
+    assert stats["duplicate_skipped"] == 1
+    assert dup_names == ["어제손님"]
+    assert dup_keys == [c1_key]
+    ws = load_workbook(BytesIO(out)).active
+    names = [ws.cell(r, 27).value for r in range(2, ws.max_row + 1)]
+    assert names == ["오늘손님"]
+
+
+def test_record_then_filter_roundtrip_matches():
+    """order_ids_from_stats로 기록한 키를 그대로 exclude_keys로 넣으면 전부 걸러진다.
+
+    canonical 옵션명으로 기록·필터가 같은 키를 만들어야 침묵 무효화가 안 난다(핵심 계약).
+    """
+    from app.processors.issued_orders import order_ids_from_stats
+
+    coupang = _coupang([
+        {"order_no": "C1", "name": "쿠1", "option": "1병"},
+        {"order_no": "C2", "name": "쿠2", "option": "2병"},
+    ])
+    gmarket = _gmarket([
+        {"order_no": "G1", "name": "지1", "option": ""},
+        {"order_no": "G2", "name": "지2", "option": "1+1 2병"},
+    ])
+    _out, _fn, first = G.process(coupang, gmarket)
+    issued = set(order_ids_from_stats(first))
+    assert issued  # 키가 실제로 만들어졌는지
+
+    # 같은 파일을 다시 넣되 전부 이미 발주됨 → 0건
+    out, _fn2, stats = G.process(coupang, gmarket, exclude_keys=issued)
+    assert stats["total"] == 0
+    assert stats["duplicate_skipped"] == 4
+    ws = load_workbook(BytesIO(out)).active
+    assert ws.max_row == 1  # 헤더만 남음
+
+
+def test_same_order_number_different_option_not_over_excluded():
+    """한 주문번호로 1병·2병을 각각 샀으면, 1병만 발주됐어도 2병은 남아야 한다(김희조 사고 방지)."""
+    from app.processors.issued_orders import make_order_key
+
+    data = _coupang([
+        {"order_no": "SAME", "name": "손님", "option": "1병"},
+        {"order_no": "SAME", "name": "손님", "option": "2병"},
+    ])
+    issued_one = make_order_key("SAME", "게걸무씨앗기름 1병")
+    _out, _fn, stats = G.process(data, exclude_keys={issued_one})
+    assert stats["total"] == 1
+    totals = {o["coupang_option_keyword"]: o["quantity"] for o in stats["options"]}
+    assert totals == {"게걸무씨앗기름 2병": 1}
+
+
+def test_no_exclusion_when_keys_empty():
+    data = _coupang([{"order_no": "C1", "name": "손님"}])
+    _out, _fn, stats = G.process(data, exclude_keys=set())
+    assert stats["total"] == 1
+    assert "duplicate_skipped" not in stats
+
+
 def test_process_puts_settlement_text_in_stats():
     payload = _coupang([
         {"order_no": "1", "option": "1개 180ml", "name": "가"},

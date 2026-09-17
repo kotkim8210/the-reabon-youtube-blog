@@ -37,7 +37,8 @@ def test_every_upload_key_reaches_backend():
     field_map = _field_name_map()
     params = _backend_upload_params()
     # 파일이 아니라 문자열(Form)로 전송되는 key는 제외
-    text_keys = {"tracking_text"}
+    # exclude_issued: extraCheckbox(이전 발주분 자동 제외) — 파일이 아닌 Form 값
+    text_keys = {"tracking_text", "exclude_issued"}
 
     missing = []
     for key, page in sorted(_upload_keys().items()):

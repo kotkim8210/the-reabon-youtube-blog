@@ -6,6 +6,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from app.processors.issued_orders import KEY_SEP, make_order_key, normalize_order_id
+
 
 KST = timezone(timedelta(hours=9))
 
@@ -236,10 +238,48 @@ def _collect_option_total(option_totals: dict[str, dict], option_name: str, orde
         bucket["orders"].append({"order_id": order_no, "quantity": qty_int})
 
 
-def _process_coupang_delivery(dl_ws) -> tuple[int, list[dict]]:
+def _make_exclusion(exclude_keys):
+    """이미 발주된 주문(order_id|옵션 복합키)을 걸러낼 판정 함수를 만든다.
+
+    발주 이력에는 canonical 옵션명('게걸무씨앗기름 2병')으로 기록되므로, 여기서도
+    같은 canonical 옵션명으로 키를 만들어 대조해야 한다(쿠팡 L열 원문으로 만들면 안 맞음).
+    반환값: 제외 대상이면 기록용 키(복합키 또는 레거시 주문번호), 아니면 None.
+    """
+    keys = set(exclude_keys or ())
+    composite = {k for k in keys if KEY_SEP in k}
+    legacy = {k for k in keys if KEY_SEP not in k}
+
+    def check(order_no, option_name):
+        oid = normalize_order_id(order_no)
+        if not oid:
+            return None
+        key = make_order_key(oid, option_name)
+        if key in composite:
+            return key
+        if oid in legacy:
+            return oid
+        return None
+
+    return check
+
+
+def _record_skip(skipped_names, skipped_keys, name, key) -> None:
+    if skipped_keys is not None:
+        skipped_keys.append(key)
+    if skipped_names is not None:
+        skipped_names.append((name or "").strip() or key.split(KEY_SEP)[0])
+
+
+def _process_coupang_delivery(
+    dl_ws,
+    exclude_check=None,
+    skipped_names=None,
+    skipped_keys=None,
+) -> tuple[int, list[dict], int]:
     matching_row_numbers: list[int] = []
     option_totals: dict[str, dict] = {}
     header_rows: set[int] = set()
+    skipped = 0
 
     for row_number in range(1, dl_ws.max_row + 1):
         if _looks_like_header_row(dl_ws, row_number):
@@ -250,15 +290,24 @@ def _process_coupang_delivery(dl_ws) -> tuple[int, list[dict]]:
         if "게걸무" not in product_text:
             continue
 
-        matching_row_numbers.append(row_number)
         order_no = normalize_order_no(dl_ws.cell(row=row_number, column=COL_MAP["order_no"]).value)
         option_text = normalize(dl_ws.cell(row=row_number, column=COL_MAP["option"]).value)
+        option_name = canonical_gaegeolmu_option(product_text, option_text)
+
+        if exclude_check is not None:
+            excluded_key = exclude_check(order_no, option_name)
+            if excluded_key:
+                skipped += 1
+                name = normalize(dl_ws.cell(row=row_number, column=COL_MAP["name"]).value)
+                _record_skip(skipped_names, skipped_keys, name, excluded_key)
+                continue  # 이미 발주된 주문 → 발주서에서 제외(행 삭제)
+
+        matching_row_numbers.append(row_number)
         qty_text = normalize(dl_ws.cell(row=row_number, column=COL_MAP["qty"]).value)
         try:
             qty_int = int(float(qty_text)) if qty_text else 1
         except (ValueError, TypeError):
             qty_int = 1
-        option_name = canonical_gaegeolmu_option(product_text, option_text)
         _collect_option_total(option_totals, option_name, order_no, qty_int)
 
     matching_set = set(matching_row_numbers) | header_rows
@@ -266,10 +315,15 @@ def _process_coupang_delivery(dl_ws) -> tuple[int, list[dict]]:
         if row_number not in matching_set:
             dl_ws.delete_rows(row_number, 1)
 
-    return len(matching_row_numbers), list(option_totals.values())
+    return len(matching_row_numbers), list(option_totals.values()), skipped
 
 
-def _process_gmarket(ws) -> tuple[Workbook, int, list[dict]]:
+def _process_gmarket(
+    ws,
+    exclude_check=None,
+    skipped_names=None,
+    skipped_keys=None,
+) -> tuple[Workbook, int, list[dict], int]:
     """지마켓 신규주문 시트 단독 처리 — 쿠팡 DeliveryList 양식 워크북으로 변환."""
     out_wb = Workbook()
     out_ws = out_wb.active
@@ -277,8 +331,11 @@ def _process_gmarket(ws) -> tuple[Workbook, int, list[dict]]:
     out_ws.append(DELIVERY_HEADERS)
     _apply_delivery_sheet_style(out_ws)
 
-    added, option_totals = _append_gmarket_rows(ws, out_ws, start_index=0)
-    return out_wb, added, list(option_totals.values())
+    added, option_totals, skipped = _append_gmarket_rows(
+        ws, out_ws, start_index=0,
+        exclude_check=exclude_check, skipped_names=skipped_names, skipped_keys=skipped_keys,
+    )
+    return out_wb, added, list(option_totals.values()), skipped
 
 
 def _append_gmarket_rows(
@@ -286,7 +343,10 @@ def _append_gmarket_rows(
     out_ws,
     start_index: int = 0,
     option_totals: dict[str, dict] | None = None,
-) -> tuple[int, dict[str, dict]]:
+    exclude_check=None,
+    skipped_names=None,
+    skipped_keys=None,
+) -> tuple[int, dict[str, dict], int]:
     """지마켓 시트의 게걸무 주문을 DeliveryList 양식 행으로 out_ws에 이어붙인다.
 
     start_index: 이미 들어있는 행 수(번호 컬럼 이어가기용).
@@ -296,6 +356,7 @@ def _append_gmarket_rows(
     if option_totals is None:
         option_totals = {}
 
+    skipped = 0
     output_row_index = start_index
     for row_number in range(2, ws.max_row + 1):
         product_text = normalize(_cell_by_header(ws, headers, row_number, "상품명"))
@@ -303,15 +364,24 @@ def _append_gmarket_rows(
         if "게걸무" not in f"{product_text} {option_text}":
             continue
 
-        output_row_index += 1
         order_no = _number_text(_cell_by_header(ws, headers, row_number, "주문번호"))
+        option_name = canonical_gaegeolmu_option(product_text, option_text)
+
+        if exclude_check is not None:
+            excluded_key = exclude_check(order_no, option_name)
+            if excluded_key:
+                skipped += 1
+                name = normalize(_cell_by_header(ws, headers, row_number, "수령인명"))
+                _record_skip(skipped_names, skipped_keys, name, excluded_key)
+                continue  # 이미 발주된 주문 → 지마켓 행도 발주서에서 제외
+
+        output_row_index += 1
         qty_text = normalize(_cell_by_header(ws, headers, row_number, "수량"))
         try:
             qty_int = int(float(qty_text)) if qty_text else 1
         except (ValueError, TypeError):
             qty_int = 1
 
-        option_name = canonical_gaegeolmu_option(product_text, option_text)
         option_display, exposed_option = _gaegeolmu_option_display(option_name)
         _collect_option_total(option_totals, option_name, order_no, qty_int)
 
@@ -372,7 +442,7 @@ def _append_gmarket_rows(
             ]
         )
 
-    return output_row_index - start_index, option_totals
+    return output_row_index - start_index, option_totals, skipped
 
 
 def _bottle_count(option_name: str) -> int:
@@ -438,28 +508,42 @@ def build_settlement_text(
 def process(
     delivery_file_bytes: bytes,
     gmarket_file_bytes: bytes | None = None,
+    exclude_keys=None,
+    skipped_names: list[str] | None = None,
+    skipped_keys: list[str] | None = None,
 ) -> tuple[bytes, str, dict]:
     """게걸무 발주서 생성.
 
     delivery_file_bytes: 쿠팡 DeliveryList 또는 지마켓 신규주문(단독 업로드도 지원).
     gmarket_file_bytes: 지마켓 신규주문(선택) — 쿠팡 발주서 뒤에 이어붙여 한 장으로 합친다
         (2026-08-17 요청: 지마켓 주문도 게걸무 발주서에 합쳐서 출력).
+    exclude_keys: 직전 영업일까지 발주된 주문키(order_id|옵션). 이 주문들은 발주서에서 제외한다.
+        같은 날 재생성은 이력에 오늘 날짜만 있으므로 걸러지지 않는다(호출부 _issued_exclusions).
     """
+    exclude_check = _make_exclusion(exclude_keys) if exclude_keys else None
+    skipped = 0
+
     dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes))
     dl_ws = dl_wb.active
 
     if _is_gmarket_sheet(dl_ws):
         # 첫 칸에 지마켓 파일을 올린 경우 — 종전처럼 단독 처리
-        output_wb, total, options = _process_gmarket(dl_ws)
+        output_wb, total, options, gm_skipped = _process_gmarket(
+            dl_ws, exclude_check, skipped_names, skipped_keys
+        )
         output_ws = output_wb.active
         option_totals = {bucket["coupang_option_keyword"]: bucket for bucket in options}
         sources = ["지마켓"]
+        skipped += gm_skipped
     else:
-        total, options = _process_coupang_delivery(dl_ws)
+        total, options, cp_skipped = _process_coupang_delivery(
+            dl_ws, exclude_check, skipped_names, skipped_keys
+        )
         output_wb = dl_wb
         output_ws = dl_ws
         option_totals = {bucket["coupang_option_keyword"]: bucket for bucket in options}
         sources = ["쿠팡"]
+        skipped += cp_skipped
 
     gmarket_added = 0
     if gmarket_file_bytes:
@@ -468,12 +552,14 @@ def process(
             raise ValueError(
                 "지마켓 파일 형식이 아닙니다. 지마켓 '신규주문' 엑셀(판매아이디·주문번호·수령인명 헤더)을 올려주세요."
             )
-        gmarket_added, option_totals = _append_gmarket_rows(
-            gm_ws, output_ws, start_index=total, option_totals=option_totals
+        gmarket_added, option_totals, gm_skipped = _append_gmarket_rows(
+            gm_ws, output_ws, start_index=total, option_totals=option_totals,
+            exclude_check=exclude_check, skipped_names=skipped_names, skipped_keys=skipped_keys,
         )
         if gmarket_added:
             sources.append("지마켓")
         total += gmarket_added
+        skipped += gm_skipped
 
     output = BytesIO()
     output_wb.save(output)
@@ -490,6 +576,8 @@ def process(
     if gmarket_file_bytes:
         stats["gmarket"] = gmarket_added
         stats["coupang"] = total - gmarket_added
+    if skipped:
+        stats["duplicate_skipped"] = skipped
 
     source_counts = (
         [("쿠팡", total - gmarket_added), ("지마켓", gmarket_added)]
