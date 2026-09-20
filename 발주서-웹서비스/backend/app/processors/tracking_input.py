@@ -7,6 +7,7 @@ from openpyxl.styles import Font
 
 from app.config import TEMPLATE_DIR
 from app.processors.tracking_match import (
+    COUPANG_CJ_NAME,
     coupang_courier_name,
     name_counts,
     normalize_courier_name,
@@ -29,6 +30,15 @@ def normalize(value) -> str:
 def normalize_courier(value) -> str:
     """Orderlist 택배사명을 쿠팡 DeliveryList가 인식하는 표기로 맞춘다."""
     return coupang_courier_name(value)
+
+
+# 햇 배 선물세트는 제주다팜 다른 품목(롯데)과 달리 CJ대한통운으로 나간다(2026-09-20 사용자 확인).
+# 회신에 택배사 칸이 비어 있으면 D열이 빈 채 남아 쿠팡윙 업로드가 실패하므로 이 값으로 채운다.
+PEAR_DEFAULT_COURIER = COUPANG_CJ_NAME
+
+
+def _is_pear_row(option_keys: set[str]) -> bool:
+    return any(key.startswith("pear:") for key in option_keys)
 
 
 def _phone_digits(value: object) -> str:
@@ -88,6 +98,15 @@ def _semantic_option_keys(*values: object) -> set[str]:
         grade = _HONGRO_GRADE_ALIASES.get(grade, grade)
         hongro_kgs = set(re.findall(r"(\d+(?:\.\d+)?)kg", text, flags=re.IGNORECASE))
         keys.update(f"hongro:{grade}:{w}kg" for w in hongro_kgs)
+    if "배선물세트" in re.sub(r"\s+", "", text):
+        # 햇 배 선물세트: orderlist(발주명 '햇 배 선물세트 {등급} {kg}kg (...) [+ 보자기 동봉]')와
+        # DeliveryList(쿠팡 '프리미엄 햇 배 선물세트 보자기 포함 큼직한 {등급} {kg}kg')를
+        # (보자기 유무·등급·kg) 의미키로 묶는다. '특대과'가 '대과' 포함 → 긴 것 먼저.
+        compact = re.sub(r"\s+", "", text)
+        bojagi = "1" if "보자기" in compact else "0"
+        grade = next((g for g in ("특대과", "대과") if g in compact), "")
+        pear_kgs = set(re.findall(r"(\d+(?:\.\d+)?)kg", compact, flags=re.IGNORECASE))
+        keys.update(f"pear:{bojagi}:{grade}:{w}kg" for w in pear_kgs)
     if "청사과" in text or "아오리" in text:
         # 청사과: orderlist(발주명 '청사과 {등급}(가정용) … {kg}kg(…)')와 DeliveryList(쿠팡 옵션)의
         # 표기가 달라 등급(중소과/소과/대과)+kg 의미키로 묶는다. '중소과'가 '소과' 포함 → 긴 것 먼저.
@@ -253,6 +272,8 @@ def process(
         if matched:
             e_cell.value = matched["tracking"]
             courier = normalize_courier(matched.get("courier"))
+            if not courier and _is_pear_row(dl_option_keys):
+                courier = PEAR_DEFAULT_COURIER  # 햇 배 선물세트 = CJ대한통운 발송
             if courier:
                 dl_ws.cell(row=row_idx, column=4).value = courier
             used_entries.add(id(matched))

@@ -258,6 +258,44 @@ def convert_hongro_option(product_name: object, option_text: object) -> str | No
     return _HONGRO_JEJU_OPTIONS.get((grade, kg))
 
 
+# 프리미엄 햇 배 선물세트 — 2026-09 제주다팜 신규 발주. 쿠팡 옵션의 (보자기 유무·등급·kg)를
+# 제주다팜 구성상품명(발주명)으로 변환한다. adminplus 구성상품 8종 실측(2026-09-19):
+#   대과/특대과 × 5·7.5kg × 보자기 동봉/미동봉. 보자기 유무에 따라 과수 표기까지 달라 각각 실측값을 둔다.
+#   (쿠팡 판매옵션 예: '프리미엄 햇 배 선물세트 보자기 포함 큼직한 특대과 5kg' → 특대과5kg 보자기 동봉)
+_PEAR_JEJU_OPTIONS = {
+    (True, "대과", "5"): "햇 배 선물세트 대과 5kg (9~12과) + 보자기 동봉",
+    (True, "대과", "7.5"): "햇 배 선물세트 대과 7.5kg (13~16과) + 보자기 동봉",
+    (True, "특대과", "5"): "햇 배 선물세트 특대과 5kg (6~8과) + 보자기 동봉",
+    (True, "특대과", "7.5"): "햇 배 선물세트 특대과 7.5kg (9~11과) + 보자기 동봉",
+    (False, "대과", "5"): "햇 배 선물세트 대과 5kg (9~12과)",
+    (False, "대과", "7.5"): "햇 배 선물세트 대과 7.5kg (13~16과)",
+    (False, "특대과", "5"): "햇 배 선물세트 특대과 5kg (5~8과)",
+    (False, "특대과", "7.5"): "햇 배 선물세트 특대과 7.5kg (9-12과)",
+}
+# 등급 판정: '특대과'가 '대과'를 포함하므로 긴 것 먼저.
+_PEAR_GRADES = ("특대과", "대과")
+
+
+def is_jeju_pear_order(product_name: object, option_text: object) -> bool:
+    """햇 배 선물세트(제주다팜) 발주 여부. 사과 선물세트 등과 배타적으로 '배 선물세트'만 잡는다."""
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    return "배선물세트" in text
+
+
+def convert_pear_option(product_name: object, option_text: object) -> str | None:
+    """햇 배 선물세트 DeliveryList → 제주다팜 발주명(구성상품명). 미매칭이면 None."""
+    if not is_jeju_pear_order(product_name, option_text):
+        return None
+    text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    bojagi = "보자기" in text  # 쿠팡 '보자기 포함' / 제주다팜 '+ 보자기 동봉'
+    grade = next((g for g in _PEAR_GRADES if g in text), "")
+    m = re.search(r"(\d+(?:\.\d+)?)kg", text, re.IGNORECASE)
+    kg = _fmt_kg_text(m.group(1)) if m else ""
+    if not grade or not kg:
+        return None
+    return _PEAR_JEJU_OPTIONS.get((bojagi, grade, kg))
+
+
 def clear_stray_header_numbers(ws) -> None:
     for col in range(14, ws.max_column + 1):
         cell = ws.cell(row=1, column=col)
@@ -840,6 +878,22 @@ def process_hongro(
     )
 
 
+def process_pear(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """프리미엄 햇 배 선물세트 제주다팜 발주 (2026-09 신규). 발주명=제주다팜 구성상품명."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_pear_option,
+        "햇 배 선물세트(제주다팜)",
+        f"제주다팜_아이티소프트_햇배선물세트발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+        matcher=is_jeju_pear_order,
+    )
+
+
 def _has_content(stats: dict | None) -> bool:
     """발주 건이 있거나, 확인이 필요한 미매칭 건이 있으면 결과로 내보낸다."""
     stats = stats or {}
@@ -894,5 +948,9 @@ def process_outputs(
     hongro_result = process_hongro(delivery_file_bytes, toss_entries=toss_hongro_entries)
     if hongro_result and _has_content(hongro_result[2]):
         results.append(hongro_result)
+
+    pear_result = process_pear(delivery_file_bytes)
+    if pear_result and _has_content(pear_result[2]):
+        results.append(pear_result)
 
     return results

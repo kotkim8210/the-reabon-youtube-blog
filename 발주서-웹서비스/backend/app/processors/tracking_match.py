@@ -9,6 +9,18 @@ def match_key(value: object) -> str:
     return re.sub(r"\s+", "", str(value).strip())
 
 
+# 쿠팡 DeliveryList(택배사 D열)가 인식하는 CJ 표기 — 'CJ'와 '대한통운' 사이 띄어쓰기 필수.
+COUPANG_CJ_NAME = "CJ 대한통운"
+
+
+def _is_cj_courier(compact: str) -> bool:
+    """거래처가 CJ를 어떻게 적어도 잡는다: CJ대한통운·CJ 대한통운·씨제이대한통운·대한통운·
+    CJ택배·CJ대한통운(주)·CJGLS·cj logistics… ('대한통운'·'씨제이'는 CJ뿐이고,
+    'cj'로 시작하는 택배사도 CJ뿐이라 과매칭 없음.)"""
+    lowered = compact.lower()
+    return "대한통운" in compact or "씨제이" in compact or lowered.startswith("cj")
+
+
 def normalize_courier_name(value: object, default: str = "") -> str:
     if value is None:
         return default
@@ -16,8 +28,10 @@ def normalize_courier_name(value: object, default: str = "") -> str:
     if not courier:
         return default
     compact = match_key(courier)
-    if re.fullmatch(r"(?i)cj대한통운", compact):
-        return "CJ 대한통운"
+    if _is_cj_courier(compact):
+        # 종전엔 정확히 'CJ대한통운'일 때만 바꿔서 '씨제이대한통운'·'CJ택배' 같은 회신은
+        # 그대로 D열에 들어가 쿠팡윙 업로드에서 택배사 미인식 (2026-09-20 햇 배 선물세트 CJ 발송 대비).
+        return COUPANG_CJ_NAME
     return courier
 
 
