@@ -18,6 +18,7 @@ from app.processors.tracking_match import (
     options_match,
     requires_option_guard,
 )
+from app.processors.goguma_order import is_hobak_goguma_text
 from app.processors.goguma_order import transform_toss_option as normalize_goguma_toss_option
 from app.processors.haedal_tracking_parser import (
     detect_haedal_columns,
@@ -95,8 +96,11 @@ def transform_toss_option(product_name: str, option_name: str) -> str:
 
 
 def is_goguma_order(item: dict) -> bool:
+    """꿀고구마 토스 주문. 호박고구마는 별도 섹션(hobak_goguma)이 발주·운송장 처리한다."""
     product_name = (item.get("productName") or "").lower()
     option_name = (item.get("optionName") or "").lower()
+    if is_hobak_goguma_text(product_name, option_name):
+        return False
     return any(kw in product_name or kw in option_name for kw in GOGUMA_KEYWORDS)
 
 
@@ -293,12 +297,20 @@ def _masked_name_match(masked: str, full_names) -> list[str]:
     ]
 
 
-async def process_toss_tracking(haedal_bytes: bytes) -> dict:
+async def process_toss_tracking(
+    haedal_bytes: bytes,
+    product_filter=None,
+    product_label: str = "고구마",
+) -> dict:
     """Parse tracking file, match Toss orders, register via API.
+
+    product_filter: 토스 item → bool. 기본은 꿀고구마(is_goguma_order).
+        호박고구마 섹션은 goguma_order.is_hobak_goguma_toss_order를 넘긴다.
 
     Returns:
         Dict with counts and per-order results.
     """
+    product_filter = product_filter or is_goguma_order
     # 1. Parse 해달 file
     haedal_entries = parse_haedal_file(haedal_bytes)
     if not haedal_entries:
@@ -325,7 +337,7 @@ async def process_toss_tracking(haedal_bytes: bytes) -> dict:
     pre_skipped_results = []
     seen_order_product_ids = set()
     for item in toss_orders_raw:
-        if not is_goguma_order(item):
+        if not product_filter(item):
             continue
 
         order_product_id = item.get("orderProductId")
@@ -390,10 +402,10 @@ async def process_toss_tracking(haedal_bytes: bytes) -> dict:
         if toss_orders_raw:
             raise ValueError(
                 f"토스에서 {len(toss_orders_raw)}건의 주문을 찾았지만 "
-                f"고구마/꿀고구마 키워드가 포함된 주문이 없습니다."
+                f"{product_label} 주문이 없습니다."
             )
         raise ValueError(
-            f"토스에서 고구마 주문을 찾을 수 없습니다. "
+            f"토스에서 {product_label} 주문을 찾을 수 없습니다. "
             f"(조회 기간: {from_date} ~ {to_date})"
         )
 

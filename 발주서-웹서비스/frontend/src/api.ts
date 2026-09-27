@@ -460,12 +460,15 @@ export async function processFile(
 }
 
 export async function processTossWatermelonTracking(
-  tomatoReplyFile: File
+  tomatoReplyFile: File,
+  // 호박고구마(해달)처럼 다른 토스 운송장 엔드포인트를 쓰는 섹션용
+  endpoint: string = '/process/toss-watermelon-tracking',
+  fieldName: string = 'tomato_reply_file',
 ): Promise<Record<string, unknown>> {
   const formData = new FormData();
-  formData.append('tomato_reply_file', tomatoReplyFile);
+  formData.append(fieldName, tomatoReplyFile);
 
-  const res = await fetch(`${BASE_URL}/process/toss-watermelon-tracking`, {
+  const res = await fetch(`${BASE_URL}${endpoint}`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,

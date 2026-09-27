@@ -35,6 +35,7 @@ from app.processors import (
     goguma_tracking,
     goguma_tracking_alwayz,
     goguma_tracking_api,
+    hobak_goguma,
     kolrabi_order,
     myeongi_order,
     myeongi_tracking,
@@ -2158,6 +2159,143 @@ async def process_gaegeolmu_order(
         return make_excel_response(output_bytes, filename, stats)
     except Exception as e:
         logger.exception("게걸무 발주 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/hobak-goguma-order")
+async def process_hobak_goguma_order(
+    delivery_file: UploadFile | None = File(None),
+    toss_from_date: str = Form(""),
+    toss_to_date: str = Form(""),
+    exclude_issued: str = Form("true"),
+    user: dict = Depends(verify_token),
+):
+    """햇 호박고구마 해달 발주서 — 쿠팡 itsoft001 DeliveryList(선택) + 토스 호박고구마(API)."""
+    section = hobak_goguma.SECTION
+    try:
+        delivery_bytes = await delivery_file.read() if delivery_file else None
+        if delivery_bytes:
+            _require_xlsx(delivery_bytes)
+        issued_excluded = await _issued_exclusions(section, exclude_issued)
+        issued_dates = await _issued_exclusion_dates(section, exclude_issued)
+        dup_names: list[str] = []
+        dup_keys: list[str] = []
+        dup_skipped = 0
+        if delivery_bytes:
+            delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
+                delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+            )
+
+        toss_entries: list[dict] = []
+        toss_error = ""
+        if toss_from_date and toss_to_date:
+            try:
+                toss_entries = await goguma_order.collect_toss_orders(
+                    toss_from_date, toss_to_date, matcher=goguma_order.is_hobak_goguma_toss_order
+                )
+            except Exception as e:
+                # 0건으로 조용히 넘기면 '토스 주문 없음'으로 오해한다 — 사유를 화면에 띄운다
+                toss_error = str(e) or type(e).__name__
+                if "IP" in toss_error.upper():
+                    toss_error += " (토스 파트너센터 > API 허용 IP에 이 PC의 공인 IP를 등록해야 합니다)"
+                logger.warning("토스 호박고구마 수집 실패(쿠팡분만 계속): %s", e)
+            if toss_entries:
+                before = len(dup_names)
+                toss_entries, toss_dup = issued_orders.filter_entries_by_issued(
+                    toss_entries, issued_excluded, skipped_names=dup_names
+                )
+                if toss_dup:
+                    dup_skipped += toss_dup
+                    # 토스 제외분은 키 목록 길이를 이름 목록에 맞춘다(_annotate_excluded가 인덱스로 짝지음)
+                    dup_keys.extend([""] * (len(dup_names) - before))
+
+        output_bytes, filename, stats = hobak_goguma.process_order(delivery_bytes, toss_entries)
+        if toss_error:
+            stats["toss"] = "수집 실패"
+            stats["needs_check"] = list(stats.get("needs_check") or []) + ["토스 주문 수집 실패 — " + toss_error]
+        if not int(stats.get("total") or 0):
+            if dup_skipped:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"신규 호박고구마 주문이 없습니다 (이전 발주분 {dup_skipped}건 자동 제외: {', '.join(n for n in dup_names if n)}).",
+                )
+            detail = "호박고구마 주문이 없습니다."
+            if toss_error:
+                detail += f" (토스 수집 실패 — {toss_error})"
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+        await _record_issued(section, filename, stats)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+        await record_sales_from_process_stats(
+            user["user_id"],
+            stats,
+            ymd=_extract_ymd_from_filename(delivery_file.filename if delivery_file else None),
+        )
+        logger.info(f"호박고구마 발주 처리 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("호박고구마 발주 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/hobak-goguma-tracking")
+async def process_hobak_goguma_tracking(
+    haedal_file: UploadFile = File(...),
+    delivery_file: UploadFile = File(...),
+    _token: dict = Depends(verify_token),
+):
+    """해달 회신 → 쿠팡 itsoft001 DeliveryList 호박고구마 행 E(송장)·D(한진택배) 입력."""
+    try:
+        haedal_bytes = await haedal_file.read()
+        delivery_bytes = await delivery_file.read()
+        _require_xlsx(delivery_bytes)
+        output_bytes, filename, stats = hobak_goguma.process_tracking(haedal_bytes, delivery_bytes)
+        logger.info(f"호박고구마 쿠팡 운송장 입력 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("호박고구마 운송장 입력 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
+@app.post("/api/process/hobak-goguma-toss-tracking")
+async def process_hobak_goguma_toss_tracking(
+    haedal_file: UploadFile = File(...),
+    _token: dict = Depends(verify_token),
+):
+    """해달 회신 → 토스 호박고구마 주문에 운송장 API 등록 (꿀고구마 토스 주문은 건드리지 않음)."""
+    try:
+        haedal_bytes = await haedal_file.read()
+        result = await toss_auto.process_toss_tracking(
+            haedal_bytes,
+            product_filter=goguma_order.is_hobak_goguma_toss_order,
+            product_label="호박고구마",
+        )
+        logger.info(
+            f"토스 호박고구마 운송장 등록: 성공={result['success']}, 실패={result['fail']}, 스킵={result['skip']}"
+        )
+        return result
+    except TossApiError as e:
+        logger.warning("Toss hobak tracking API failed: %s", e.message)
+        _raise_toss_http_error(e)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.exception("토스 호박고구마 운송장 등록 중 오류")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",

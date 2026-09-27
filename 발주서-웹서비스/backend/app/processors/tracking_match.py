@@ -51,6 +51,9 @@ def coupang_courier_name(value: object, default: str = "") -> str:
     # 괄호 표기 그대로 넣으면 택배사가 인식되지 않는다(2026-09-07).
     if "롯데" in compact:
         return "롯데택배"
+    # 해달은 택배사 칸에 '한진'만 적어 보내기도 한다(2026-09-04). 쿠팡 표기는 '한진택배'.
+    if "한진" in compact:
+        return "한진택배"
     return courier
 
 

@@ -105,6 +105,35 @@ interface ProductConfig {
 
 // ── 제품별 설정 ───────────────────────────────────────────────────
 const productConfigs: Record<string, ProductConfig> = {
+  'hobak-goguma': {
+    title: '햇 호박고구마 (해달 · 쿠팡 itsoft001 + 토스)',
+    description: '취급품목: 국내산 해남 황토밭 햇 호풍미 호박고구마 — 꿀고구마와 같은 해달(한진) 발주지만 쿠팡 주문이 itsoft001 계정이라 별도 섹션 · 쿠팡은 itsoft001 DeliveryList 업로드, 토스 호박고구마는 API로 자동 수집해 한 발주서로 합침 · 발주 품목명 "호박고구마 {kg}Kg ({등급})" · 운송장 입력 시 DeliveryList 택배사(D열)를 롯데택배 → 한진택배로 바꿔 넣음 · 꿀고구마 페이지는 토스 호박고구마를 더 이상 수집하지 않음(중복 발주 방지)',
+    icon: '🍠',
+    bgClass: 'bg-orange-50',
+    order: {
+      title: '햇 호박고구마 해달 발주서 생성',
+      icon: '📋',
+      apiToolId: 'hobak-goguma-order',
+      files: [
+        { key: 'delivery', label: '쿠팡 DeliveryList 파일 (itsoft001 — 토스 주문만 있으면 비워도 됩니다)', optional: true },
+      ],
+      buttonLabel: '발주서 생성',
+      tossDateRange: true,
+      tossDefaultDays: 1,
+      tossDateTitle: '토스 호박고구마 주문 수집',
+      tossDateHint: '기본 2일(어제~오늘) 토스 호박고구마 결제완료 주문을 해달 발주서에 합칩니다. 꿀고구마는 고구마 페이지에서. (안 합치려면 "수집안함")',
+    },
+    tracking: {
+      title: '햇 호박고구마 쿠팡 운송장번호 입력 (itsoft001)',
+      icon: '📦',
+      apiToolId: 'hobak-goguma-tracking',
+      files: [
+        { key: 'haedal', label: '해달 회신 파일 (한진양식, 송장번호 포함)' },
+        { key: 'delivery', label: '쿠팡 DeliveryList 파일 (itsoft001)' },
+      ],
+      buttonLabel: '운송장 입력',
+    },
+  },
   biseller: {
     title: '비셀러 (LA한입갈비)',
     description: '취급품목: 양념LA한입갈비 800g 세트 — 비셀러 발주서 생성 + 운송장번호 입력 · 2026-09-15부터 메이크샵 발주용 양식(상품번호 2세트 6120·4세트 6121, 4행부터 데이터)으로 출력 · 쿠팡 옵션 800g N개 → 세트 수로 변환 · 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐지고 당첨 1팩은 2세트로 발주(우편번호는 직접 입력)',
@@ -339,9 +368,14 @@ function ProcessSection({
   const requiredFiles = section.files.filter((f) => !f.optional);
   // 필수 파일이 하나도 없는 섹션(예: 비셀러 발주 = DeliveryList 또는 당첨자 CSV)은
   // 둘 중 하나만 올려도 실행할 수 있어야 한다.
+  // 토스 수집 기간이 잡혀 있으면 파일 없이 토스 주문만으로도 실행할 수 있다(예: 호박고구마 토스만 들어온 날).
+  const tossOnlyReady = Boolean(
+    section.tossDateRange && section.files.every((f) => f.optional)
+    && extraValues.toss_from_date && extraValues.toss_to_date,
+  );
   const allUploaded = requiredFiles.length > 0
     ? requiredFiles.every((f) => files[f.key] != null)
-    : section.files.some((f) => files[f.key] != null);
+    : section.files.some((f) => files[f.key] != null) || tossOnlyReady;
 
   const handleFileSelect = (key: string) => (file: File) => {
     setFiles((prev) => ({ ...prev, [key]: file || null }));
@@ -592,7 +626,17 @@ function ProcessSection({
 }
 
 // ── 토스 운송장 자동등록(API) 카드 (고구마식) ──────────────────────
-function TossApiTrackingCard({ supplierLabel = '쥬얼리' }: { supplierLabel?: string }) {
+function TossApiTrackingCard({
+  supplierLabel = '쥬얼리',
+  endpoint,
+  fieldName,
+  replyLabel = '거래처 회신(orderlist)',
+}: {
+  supplierLabel?: string;
+  endpoint?: string;     // 기본: 과일(쥬얼리·제주다팜) 토스 운송장
+  fieldName?: string;
+  replyLabel?: string;   // 화면 안내용 회신 파일 이름 (해달은 '해달 회신 파일')
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
@@ -604,7 +648,7 @@ function TossApiTrackingCard({ supplierLabel = '쥬얼리' }: { supplierLabel?: 
     setError('');
     setResult(null);
     try {
-      const res = await processTossWatermelonTracking(file);
+      const res = await processTossWatermelonTracking(file, endpoint, fieldName);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : '토스 운송장 등록 중 오류가 발생했습니다.');
@@ -620,17 +664,17 @@ function TossApiTrackingCard({ supplierLabel = '쥬얼리' }: { supplierLabel?: 
         <div>
           <h3 className="text-base font-bold text-gray-900">토스 운송장 자동등록 (API)</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            {supplierLabel} 거래처 회신(orderlist) 파일을 올리면 토스 주문에 운송장번호를 토스 API로 자동 등록합니다.
+            {supplierLabel} {replyLabel} 파일을 올리면 토스 주문에 운송장번호를 토스 API로 자동 등록합니다.
             결제완료 주문은 상품준비중으로 자동 전환됩니다.
           </p>
           <p className="text-xs font-semibold text-amber-700 mt-1">
-            ⚠️ DeliveryList(쿠팡 송장입력본)가 아니라, 토스 고객 송장이 들어있는 <b>거래처 회신(orderlist)</b> 파일을 올려야 합니다.
+            ⚠️ DeliveryList(쿠팡 송장입력본)가 아니라, 토스 고객 송장이 들어있는 <b>{replyLabel}</b> 파일을 올려야 합니다.
           </p>
         </div>
       </div>
 
       <FileUpload
-        label={`${supplierLabel} 거래처 회신(orderlist) 파일`}
+        label={`${supplierLabel} ${replyLabel} 파일`}
         file={file}
         onFileSelect={(f) => {
           setFile(f || null);
@@ -670,13 +714,29 @@ function TossApiTrackingCard({ supplierLabel = '쥬얼리' }: { supplierLabel?: 
         <div className="bg-green-50 border border-green-200 rounded-xl p-4">
           <p className="text-sm font-bold text-green-800 mb-2">토스 운송장 등록 결과</p>
           <div className="space-y-0.5">
-            {formatStats(result).map((line, i) => (
+            {formatStats(
+              Object.fromEntries(Object.entries(result).filter(([k]) => k !== 'results')),
+            ).map((line, i) => (
               <p key={i} className="text-sm text-green-700">{line}</p>
             ))}
           </div>
-          {Number((result.toss_success as number) ?? 0) === 0 && (
+          {/* 고구마식 응답은 주문별 결과 목록(results)을 준다 — 누가 등록/스킵됐는지 이름으로 보여준다 */}
+          {Array.isArray(result.results) && (result.results as Record<string, unknown>[]).length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-xs">
+              {(result.results as Record<string, unknown>[]).map((r, i) => (
+                <li
+                  key={i}
+                  className={r.status === 'success' ? 'text-green-700' : r.status === 'fail' ? 'text-red-600' : 'text-gray-600'}
+                >
+                  {r.status === 'success' ? '✅' : r.status === 'fail' ? '❌' : '⏭️'} {String(r.name ?? '')}
+                  {r.tracking ? ` · ${String(r.tracking)}` : ''} — {String(r.message ?? '')}
+                </li>
+              ))}
+            </ul>
+          )}
+          {Number((result.toss_success as number) ?? (result.success as number) ?? 0) === 0 && (
             <p className="mt-2 text-xs text-amber-700">
-              성공 0건이면 올린 파일이 DeliveryList(쿠팡)일 수 있어요. 토스 고객이 포함된 <b>{supplierLabel} 회신(orderlist)</b> 파일인지 확인하세요.
+              성공 0건이면 올린 파일이 DeliveryList(쿠팡)일 수 있어요. 토스 고객이 포함된 <b>{supplierLabel} {replyLabel}</b> 파일인지 확인하세요.
             </p>
           )}
         </div>
@@ -1250,6 +1310,18 @@ function UnifiedProcessPage() {
       {(productId === 'myeongi' || productId === 'kolrabi') && (
         <div className="mt-4 animate-slide-up">
           <TossApiTrackingCard supplierLabel={productId === 'kolrabi' ? '제주다팜' : '쥬얼리'} />
+        </div>
+      )}
+
+      {/* 토스 호박고구마 운송장 자동등록 (API) — 해달 회신으로 토스 호박고구마 주문만 등록 */}
+      {productId === 'hobak-goguma' && (
+        <div className="mt-4 animate-slide-up">
+          <TossApiTrackingCard
+            supplierLabel="해달"
+            replyLabel="회신(한진양식, 송장번호 포함)"
+            endpoint="/process/hobak-goguma-toss-tracking"
+            fieldName="haedal_file"
+          />
         </div>
       )}
 

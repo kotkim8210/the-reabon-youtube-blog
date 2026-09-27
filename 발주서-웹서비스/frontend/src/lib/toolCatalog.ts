@@ -19,6 +19,14 @@ export const TOOL_CATALOG: ToolConfig[] = [
     kind: 'unified',
   },
   {
+    id: 'hobak-goguma-unified',
+    title: '햇 호박고구마 (해달 · itsoft001)',
+    description: '쿠팡 itsoft001 DeliveryList + 토스 호박고구마 → 해달 발주서 생성, 해달 회신으로 쿠팡(DeliveryList)·토스(API) 운송장 등록.',
+    icon: '🍠',
+    color: 'orange',
+    kind: 'unified',
+  },
+  {
     id: 'chamdureup-unified',
     title: '참두릅',
     description: '발주서 생성 + 운송장번호 입력',

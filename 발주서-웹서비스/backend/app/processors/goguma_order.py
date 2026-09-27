@@ -69,14 +69,30 @@ def transform_alwayz_option(option_text: str) -> str:
     return text
 
 
+# 햇 호박고구마(호풍미) — 2026-09-28 추가. 꿀고구마와 같은 해달 발주지만 쿠팡은 itsoft001 계정
+# 주문(API 키 없음 → DeliveryList 업로드)이라 별도 섹션(hobak_goguma)에서 처리한다.
+HOBAK_KEYWORD = "호박고구마"
+
+
+def is_hobak_goguma_text(*values: object) -> bool:
+    """상품명/옵션 어디든 '호박고구마'가 들어 있으면 True (띄어쓰기 무시)."""
+    compact = re.sub(r"\s+", "", " ".join(str(v) for v in values if v not in (None, "")))
+    return HOBAK_KEYWORD in compact
+
+
 def canonical_goguma_option(*values: str) -> str:
-    """Normalize marketplace 고구마 option text to the 해달 발주서 품목명."""
+    """Normalize marketplace 고구마 option text to the 해달 발주서 품목명.
+
+    호박고구마는 '호박고구마 {kg}Kg ({등급})', 그 외는 '꿀고구마 {kg}Kg ({등급})'.
+    (종전엔 무조건 '꿀고구마'를 붙여 토스 호박고구마가 꿀고구마로 발주될 뻔했다 — 2026-09-28)
+    """
     texts = [normalize(value) for value in values if normalize(value)]
     text = " ".join(texts)
     if not text:
         return ""
 
     compact = re.sub(r"\s+", "", text).lower()
+    product_label = "호박고구마" if HOBAK_KEYWORD in compact else "꿀고구마"
     weight_match = re.search(r"(10|5|3|2)\s*(?:kg|키로)", text, re.IGNORECASE)
     weight = weight_match.group(1) if weight_match else ""
 
@@ -102,7 +118,7 @@ def canonical_goguma_option(*values: str) -> str:
             grade = "대"
 
     if weight and grade:
-        return f"꿀고구마 {weight}Kg ({grade})"
+        return f"{product_label} {weight}Kg ({grade})"
 
     # Fallback: keep legacy cleanup, but remove noisy market prefixes.
     cleaned = re.sub(r"^\d+\.\s*", "", text)
@@ -188,13 +204,24 @@ def ensure_haedal_header(ws) -> None:
 
 
 def is_goguma_order(item: dict) -> bool:
-    """Check if a Toss order item is a 고구마 product."""
+    """Check if a Toss order item is a 꿀고구마(해달·알제이시스템즈 발주) product.
+
+    호박고구마는 별도 섹션(hobak_goguma)이 수집한다 — 여기서 같이 잡으면 같은 토스 주문이
+    두 발주서에 들어가 중복 발주된다.
+    """
     product_name = (item.get("productName") or "").lower()
     option_name = (item.get("optionName") or "").lower()
+    if is_hobak_goguma_text(product_name, option_name):
+        return False
     for kw in GOGUMA_KEYWORDS:
         if kw in product_name or kw in option_name:
             return True
     return False
+
+
+def is_hobak_goguma_toss_order(item: dict) -> bool:
+    """토스 주문이 햇 호박고구마인지 (hobak_goguma 섹션 전용)."""
+    return is_hobak_goguma_text(item.get("productName"), item.get("optionName"))
 
 
 def transform_toss_option(product_name: str, option_name: str) -> str:
@@ -247,18 +274,21 @@ def parse_toss_excel(file_bytes: bytes) -> list[dict]:
     return entries
 
 
-async def collect_toss_orders(from_date: str, to_date: str) -> list[dict]:
+async def collect_toss_orders(from_date: str, to_date: str, matcher=None) -> list[dict]:
     """Collect 고구마 orders from Toss Shopping API.
 
     Args:
         from_date: Start date in YYYY-MM-DD format.
         to_date: End date in YYYY-MM-DD format.
+        matcher: item → bool. 기본은 꿀고구마(is_goguma_order), 호박고구마 섹션은
+            is_hobak_goguma_toss_order를 넘긴다.
 
     Returns:
         List of order entry dicts.
     """
     from app.toss.client import toss_client
 
+    matcher = matcher or is_goguma_order
     orders = await toss_client.get_orders(
         start_date=from_date,
         end_date=to_date,
@@ -267,7 +297,7 @@ async def collect_toss_orders(from_date: str, to_date: str) -> list[dict]:
 
     entries = []
     for item in orders:
-        if not is_goguma_order(item):
+        if not matcher(item):
             continue
 
         address = item.get("address") or ""
