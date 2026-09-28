@@ -631,30 +631,68 @@ function TossApiTrackingCard({
   endpoint,
   fieldName,
   replyLabel = '거래처 회신(orderlist)',
+  coupangToolId,
+  coupangFileLabel = '쿠팡 DeliveryList 파일',
 }: {
   supplierLabel?: string;
   endpoint?: string;     // 기본: 과일(쥬얼리·제주다팜) 토스 운송장
   fieldName?: string;
   replyLabel?: string;   // 화면 안내용 회신 파일 이름 (해달은 '해달 회신 파일')
+  // 설정하면 같은 회신 파일로 쿠팡 DeliveryList 운송장 입력(엑셀)도 한 번에 한다 (호박고구마: API 키 없는 itsoft001)
+  coupangToolId?: string;
+  coupangFileLabel?: string;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  const [deliveryFile, setDeliveryFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState('');
+  const [coupangResult, setCoupangResult] = useState<ProcessResult | null>(null);
+  const [coupangError, setCoupangError] = useState('');
+
+  const reset = () => {
+    setFile(null);
+    setDeliveryFile(null);
+    setResult(null);
+    setError('');
+    setCoupangResult(null);
+    setCoupangError('');
+  };
 
   const run = async () => {
     if (!file) return;
     setLoading(true);
     setError('');
     setResult(null);
+    setCoupangError('');
+    setCoupangResult(null);
+    // 토스와 쿠팡은 서로 독립 — 한쪽이 실패(예: 토스에 대상 주문 없음)해도 다른 쪽은 진행한다.
     try {
       const res = await processTossWatermelonTracking(file, endpoint, fieldName);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : '토스 운송장 등록 중 오류가 발생했습니다.');
-    } finally {
-      setLoading(false);
     }
+    if (coupangToolId && deliveryFile) {
+      try {
+        const res = await processFile(coupangToolId, { haedal: file, delivery: deliveryFile });
+        setCoupangResult(res);
+        downloadBlob(res.blob, res.filename);
+      } catch (e) {
+        setCoupangError(e instanceof Error ? e.message : '쿠팡 운송장 입력 중 오류가 발생했습니다.');
+      }
+    }
+    setLoading(false);
+  };
+
+  const coupangLabels: Record<string, string> = {
+    filled: '쿠팡 송장 입력',
+    skipped: '미입력',
+    skipped_names: '미입력 주문(받는분)',
+    hobak_rows: '호박고구마 주문',
+    haedal_entries: '해달 회신 송장',
+    already_filled: '이미 입력돼 있던 주문',
+    needs_check: '⚠️ 확인 필요',
   };
 
   return (
@@ -662,13 +700,18 @@ function TossApiTrackingCard({
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-xl">📦</div>
         <div>
-          <h3 className="text-base font-bold text-gray-900">토스 운송장 자동등록 (API)</h3>
+          <h3 className="text-base font-bold text-gray-900">
+            {coupangToolId ? '운송장 등록 — 토스 자동등록(API) + 쿠팡 운송장 입력' : '토스 운송장 자동등록 (API)'}
+          </h3>
           <p className="text-xs text-gray-500 mt-0.5">
             {supplierLabel} {replyLabel} 파일을 올리면 토스 주문에 운송장번호를 토스 API로 자동 등록합니다.
             결제완료 주문은 상품준비중으로 자동 전환됩니다.
+            {coupangToolId && (
+              <> {coupangFileLabel}도 같이 올리면 같은 회신으로 쿠팡 운송장번호(택배사 한진택배)까지 입력한 파일을 바로 내려받습니다 — WING에 그대로 업로드하세요.</>
+            )}
           </p>
           <p className="text-xs font-semibold text-amber-700 mt-1">
-            ⚠️ DeliveryList(쿠팡 송장입력본)가 아니라, 토스 고객 송장이 들어있는 <b>{replyLabel}</b> 파일을 올려야 합니다.
+            ⚠️ 토스 송장은 DeliveryList(쿠팡 송장입력본)가 아니라, 토스 고객 송장이 들어있는 <b>{replyLabel}</b> 파일로 등록됩니다.
           </p>
         </div>
       </div>
@@ -680,8 +723,22 @@ function TossApiTrackingCard({
           setFile(f || null);
           setResult(null);
           setError('');
+          setCoupangResult(null);
+          setCoupangError('');
         }}
       />
+
+      {coupangToolId && (
+        <FileUpload
+          label={`${coupangFileLabel} (선택 — 올리면 쿠팡 운송장도 같이 입력)`}
+          file={deliveryFile}
+          onFileSelect={(f) => {
+            setDeliveryFile(f || null);
+            setCoupangResult(null);
+            setCoupangError('');
+          }}
+        />
+      )}
 
       <div className="flex items-center gap-3">
         <button
@@ -691,11 +748,15 @@ function TossApiTrackingCard({
                      hover:bg-blue-700 active:bg-blue-800
                      disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
         >
-          {loading ? '등록 중...' : '토스 운송장 등록'}
+          {loading
+            ? '등록 중...'
+            : coupangToolId && deliveryFile
+              ? '운송장 등록 (토스 + 쿠팡)'
+              : '토스 운송장 등록'}
         </button>
-        {(file || result || error) && (
+        {(file || deliveryFile || result || error || coupangResult || coupangError) && (
           <button
-            onClick={() => { setFile(null); setResult(null); setError(''); }}
+            onClick={reset}
             disabled={loading}
             className="text-gray-500 hover:text-gray-700 px-4 py-2.5 rounded-xl font-medium text-sm hover:bg-gray-100 transition-all"
           >
@@ -739,6 +800,32 @@ function TossApiTrackingCard({
               성공 0건이면 올린 파일이 DeliveryList(쿠팡)일 수 있어요. 토스 고객이 포함된 <b>{supplierLabel} {replyLabel}</b> 파일인지 확인하세요.
             </p>
           )}
+        </div>
+      )}
+
+      {coupangError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm font-bold text-red-700 mb-1">쿠팡 운송장 입력 실패</p>
+          <p className="text-sm text-red-600">{coupangError}</p>
+        </div>
+      )}
+
+      {coupangResult && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+          <p className="text-sm font-bold text-orange-800 mb-2">쿠팡 운송장 입력 결과 (파일 다운로드됨)</p>
+          <div className="space-y-0.5">
+            {Object.entries(coupangResult.stats || {}).map(([k, v]) => (
+              <p key={k} className="text-sm text-orange-700">
+                {coupangLabels[k] || k}: {Array.isArray(v) ? v.join(' / ') : typeof v === 'number' ? `${v}건` : String(v)}
+              </p>
+            ))}
+          </div>
+          <button
+            onClick={() => downloadBlob(coupangResult.blob, coupangResult.filename)}
+            className="mt-3 text-sm font-semibold text-orange-700 hover:text-orange-900 underline"
+          >
+            {coupangResult.filename} 다시 받기
+          </button>
         </div>
       )}
     </div>
@@ -1321,6 +1408,8 @@ function UnifiedProcessPage() {
             replyLabel="회신(한진양식, 송장번호 포함)"
             endpoint="/process/hobak-goguma-toss-tracking"
             fieldName="haedal_file"
+            coupangToolId="hobak-goguma-tracking"
+            coupangFileLabel="쿠팡 DeliveryList 파일 (itsoft001)"
           />
         </div>
       )}
