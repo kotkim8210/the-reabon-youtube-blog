@@ -13,6 +13,7 @@ import {
   fetchGogumaCsInquiries, replyGogumaCsInquiry, GogumaCsInquiry,
 } from '../api';
 import FileUpload from '../components/FileUpload';
+import MultiFileUpload from '../components/MultiFileUpload';
 import { getDefaultGogumaDateRange, getGogumaDateRangeForDays } from '../lib/gogumaDateRange';
 
 function formatDate(date: Date): string {
@@ -178,20 +179,24 @@ function OrderCollectionTab() {
   const [alwayzFile, setAlwayzFile] = useState<File | null>(null);
   const [excludeIssued, setExcludeIssued] = useState(true);  // 이전 발주분 자동 제외 (중복발주 방지)
 
-  // 발주서 이메일 발송(수동 버튼): 최종 발주파일 업로드 → 클릭 시 발송
-  const [emailFile, setEmailFile] = useState<File | null>(null);
+  // 발주서 이메일 발송(수동 버튼): 최종 발주파일 업로드 → 클릭 시 발송.
+  // 꿀고구마(알제이시스템즈) + 호박고구마(아이티소프트) 발주파일을 한 메일에 같이 첨부할 수 있게 여러 개 받는다.
+  const [emailFiles, setEmailFiles] = useState<File[]>([]);
   const [emailSending, setEmailSending] = useState(false);
   const [emailResult, setEmailResult] = useState('');
   const [emailError, setEmailError] = useState('');
 
   const handleSendOrderEmail = async () => {
-    if (!emailFile) return;
+    if (emailFiles.length === 0) return;
     setEmailSending(true);
     setEmailResult('');
     setEmailError('');
     try {
-      const res = await sendOrderEmailFiles([emailFile]);
-      setEmailResult(`발송 완료 → ${res.to || 'farmers2022@naver.com'} · 제목 "${res.subject || ''}"`);
+      const res = await sendOrderEmailFiles(emailFiles);
+      const sentNames = res.files?.length ? res.files : emailFiles.map((f) => f.name);
+      setEmailResult(
+        `발송 완료 → ${res.to || 'farmers2022@naver.com'} · 제목 "${res.subject || ''}" · 첨부 ${sentNames.length}개: ${sentNames.join(', ')}`,
+      );
     } catch (err) {
       setEmailError(err instanceof Error ? err.message : '이메일 발송에 실패했습니다.');
     } finally {
@@ -499,24 +504,29 @@ function OrderCollectionTab() {
           <div>
             <h3 className="text-base font-bold text-gray-900">발주서 이메일 발송</h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              최종 고구마 발주파일을 올리고(드래그 가능) 버튼을 누르면
-              shach457@gmail.com → farmers2022@naver.com로 첨부 발송합니다.
+              최종 고구마 발주파일을 올리고(여러 개 한꺼번에 선택·드래그 가능) 버튼을 누르면
+              shach457@gmail.com → farmers2022@naver.com로 한 메일에 모두 첨부해 발송합니다.
+              꿀고구마(알제이시스템즈)와 호박고구마(아이티소프트) 발주파일을 같이 보낼 수 있습니다.
             </p>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 md:items-end">
-          <FileUpload
-            label="최종 고구마 발주파일"
-            file={emailFile}
-            onFileSelect={(f) => { setEmailFile(f); setEmailResult(''); setEmailError(''); }}
+          <MultiFileUpload
+            label="최종 고구마 발주파일 (꿀고구마 + 호박고구마)"
+            files={emailFiles}
+            onChange={(next) => { setEmailFiles(next); setEmailResult(''); setEmailError(''); }}
           />
           <button
             onClick={handleSendOrderEmail}
-            disabled={!emailFile || emailSending}
+            disabled={emailFiles.length === 0 || emailSending}
             className="bg-orange-500 text-white px-6 py-3 rounded-xl font-semibold text-sm hover:bg-orange-600
                        disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-orange-200"
           >
-            {emailSending ? '발송 중...' : '📧 이메일 발송'}
+            {emailSending
+              ? '발송 중...'
+              : emailFiles.length > 1
+                ? `📧 이메일 발송 (${emailFiles.length}개 파일)`
+                : '📧 이메일 발송'}
           </button>
         </div>
         {emailResult && <p className="mt-3 text-sm font-bold text-green-700">{emailResult}</p>}
