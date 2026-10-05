@@ -2272,6 +2272,38 @@ async def process_hobak_goguma_tracking(
         )
 
 
+@app.post("/api/process/hobak-goguma-event-order")
+async def process_hobak_goguma_event_order(
+    winners_file: UploadFile = File(...),
+    exclude_issued: str = Form("true"),
+    user: dict = Depends(verify_token),
+):
+    """라이브 이벤트 당첨자 CSV → 호박고구마 경품 해달 발주서 (같은 CSV 재업로드 시 이전 발주분 자동 제외)."""
+    section = hobak_goguma.EVENT_SECTION
+    try:
+        csv_bytes = await winners_file.read()
+        issued_excluded = await _issued_exclusions(section, exclude_issued)
+        issued_dates = await _issued_exclusion_dates(section, exclude_issued)
+        dup_names: list[str] = []
+        dup_keys: list[str] = []
+        output_bytes, filename, stats = hobak_goguma.process_event(
+            csv_bytes, exclude_keys=issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+        )
+        await _record_issued(section, filename, stats)
+        dup_skipped = int((stats or {}).pop("duplicate_skipped", 0) or 0)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+        logger.info(f"호박고구마 이벤트 당첨자 발주 처리 완료: {stats}")
+        return make_excel_response(output_bytes, filename, stats)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception("호박고구마 이벤트 당첨자 발주 처리 중 오류")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
+        )
+
+
 @app.post("/api/process/hobak-goguma-toss-tracking")
 async def process_hobak_goguma_toss_tracking(
     haedal_file: UploadFile = File(...),

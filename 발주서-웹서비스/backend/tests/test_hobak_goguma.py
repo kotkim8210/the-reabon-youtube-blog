@@ -204,3 +204,61 @@ def test_toss_tracking_registers_only_hobak_orders(monkeypatch):
     ))
     assert result["success"] == 1 and result["fail"] == 0, result
     assert registered == [("OP-HOBAK", "한진택배", "463319275871")]   # 회신 택배사 빈칸 → 해달 기본 한진
+
+
+# ── 라이브 이벤트 당첨자 (2026-10-06) — 실제 당첨자 개인정보 대신 가짜 데이터 사용 ──
+_WINNERS_HEADER = "경품명,별명,개인 식별 정보 확인,이름,연락처,주소,주문 아이디,구매 금액,환불/취소 금액,환불/날짜/시간"
+
+
+def _winners_csv(rows: list[str]) -> bytes:
+    return ("\n".join([_WINNERS_HEADER, *rows]) + "\n").encode("utf-8-sig")
+
+
+def test_event_winners_become_haedal_rows():
+    data = _winners_csv([
+        "호박고구마 2kg(중상),김*희,2026/10/05 21:01,김테스트,010-1111-2222,서울특별시 어딘가 1,27100000000001,21800,0,",
+        "호박고구마 2kg(중상),태풍,2026/10/05 21:01,이테스트,010-3333-4444,경기도 어딘가 2,12100000000002,8400,0,",
+    ])
+    out, filename, stats = hobak_goguma.process_event(data)
+    assert "이벤트당첨" in filename and "호박고구마" in filename
+    assert stats["event"] == 2 and stats["total"] == 2
+    assert "needs_check" not in stats
+    ws = load_workbook(BytesIO(out)).active
+    rows = [(ws.cell(r, 1).value, ws.cell(r, 2).value, ws.cell(r, 6).value, ws.cell(r, 14).value,
+             ws.cell(r, 13).value, ws.cell(r, 19).value, ws.cell(r, 7).value)
+            for r in range(2, ws.max_row + 1) if ws.cell(r, 1).value]
+    assert rows == [
+        ("김테스트", "010-1111-2222", "서울특별시 어딘가 1", "호박고구마 2Kg (중상)", "1", "문 앞", "식품애착"),
+        ("이테스트", "010-3333-4444", "경기도 어딘가 2", "호박고구마 2Kg (중상)", "1", "문 앞", "식품애착"),
+    ]
+
+
+def test_event_skips_refunds_and_flags_other_prizes():
+    data = _winners_csv([
+        "호박고구마 3kg(특상),a,x,정상당첨,010-1,서울 1,1001,1,0,",
+        "호박고구마 2kg(중상),b,x,환불당첨,010-2,서울 2,1002,1,8400,2026/10/05 22:00",   # 환불 → 제외
+        "미니밤호박 3kg,c,x,다른경품,010-3,서울 3,1003,1,0,",                              # 호박고구마 아님
+    ])
+    out, _fn, stats = hobak_goguma.process_event(data)
+    assert stats["event"] == 1 and stats["refund_skipped"] == 1
+    assert any("다른경품" in s for s in stats["needs_check"])
+    ws = load_workbook(BytesIO(out)).active
+    assert ws.cell(2, 1).value == "정상당첨" and ws.cell(2, 14).value == "호박고구마 3Kg (특상)"
+    assert ws.cell(3, 1).value in (None, "")
+
+
+def test_event_reupload_on_later_day_is_excluded():
+    """같은 당첨자 CSV를 다음 날 또 올려도 경품이 두 번 나가지 않는다."""
+    from app.processors.issued_orders import order_ids_from_stats
+
+    data = _winners_csv(["호박고구마 2kg(중상),a,x,김테스트,010-1,서울 1,27100000000001,1,0,"])
+    _out, _fn, first = hobak_goguma.process_event(data)
+    issued = set(order_ids_from_stats(first))
+    assert issued == {"27100000000001|호박고구마2Kg(중상)"}
+    names: list[str] = []
+    try:
+        hobak_goguma.process_event(data, exclude_keys=issued, skipped_names=names)
+    except ValueError as exc:
+        assert "김테스트" in str(exc)
+    else:
+        raise AssertionError("이미 발주한 당첨자는 다시 발주서에 들어가면 안 된다")

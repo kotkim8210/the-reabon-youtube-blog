@@ -96,10 +96,12 @@ def _is_parsed(vendor_name: str) -> bool:
 def process_order(
     delivery_file_bytes: bytes | None = None,
     toss_entries: list[dict] | None = None,
+    entry_label: str = "토스",
 ) -> tuple[bytes, str, dict]:
     """해달 한진양식 발주서 생성 — 쿠팡 itsoft001 DeliveryList 호박고구마 행 + 토스 호박고구마 entries.
 
     toss_entries 필드는 goguma_order.collect_toss_orders와 동일(name/phone/zipcode/address/qty/product/memo/order_id).
+    entry_label: entries 출처 이름(확인 필요 문구용) — 이벤트 당첨자 경로는 '이벤트'.
     """
     toss_entries = list(toss_entries or [])
     coupang_rows: list[dict] = []
@@ -131,7 +133,7 @@ def process_order(
     for entry in toss_entries:
         if not _is_parsed(entry.get("product") or ""):
             needs_check.append(
-                f"{entry.get('name') or '이름없음'}(토스 {entry.get('product') or ''}) — 호박고구마 중량·등급을 못 읽음, 발주서 품목명 확인"
+                f"{entry.get('name') or '이름없음'}({entry_label} {entry.get('product') or ''}) — 호박고구마 중량·등급을 못 읽음, 발주서 품목명 확인"
             )
 
     template_path = TEMPLATE_DIR / "해달_발주서_한진양식.xlsx"
@@ -200,6 +202,81 @@ def process_order(
     if needs_check:
         stats["needs_check"] = needs_check
     return output.read(), filename, stats
+
+
+EVENT_SECTION = "hobak_goguma_event"   # 이벤트 당첨자 발주 이력 — 일반 주문 이력과 분리
+
+
+def process_event(
+    csv_bytes: bytes,
+    exclude_keys=None,
+    skipped_names: list[str] | None = None,
+    skipped_keys: list[str] | None = None,
+) -> tuple[bytes, str, dict]:
+    """라이브 이벤트 당첨자 CSV(winners_raw) → 호박고구마 경품 해달 발주서 (2026-10-06).
+
+    CSV 읽기·환불/취소 제외·이름/주소 누락 표시는 기존 이벤트 발주(event_order.parse_winners)를
+    그대로 쓴다. 경품명 '호박고구마 2kg(중상)' → 해달 품목명 '호박고구마 2Kg (중상)'.
+    호박고구마가 아닌 경품은 발주서에 넣지 않고 needs_check로 알린다(해당 상품 페이지에서 발주).
+    당첨자 CSV에는 우편번호 칸이 없어 해달 우편번호(선택)는 비운다.
+
+    exclude_keys: 직전 영업일까지 이미 발주한 당첨 키(주문아이디|품목명) — 같은 CSV 재업로드 시 중복 발송 방지.
+    """
+    from app.processors.event_order import parse_winners
+    from app.processors.issued_orders import KEY_SEP, make_order_key, normalize_order_id
+
+    winners = parse_winners(csv_bytes)
+    skipped_refund = winners[-1].get("_skipped_refund", 0) if winners else 0
+    incomplete = list(winners[-1].get("_incomplete", []) if winners else [])
+    keys = set(exclude_keys or ())
+    composite = {k for k in keys if KEY_SEP in k}
+    legacy = {k for k in keys if KEY_SEP not in k}
+
+    entries: list[dict] = []
+    others: list[str] = []
+    dup = 0
+    for w in winners:
+        w.pop("_skipped_refund", None)
+        w.pop("_incomplete", None)
+        prize = w.get("product") or ""
+        if not is_hobak_goguma_text(prize):
+            others.append(f"{w.get('name') or '이름없음'}({prize}) — 호박고구마 경품이 아니라 이 발주서에서 뺐습니다. 해당 상품 페이지에서 발주하세요")
+            continue
+        product = hobak_vendor_name("", prize)
+        oid = normalize_order_id(w.get("order_id"))
+        key = make_order_key(oid, product) if oid else ""
+        if key and (key in composite or oid in legacy):
+            dup += 1
+            if skipped_names is not None:
+                skipped_names.append(w.get("name") or oid)
+            if skipped_keys is not None:
+                skipped_keys.append(key if key in composite else oid)
+            continue
+        entries.append({**w, "product": product, "option": product, "zipcode": ""})
+
+    if not entries:
+        reasons = []
+        if dup:
+            reasons.append(f"이전에 이미 발주한 당첨자 {dup}건 제외: {', '.join(skipped_names or [])}")
+        if others:
+            reasons.append(f"호박고구마가 아닌 경품 {len(others)}건")
+        raise ValueError("발주할 호박고구마 당첨자가 없습니다." + (" (" + " / ".join(reasons) + ")" if reasons else ""))
+
+    out, _fn, stats = process_order(None, entries, entry_label="이벤트")
+    stats.pop("coupang", None)
+    stats["event"] = stats.pop("toss", len(entries))
+    stats["product"] = "햇 호박고구마 이벤트 당첨(해달)"
+    if skipped_refund:
+        stats["refund_skipped"] = skipped_refund
+    if dup:
+        stats["duplicate_skipped"] = dup
+    extra = incomplete + others
+    if extra:
+        stats["needs_check"] = list(stats.get("needs_check") or []) + extra
+
+    now = datetime.now(KST)
+    filename = f"해달 발주서 한진양식_아이티소프트_호박고구마_이벤트당첨({now.strftime('%y%m%d')}).xlsx"
+    return out, filename, stats
 
 
 def _parse_haedal_entries(haedal_bytes: bytes) -> list[dict]:
