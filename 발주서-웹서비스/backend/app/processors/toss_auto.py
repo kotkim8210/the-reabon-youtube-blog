@@ -231,7 +231,7 @@ async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, 
     output.seek(0)
 
     now = datetime.now(KST)
-    filename = f"해달 발주서 한진양식_토스_알제이시스템즈({now.strftime('%y%m%d')}).xlsx"
+    filename = f"해달 발주서 한진양식_토스_알제이시스템즈_꿀고구마({now.strftime('%y%m%d')}).xlsx"
     stats = {
         "total": len(entries),
         "period": f"{from_date} ~ {to_date}",

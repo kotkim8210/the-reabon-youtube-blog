@@ -306,7 +306,7 @@ async def process_from_api(
 
     now = datetime.now(KST)
     total = len(orders) + len(toss_entries)
-    filename = f"해달 발주서 한진양식_알제이시스템즈({now.strftime('%y%m%d')}).xlsx"
+    filename = f"해달 발주서 한진양식_알제이시스템즈_꿀고구마({now.strftime('%y%m%d')}).xlsx"
     stats = {
         "total": total,
         "coupang": len(orders),

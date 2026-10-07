@@ -649,7 +649,7 @@ def process(
 
     now = datetime.now(KST)
     total = len(filtered_rows) + len(alwayz_entries) + len(toss_entries)
-    filename = f"해달 발주서 한진양식_알제이시스템즈({now.strftime('%y%m%d')}).xlsx"
+    filename = f"해달 발주서 한진양식_알제이시스템즈_꿀고구마({now.strftime('%y%m%d')}).xlsx"
     stats = {
         "total": total,
         "coupang": len(filtered_rows),

@@ -618,7 +618,7 @@ def _build_haedal_goguma_workbook(entries: list[dict]) -> tuple[bytes, str, dict
     output.seek(0)
 
     today = datetime.now(tomato_order.KST).strftime("%y%m%d")
-    filename = f"해달 발주서 한진양식_테무_알제이시스템즈({today}).xlsx"
+    filename = f"해달 발주서 한진양식_테무_알제이시스템즈_꿀고구마({today}).xlsx"
     stats = {
         "total": len(entries),
         "platform": "테무",
