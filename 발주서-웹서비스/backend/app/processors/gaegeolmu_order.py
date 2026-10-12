@@ -275,6 +275,8 @@ def _process_coupang_delivery(
     exclude_check=None,
     skipped_names=None,
     skipped_keys=None,
+    reissue_check=None,
+    reissued=None,
 ) -> tuple[int, list[dict], int]:
     matching_row_numbers: list[int] = []
     option_totals: dict[str, dict] = {}
@@ -301,6 +303,11 @@ def _process_coupang_delivery(
                 name = normalize(dl_ws.cell(row=row_number, column=COL_MAP["name"]).value)
                 _record_skip(skipped_names, skipped_keys, name, excluded_key)
                 continue  # 이미 발주된 주문 → 발주서에서 제외(행 삭제)
+        if reissue_check is not None and reissued is not None:
+            reissue_key = reissue_check(order_no, option_name)
+            if reissue_key:  # 영업일 2일↑ 지났는데 아직 미출고 → 그대로 넣고 '재발주'로 표시
+                name = normalize(dl_ws.cell(row=row_number, column=COL_MAP["name"]).value)
+                reissued.append((name or order_no, reissue_key))
 
         matching_row_numbers.append(row_number)
         qty_text = normalize(dl_ws.cell(row=row_number, column=COL_MAP["qty"]).value)
@@ -323,6 +330,8 @@ def _process_gmarket(
     exclude_check=None,
     skipped_names=None,
     skipped_keys=None,
+    reissue_check=None,
+    reissued=None,
 ) -> tuple[Workbook, int, list[dict], int]:
     """지마켓 신규주문 시트 단독 처리 — 쿠팡 DeliveryList 양식 워크북으로 변환."""
     out_wb = Workbook()
@@ -334,6 +343,7 @@ def _process_gmarket(
     added, option_totals, skipped = _append_gmarket_rows(
         ws, out_ws, start_index=0,
         exclude_check=exclude_check, skipped_names=skipped_names, skipped_keys=skipped_keys,
+        reissue_check=reissue_check, reissued=reissued,
     )
     return out_wb, added, list(option_totals.values()), skipped
 
@@ -346,6 +356,8 @@ def _append_gmarket_rows(
     exclude_check=None,
     skipped_names=None,
     skipped_keys=None,
+    reissue_check=None,
+    reissued=None,
 ) -> tuple[int, dict[str, dict], int]:
     """지마켓 시트의 게걸무 주문을 DeliveryList 양식 행으로 out_ws에 이어붙인다.
 
@@ -374,6 +386,11 @@ def _append_gmarket_rows(
                 name = normalize(_cell_by_header(ws, headers, row_number, "수령인명"))
                 _record_skip(skipped_names, skipped_keys, name, excluded_key)
                 continue  # 이미 발주된 주문 → 지마켓 행도 발주서에서 제외
+        if reissue_check is not None and reissued is not None:
+            reissue_key = reissue_check(order_no, option_name)
+            if reissue_key:
+                name = normalize(_cell_by_header(ws, headers, row_number, "수령인명"))
+                reissued.append((name or order_no, reissue_key))
 
         output_row_index += 1
         qty_text = normalize(_cell_by_header(ws, headers, row_number, "수량"))
@@ -511,6 +528,8 @@ def process(
     exclude_keys=None,
     skipped_names: list[str] | None = None,
     skipped_keys: list[str] | None = None,
+    reissue_keys=None,
+    reissued: list[tuple[str, str]] | None = None,
 ) -> tuple[bytes, str, dict]:
     """게걸무 발주서 생성.
 
@@ -521,6 +540,7 @@ def process(
         같은 날 재생성은 이력에 오늘 날짜만 있으므로 걸러지지 않는다(호출부 _issued_exclusions).
     """
     exclude_check = _make_exclusion(exclude_keys) if exclude_keys else None
+    reissue_check = _make_exclusion(reissue_keys) if reissue_keys else None  # 미출고 재발주 표시용
     skipped = 0
 
     dl_wb = load_workbook(filename=BytesIO(delivery_file_bytes))
@@ -529,7 +549,7 @@ def process(
     if _is_gmarket_sheet(dl_ws):
         # 첫 칸에 지마켓 파일을 올린 경우 — 종전처럼 단독 처리
         output_wb, total, options, gm_skipped = _process_gmarket(
-            dl_ws, exclude_check, skipped_names, skipped_keys
+            dl_ws, exclude_check, skipped_names, skipped_keys, reissue_check, reissued
         )
         output_ws = output_wb.active
         option_totals = {bucket["coupang_option_keyword"]: bucket for bucket in options}
@@ -537,7 +557,7 @@ def process(
         skipped += gm_skipped
     else:
         total, options, cp_skipped = _process_coupang_delivery(
-            dl_ws, exclude_check, skipped_names, skipped_keys
+            dl_ws, exclude_check, skipped_names, skipped_keys, reissue_check, reissued
         )
         output_wb = dl_wb
         output_ws = dl_ws
@@ -555,6 +575,7 @@ def process(
         gmarket_added, option_totals, gm_skipped = _append_gmarket_rows(
             gm_ws, output_ws, start_index=total, option_totals=option_totals,
             exclude_check=exclude_check, skipped_names=skipped_names, skipped_keys=skipped_keys,
+            reissue_check=reissue_check, reissued=reissued,
         )
         if gmarket_added:
             sources.append("지마켓")

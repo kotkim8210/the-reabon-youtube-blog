@@ -1546,9 +1546,10 @@ async def issued_order_ids_before(section: str, today_ymd: str) -> set[str]:
 
 
 async def issued_order_dates_before(section: str, today_ymd: str) -> dict[str, str]:
-    """오늘 이전에 발주서에 포함됐던 주문키 → 최초 발주일(YYYY-MM-DD).
+    """오늘 이전에 발주서에 포함됐던 주문키 → 직전 발주일(YYYY-MM-DD).
 
-    "며칠 전 발주분인데 아직 미출고" 경고용. 같은 키가 여러 번 기록됐으면 가장 이른 날짜.
+    키는 UNIQUE(section, order_key)라 행이 하나뿐이고, 재발주되면 issued_on이 그 날짜로 갱신된다
+    → 돌려주는 값은 '마지막으로 발주서에 넣은 날'. 제외 라벨('이름(10/8 발주분)')과 재발주 판정에 쓴다.
     """
     db = await get_db()
     cursor = await db.execute(
@@ -1559,6 +1560,20 @@ async def issued_order_dates_before(section: str, today_ymd: str) -> dict[str, s
     rows = await cursor.fetchall()
     return {str(row["order_key"]): str(row["first_issued"]) for row in rows}
 
+
+async def issued_order_created_before(section: str, today_ymd: str) -> dict[str, str]:
+    """오늘 이전 발주 키 → 그 발주서를 만든 시각(created_at, UTC 'YYYY-MM-DD HH:MM:SS').
+
+    재발주 기산일 계산용: 마감(10:30 KST) 이후·주말에 만든 발주서는 거래처가 다음 영업일에 받는다.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT order_key, created_at FROM issued_order_items WHERE section = ? AND issued_on < ?",
+        (section, today_ymd),
+    )
+    rows = await cursor.fetchall()
+    return {str(row["order_key"]): str(row["created_at"] or "") for row in rows}
+
 async def record_issued_orders(section: str, order_ids: list[str], filename: str, today_ymd: str) -> None:
     """발주서에 포함된 주문번호를 기록. 재발주 시 issued_on을 최신 날짜로 갱신."""
     if not order_ids:
@@ -1568,7 +1583,8 @@ async def record_issued_orders(section: str, order_ids: list[str], filename: str
         """INSERT INTO issued_order_items (section, order_key, issued_on, filename, created_at)
            VALUES (?, ?, ?, ?, datetime('now'))
            ON CONFLICT(section, order_key)
-           DO UPDATE SET issued_on = excluded.issued_on, filename = excluded.filename""",
+           DO UPDATE SET issued_on = excluded.issued_on, filename = excluded.filename,
+                         created_at = excluded.created_at""",
         [(section, order_id, today_ymd, filename or "") for order_id in order_ids],
     )
     # 45일 지난 이력은 정리 (쿠팡 상품준비중 잔존 기간 대비 충분)

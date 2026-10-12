@@ -592,6 +592,8 @@ function ProcessPage() {
       needs_check: '⚠️ 확인 필요(발주서에 못 넣음)',
       duplicate_skipped: '🚫 이전 발주분 제외',
       duplicate_skipped_names: '제외된 주문(받는분)',
+      reissued: '🔁 미출고 재발주',
+      reissued_names: '재발주 주문(받는분·직전 발주일)',
     };
     const lines: string[] = [];
     for (const [key, value] of Object.entries(stats)) {

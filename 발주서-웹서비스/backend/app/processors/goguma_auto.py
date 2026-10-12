@@ -117,6 +117,9 @@ async def collect_orders(from_date: str, to_date: str) -> list[dict]:
                         "address": address,
                         "quantity": item.get("shippingCount") or 1,
                         "product": transform_option(option_text),
+                        # 발주 이력 키는 DeliveryList 경로(L열 원문)와 같은 원문 옵션으로 만든다 —
+                        # 변환명('꿀고구마 3Kg (중상)')으로 기록하면 두 경로를 번갈아 쓸 때 제외가 안 걸린다(2026-10-12 리뷰).
+                        "option": normalize(option_text),
                         "memo": memo,
                         "order_id": order_id,
                     }
@@ -150,6 +153,9 @@ async def process_from_api(
     to_date: str,
     include_toss: bool = False,
     exclude_order_ids: set[str] | None = None,
+    skipped_names: list[str] | None = None,
+    reissue_keys: set[str] | None = None,
+    reissued: list[tuple[str, str]] | None = None,
 ) -> tuple[bytes, str, dict]:
     """Collect 고구마 orders from Coupang API and generate 해달 발주서.
 
@@ -176,12 +182,21 @@ async def process_from_api(
 
     # 이전 영업일 발주분 자동 제외 (중복발주 방지)
     duplicate_skipped = 0
-    if exclude_order_ids:
-        from app.processors.issued_orders import normalize_order_id
-        before_count = len(orders) + len(toss_entries)
-        orders = [o for o in orders if normalize_order_id(o.get("order_id")) not in exclude_order_ids]
-        toss_entries = [e for e in toss_entries if normalize_order_id(e.get("order_id")) not in exclude_order_ids]
-        duplicate_skipped = before_count - len(orders) - len(toss_entries)
+    if exclude_order_ids or reissue_keys:
+        from app.processors.issued_orders import filter_entries_by_issued
+
+        # 쿠팡 API 주문·토스 주문 모두 '주문번호|발주품목' 복합키로 대조한다(기록 형식과 동일).
+        # 종전엔 주문번호만 비교해 복합키 기록과 전혀 안 맞았다 → 이 경로의 제외가 사실상 안 걸렸음
+        # (해달이 당일 출고해 티가 안 났을 뿐, 거래처 휴무 주엔 중복 발주가 날 수 있었다 — 2026-10-12 발견).
+        orders, dup_c = filter_entries_by_issued(
+            orders, exclude_order_ids or set(), skipped_names=skipped_names,
+            reissue_keys=reissue_keys, reissued=reissued,
+        )
+        toss_entries, dup_t = filter_entries_by_issued(
+            toss_entries, exclude_order_ids or set(), skipped_names=skipped_names,
+            reissue_keys=reissue_keys, reissued=reissued,
+        )
+        duplicate_skipped = dup_c + dup_t
 
     if not orders and not toss_entries:
         if duplicate_skipped:
@@ -249,9 +264,9 @@ async def process_from_api(
         except (ValueError, TypeError):
             qty_int = 1
         bucket = option_totals.setdefault(
-            order["product"] or "고구마",
+            order.get("option") or order["product"] or "고구마",
             {
-                "coupang_option_keyword": order["product"] or "고구마",
+                "coupang_option_keyword": order.get("option") or order["product"] or "고구마",
                 "vendor_option_name": order["product"] or "고구마",
                 "quantity": 0,
                 "orders": [],

@@ -223,15 +223,61 @@ def _exclude_issued_enabled(flag: str) -> bool:
     return (flag or "").strip().lower() not in ("false", "0", "off", "no")
 
 
-async def _issued_exclusions(section: str, flag: str) -> set[str]:
-    """전일 이전 발주서에 포함됐던 주문번호(중복발주 방지). 같은 날 재생성은 막지 않는다."""
+async def _issued_exclusions(section: str, flag: str, reissue_stale: bool = True) -> set[str]:
+    """전일 이전 발주서에 포함됐던 주문키(중복발주 방지). 같은 날 재생성은 막지 않는다.
+
+    reissue_stale=True(기본): 영업일 2일 이상 지난 키는 제외 목록에서 뺀다 → 그 주문이 아직
+    DeliveryList·토스 결제완료에 남아 있으면(=거래처 미출고) 자동으로 다시 발주서에 들어간다.
+    (2026-10-08 해달 휴무일에 만든 발주서가 처리되지 않았는데 '이미 발주함'으로 막아 2건이 10/12까지 누락)
+    이벤트 당첨자처럼 '아직 미출고'라는 신호가 없는 섹션은 False로 호출해 영구 제외를 유지한다.
+    """
     if not _exclude_issued_enabled(flag):
         return set()
     try:
-        return await database.issued_order_ids_before(section, _today_kst())
+        dates = await database.issued_order_dates_before(section, _today_kst())
     except Exception:
         logger.exception("발주 이력 조회 실패(제외 없이 계속)")
         return set()
+    keys = set(dates)
+    if reissue_stale:
+        keys -= await _issued_stale_keys(section, flag, dates)
+    return keys
+
+
+async def _issued_stale_keys(section: str, flag: str, issued_dates: dict[str, str] | None = None) -> set[str]:
+    """자동 재발주 대상 키(거래처 접수일 기준 영업일 2일↑ 지난 발주분) — 발주서에 그대로 넣되 '미출고 재발주'로 표시.
+
+    기산일은 발주서를 만든 시각으로 보정한다: 마감(10:30 KST) 이후·주말 생성분은 거래처가 다음 영업일에 받는다.
+    """
+    if not _exclude_issued_enabled(flag):
+        return set()
+    try:
+        if issued_dates is None:
+            issued_dates = await database.issued_order_dates_before(section, _today_kst())
+        created = await database.issued_order_created_before(section, _today_kst())
+    except Exception:
+        logger.exception("발주 이력(생성시각) 조회 실패 — 재발주 없이 계속")
+        return set()
+    effective = {k: issued_orders.effective_issue_date(d, created.get(k)) for k, d in issued_dates.items()}
+    return issued_orders.stale_issued_keys(effective, _today_kst())
+
+
+def _widen_start(from_ymd: str, issued_dates: dict[str, str], reissue_keys: set[str], max_days: int = 14) -> str:
+    """API 수집 시작일을 재발주 대상의 발주일까지 앞당긴다(최대 max_days).
+
+    쿠팡·토스 API 수집은 '주문일' 기준 기간 조회라, 며칠 전 발주분은 기본 기간(어제~오늘)에 안 들어와
+    재발주가 영영 안 걸린다(리뷰 지적). 미출고 주문만 돌려주므로 기간을 넓혀도 중복 위험은 없다.
+    """
+    candidates = [issued_dates[k] for k in reissue_keys if issued_dates.get(k)]
+    if not candidates or not from_ymd:
+        return from_ymd
+    try:
+        today = datetime.strptime(_today_kst(), "%Y-%m-%d").date()
+        floor = (today - timedelta(days=max_days)).isoformat()
+    except ValueError:
+        return from_ymd
+    start = max(min(candidates), floor)
+    return min(from_ymd, start)
 
 
 async def _issued_exclusion_dates(section: str, flag: str) -> dict[str, str]:
@@ -245,10 +291,14 @@ async def _issued_exclusion_dates(section: str, flag: str) -> dict[str, str]:
         return {}
 
 
-# 발주서에 넣은 지 이 일수 이상 지났는데 아직 DeliveryList(미출고)에 남아 있으면 누락을 의심한다.
-# 거래처는 보통 당일~다음날 출고하므로 이틀째 미출고는 "발주서가 전달 안 됐다"는 신호다
-# (2026-09-09 임재숙 콜라비: 발주서엔 있었지만 거래처 미출고 → 9/10·9/11 자동 제외로 이틀 지연).
-_STALE_ISSUED_DAYS = 2
+def _issued_label(name: str, key: str, issued_dates: dict[str, str]) -> str:
+    """'김영옥(10/8 발주분)' — 발주일을 못 찾으면 이름만."""
+    issued = issued_dates.get(key) or issued_dates.get((key or "").split(issued_orders.KEY_SEP)[0], "")
+    try:
+        issued_d = datetime.strptime(issued, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return name
+    return f"{name}({issued_d.month}/{issued_d.day} 발주분)"
 
 
 def _annotate_excluded(
@@ -257,37 +307,45 @@ def _annotate_excluded(
     dup_names: list[str],
     dup_keys: list[str],
     issued_dates: dict[str, str],
+    reissued: list[tuple[str, str]] | None = None,
 ) -> dict:
-    """중복 제외 결과를 stats에 담는다 — 이름 옆에 발주일, 오래된 미출고는 needs_check 경고."""
-    if not dup_skipped:
+    """중복 제외·미출고 재발주 결과를 stats에 담는다 — 이름 옆에 원래 발주일을 붙여 침묵을 막는다.
+
+    reissued: (받는분, 키) — 영업일 2일↑ 전에 발주서에 넣었는데 아직 미출고라 이번 발주서에 다시 넣은 주문.
+    (종전의 '체크 해제하세요' 경고는 폐지 — 경고를 못 보고 넘어가 주문이 며칠씩 묻혔다. 이제 자동으로 넣는다.)
+    """
+    if not dup_skipped and not reissued:
         return stats
-    stats = {**(stats or {}), "duplicate_skipped": dup_skipped}
-    today = datetime.strptime(_today_kst(), "%Y-%m-%d").date()
-    labels: list[str] = []
-    stale: list[str] = []
-    for idx, name in enumerate(n for n in dup_names if n):
-        key = dup_keys[idx] if idx < len(dup_keys) else ""
-        issued = issued_dates.get(key) or issued_dates.get(key.split(KEY_SEP)[0], "")
-        if not issued:
-            labels.append(name)
-            continue
-        try:
-            issued_d = datetime.strptime(issued, "%Y-%m-%d").date()
-        except ValueError:
-            labels.append(name)
-            continue
-        short = f"{issued_d.month}/{issued_d.day}"
-        labels.append(f"{name}({short} 발주분)")
-        age = (today - issued_d).days
-        if age >= _STALE_ISSUED_DAYS:
-            stale.append(
-                f"{name} — {short} 발주서에 넣었는데 {age}일째 아직 미출고입니다. "
-                "거래처에 전달됐는지 확인하고, 다시 넣으려면 '이전 발주분 자동 제외' 체크를 해제하세요"
-            )
-    if labels:
-        stats["duplicate_skipped_names"] = ", ".join(labels)
-    if stale:
-        stats["needs_check"] = list(stats.get("needs_check") or []) + stale
+    stats = dict(stats or {})
+    if dup_skipped:
+        stats["duplicate_skipped"] = dup_skipped
+        labels = [
+            _issued_label(name, dup_keys[idx] if idx < len(dup_keys) else "", issued_dates)
+            for idx, name in enumerate(n for n in dup_names if n)
+        ]
+        if labels:
+            stats["duplicate_skipped_names"] = ", ".join(labels)
+    if reissued:
+        stats["reissued"] = len(reissued)
+        stats["reissued_names"] = ", ".join(_issued_label(name, key, issued_dates) for name, key in reissued)
+        old_days: list[str] = []
+        for _, key in reissued:
+            label = _issued_label("", key, issued_dates)      # '(10/8 발주분)' 또는 ''
+            day = label[1:].split(" ")[0] if label.startswith("(") else ""
+            if day and day not in old_days:
+                old_days.append(day)
+        stats["needs_check"] = list(stats.get("needs_check") or []) + [
+            f"미출고 재발주 {len(reissued)}건 포함 — 거래처가 이전 발주서({', '.join(old_days) or '이전'})를 뒤늦게 처리하면 이중 출고되니 그 발주서는 폐기하라고 알려주세요"
+        ]
+    # 재발주를 안 하는 섹션(이벤트 당첨자)에서 2영업일↑ 지난 당첨자가 또 올라오면 알린다 — 침묵 영구 제외 방지
+    stale_dups = [
+        name for idx, name in enumerate(n for n in dup_names if n)
+        if idx < len(dup_keys) and dup_keys[idx] in issued_orders.stale_issued_keys(issued_dates, _today_kst())
+    ]
+    if stale_dups:
+        stats["needs_check"] = list(stats.get("needs_check") or []) + [
+            f"이전에 발주한 당첨자가 다시 올라옴(자동 재발주 안 함): {', '.join(stale_dups)} — 거래처 발송 여부 확인 후 필요하면 당첨자만 다시 발주"
+        ]
     return stats
 
 def _require_xlsx(data: bytes, field_label: str = "DeliveryList") -> None:
@@ -497,10 +555,13 @@ async def process_kolrabi_order(
         _require_xlsx(delivery_bytes)
         issued_excluded = await _issued_exclusions("kolrabi", exclude_issued)
         issued_dates = await _issued_exclusion_dates("kolrabi", exclude_issued)
+        reissue_keys = await _issued_stale_keys("kolrabi", exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
         dup_names: list[str] = []
         dup_keys: list[str] = []
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
-            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+            reissue_keys=reissue_keys, reissued=reissued,
         )
         # 토스 제주다팜 주문(콜라비 + 미니밤호박 1kg + 홍감자 + 백도 2·4kg)을 토스 API로 수집해 각 발주서에 합친다.
         toss_colrabi_entries = []
@@ -516,27 +577,34 @@ async def process_kolrabi_order(
             today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
             collect_dates = (today, today)
         if collect_dates:
+            # 재발주 대상 발주일까지 수집 기간을 넓힌다(기본 기간엔 옛 주문이 안 들어와 재발주가 안 걸림)
+            collect_dates = (_widen_start(collect_dates[0], issued_dates, reissue_keys), collect_dates[1])
             try:
                 toss_jeju = await tomato_order.collect_toss_jejudapam_orders(*collect_dates)
                 toss_colrabi_entries = toss_jeju.get("colrabi", [])
                 toss_bamhobak_entries = toss_jeju.get("bamhobak", [])
                 toss_potato_entries = toss_jeju.get("potato", [])
                 toss_colrabi_entries, _dup_c = issued_orders.filter_entries_by_issued(
-                    toss_colrabi_entries, issued_excluded, skipped_names=dup_names
+                    toss_colrabi_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
                 )
                 toss_bamhobak_entries, _dup_b = issued_orders.filter_entries_by_issued(
-                    toss_bamhobak_entries, issued_excluded, skipped_names=dup_names
+                    toss_bamhobak_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
                 )
                 toss_potato_entries, _dup_p = issued_orders.filter_entries_by_issued(
-                    toss_potato_entries, issued_excluded, skipped_names=dup_names
+                    toss_potato_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
                 )
                 toss_baekdo_entries = toss_jeju.get("baekdo", [])
                 toss_baekdo_entries, _dup_bd = issued_orders.filter_entries_by_issued(
-                    toss_baekdo_entries, issued_excluded, skipped_names=dup_names
+                    toss_baekdo_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
                 )
                 toss_hongro_entries = toss_jeju.get("hongro", [])
                 toss_hongro_entries, _dup_h = issued_orders.filter_entries_by_issued(
-                    toss_hongro_entries, issued_excluded, skipped_names=dup_names
+                    toss_hongro_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
                 )
                 dup_skipped += _dup_c + _dup_b + _dup_p + _dup_bd + _dup_h
             except Exception as toss_exc:
@@ -565,7 +633,7 @@ async def process_kolrabi_order(
 
         if len(results) == 1:
             output_bytes, filename, stats = results[0]
-            stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+            stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
             if toss_error:
                 stats = {**(stats or {}), "toss_error": toss_error}
             response = make_excel_response(output_bytes, filename, stats)
@@ -576,7 +644,7 @@ async def process_kolrabi_order(
                 "files": len(results),
                 "total": sum(int((item_stats or {}).get("total", 0)) for _, _, item_stats in results),
             }
-            stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+            stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
             if toss_error:
                 stats["toss_error"] = toss_error
             response = make_zip_response(
@@ -608,14 +676,17 @@ async def process_chamdureup_order(
         delivery_bytes = await delivery_file.read()
         issued_excluded = await _issued_exclusions("chamdureup", exclude_issued)
         issued_dates = await _issued_exclusion_dates("chamdureup", exclude_issued)
+        reissue_keys = await _issued_stale_keys("chamdureup", exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
         dup_names: list[str] = []
         dup_keys: list[str] = []
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
-            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+            reissue_keys=reissue_keys, reissued=reissued,
         )
         output_bytes, filename, stats = chamdureup_order.process(delivery_bytes)
         await _record_issued("chamdureup", filename, stats)
-        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
         )
@@ -696,10 +767,13 @@ async def process_myeongi_order(
         _require_xlsx(delivery_bytes)
         issued_excluded = await _issued_exclusions("myeongi", exclude_issued)
         issued_dates = await _issued_exclusion_dates("myeongi", exclude_issued)
+        reissue_keys = await _issued_stale_keys("myeongi", exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
         dup_names: list[str] = []
         dup_keys: list[str] = []
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
-            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+            reissue_keys=reissue_keys, reissued=reissued,
         )
         # 토스 쥬얼리 주문(수박·성주참외·신비복숭아·망고수박)을 토스 API로 수집해 함께 발주.
         # 토스 신비복숭아 수집은 이 페이지(명이)로 일원화됨.
@@ -712,10 +786,13 @@ async def process_myeongi_order(
             today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
             collect_dates = (today, today)
         if collect_dates:
+            # 재발주 대상 발주일까지 수집 기간을 넓힌다(기본 기간엔 옛 주문이 안 들어와 재발주가 안 걸림)
+            collect_dates = (_widen_start(collect_dates[0], issued_dates, reissue_keys), collect_dates[1])
             try:
                 toss_entries = await tomato_order.collect_toss_jewelry_orders(*collect_dates)
                 toss_entries, _dup_t = issued_orders.filter_entries_by_issued(
-                    toss_entries, issued_excluded, skipped_names=dup_names
+                    toss_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
                 )
                 dup_skipped += _dup_t
             except Exception as toss_exc:
@@ -726,7 +803,7 @@ async def process_myeongi_order(
             delivery_bytes, toss_entries=toss_entries
         )
         await _record_issued("myeongi", filename, stats)
-        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
         if toss_error:
             stats = {**(stats or {}), "toss_error": toss_error}
         await record_sales_from_process_stats(
@@ -804,10 +881,13 @@ async def process_tomato_order(
         delivery_bytes = await delivery_file.read()
         issued_excluded = await _issued_exclusions("tomato", exclude_issued)
         issued_dates = await _issued_exclusion_dates("tomato", exclude_issued)
+        reissue_keys = await _issued_stale_keys("tomato", exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
         dup_names: list[str] = []
         dup_keys: list[str] = []
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
-            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+            reissue_keys=reissue_keys, reissued=reissued,
         )
         # 신비복숭아 3·4kg은 쿠팡(DeliveryList) + 토스(API)에서 모두 제이비티 발주로 합친다.
         # (1·2kg은 명이/쥬얼리 메뉴, 수박·성주참외 등 다른 토스 품목은 명이로 일원화)
@@ -820,12 +900,15 @@ async def process_tomato_order(
             today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
             collect_dates = (today, today)
         if collect_dates:
+            # 재발주 대상 발주일까지 수집 기간을 넓힌다(기본 기간엔 옛 주문이 안 들어와 재발주가 안 걸림)
+            collect_dates = (_widen_start(collect_dates[0], issued_dates, reissue_keys), collect_dates[1])
             try:
                 toss_peach_entries = await tomato_order.collect_toss_peach_orders(
                     *collect_dates, kgs=tomato_order.JBT_PEACH_KGS
                 )
                 toss_peach_entries, _dup_p = issued_orders.filter_entries_by_issued(
-                    toss_peach_entries, issued_excluded, skipped_names=dup_names
+                    toss_peach_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
                 )
                 dup_skipped += _dup_p
             except Exception as toss_exc:
@@ -852,6 +935,7 @@ async def process_tomato_order(
             toss_peach_info["toss_peach_orders"] = len(toss_peach_entries)
         if toss_peach_error:
             toss_peach_info["toss_peach_error"] = toss_peach_error
+        toss_peach_info = _annotate_excluded(toss_peach_info, 0, [], [], issued_dates, reissued=reissued)
 
         if len(results) == 1:
             output_bytes, filename, stats = results[0]
@@ -1035,10 +1119,13 @@ async def process_goguma_order(
         delivery_bytes = await delivery_file.read()
         issued_excluded = await _issued_exclusions("goguma", exclude_issued)
         issued_dates = await _issued_exclusion_dates("goguma", exclude_issued)
+        reissue_keys = await _issued_stale_keys("goguma", exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
         dup_names: list[str] = []
         dup_keys: list[str] = []
         delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
-            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+            delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+            reissue_keys=reissue_keys, reissued=reissued,
         )
         template_bytes = None
         if template_file is not None:
@@ -1121,14 +1208,17 @@ async def process_goguma_order(
 
         # 날짜 범위가 있으면 해당 기간 수집
         if toss_from_date and toss_to_date:
-            toss_entries = await goguma_order.collect_toss_orders(toss_from_date, toss_to_date)
+            toss_entries = await goguma_order.collect_toss_orders(
+                _widen_start(toss_from_date, issued_dates, reissue_keys), toss_to_date
+            )
         # 하위호환: include_toss=true면 오늘 수집
         elif include_toss.lower() == "true":
             today = datetime.now(KST).strftime("%Y-%m-%d")
-            toss_entries = await goguma_order.collect_toss_orders(today, today)
+            toss_entries = await goguma_order.collect_toss_orders(_widen_start(today, issued_dates, reissue_keys), today)
 
         toss_entries, _dup_t = issued_orders.filter_entries_by_issued(
-            toss_entries, issued_excluded, skipped_names=dup_names
+            toss_entries, issued_excluded, skipped_names=dup_names,
+            reissue_keys=reissue_keys, reissued=reissued,
         )
         dup_skipped += _dup_t
 
@@ -1140,7 +1230,8 @@ async def process_goguma_order(
         if temu_bytes:
             temu_entries = temu_order.extract_goguma_entries(temu_bytes, temu_file.filename or "")
             temu_entries, _dup_temu = issued_orders.filter_entries_by_issued(
-                temu_entries, issued_excluded, skipped_names=dup_names
+                temu_entries, issued_excluded, skipped_names=dup_names,
+                reissue_keys=reissue_keys, reissued=reissued,
             )
             dup_skipped += _dup_temu
             output_bytes = goguma_order.append_entries_to_haedal(output_bytes, temu_entries)
@@ -1151,7 +1242,7 @@ async def process_goguma_order(
             except (TypeError, ValueError):
                 pass
         await _record_issued("goguma", filename, stats, extra_ids=temu_issued_ids)
-        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
         )
@@ -1228,6 +1319,10 @@ async def process_goguma_auto(
         include_toss_flag = include_toss.strip().lower() in ("true", "1", "on")
         send_email_flag = send_email.strip().lower() in ("true", "1", "on")
         issued_excluded = await _issued_exclusions("goguma", exclude_issued)
+        issued_dates = await _issued_exclusion_dates("goguma", exclude_issued)
+        reissue_keys = await _issued_stale_keys("goguma", exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
+        dup_names: list[str] = []
         temu_bytes = None
         if temu_file is not None:
             temu_bytes = await temu_file.read()
@@ -1258,8 +1353,9 @@ async def process_goguma_auto(
                 stats = {}
         else:
             output_bytes, filename, stats = await goguma_auto.process_from_api(
-                from_date, to_date, include_toss=include_toss_flag,
+                _widen_start(from_date, issued_dates, reissue_keys), to_date, include_toss=include_toss_flag,
                 exclude_order_ids=issued_excluded or None,
+                skipped_names=dup_names, reissue_keys=reissue_keys, reissued=reissued,
             )
             await record_sales_from_process_stats(
                 user["user_id"], stats, ymd=from_date if from_date == to_date else None
@@ -1267,7 +1363,6 @@ async def process_goguma_auto(
 
         # 올웨이즈·테무 주문서(선택)를 같은 해달 발주서에 합친다
         extra_issued_ids: list[str] = []
-        dup_names: list[str] = []
 
         def _bump_stats(kind: str, count: int, dup: int) -> None:
             stats[kind] = count
@@ -1286,7 +1381,8 @@ async def process_goguma_auto(
         if alwayz_bytes:
             alwayz_entries = goguma_order.parse_alwayz_entries(alwayz_bytes)
             alwayz_entries, _dup_alz = issued_orders.filter_entries_by_issued(
-                alwayz_entries, issued_excluded, skipped_names=dup_names
+                alwayz_entries, issued_excluded, skipped_names=dup_names,
+                reissue_keys=reissue_keys, reissued=reissued,
             )
             output_bytes = goguma_order.append_entries_to_haedal(output_bytes, alwayz_entries)
             _bump_stats("alwayz", len(alwayz_entries), _dup_alz)
@@ -1295,7 +1391,8 @@ async def process_goguma_auto(
         if temu_bytes:
             temu_entries = temu_order.extract_goguma_entries(temu_bytes, temu_file.filename or "")
             temu_entries, _dup_temu = issued_orders.filter_entries_by_issued(
-                temu_entries, issued_excluded, skipped_names=dup_names
+                temu_entries, issued_excluded, skipped_names=dup_names,
+                reissue_keys=reissue_keys, reissued=reissued,
             )
             output_bytes = goguma_order.append_entries_to_haedal(output_bytes, temu_entries)
             _bump_stats("temu", len(temu_entries), _dup_temu)
@@ -1308,6 +1405,9 @@ async def process_goguma_auto(
         if send_email_flag:
             stats["email"] = email_service.send_haedal_order_email(output_bytes, filename)
 
+        stats = _annotate_excluded(
+            stats, int((stats or {}).get("duplicate_skipped") or 0), dup_names, [], issued_dates, reissued=reissued
+        )
         logger.info(f"고구마 자동 발주 처리 완료: {stats}")
         return make_excel_response(output_bytes, filename, stats)
     except CoupangApiError as e:
@@ -2076,20 +2176,25 @@ async def process_biseller_order(
         delivery_bytes = await delivery_file.read() if delivery_file else None
         winners_bytes = await winners_file.read() if winners_file else None
         issued_excluded = await _issued_exclusions("biseller", exclude_issued)
+        # 당첨자 CSV엔 "아직 미출고"라는 신호가 없어(같은 명단이 다시 올 수 있음) 영구 제외 목록을 따로 쓴다
+        issued_all = await _issued_exclusions("biseller", exclude_issued, reissue_stale=False)
         issued_dates = await _issued_exclusion_dates("biseller", exclude_issued)
+        reissue_keys = await _issued_stale_keys("biseller", exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
         dup_names: list[str] = []
         dup_keys: list[str] = []
         dup_skipped = 0
         if delivery_bytes:
             delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
-                delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+                delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+                reissue_keys=reissue_keys, reissued=reissued,
             )
         output_bytes, filename, stats = biseller_order.process(
-            delivery_bytes, winners_bytes, issued_excluded, dup_names
+            delivery_bytes, winners_bytes, issued_all, dup_names
         )
         await _record_issued("biseller", filename, stats)
         dup_skipped += int((stats or {}).pop("duplicate_skipped", 0) or 0)
-        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
         await record_sales_from_process_stats(
             user["user_id"],
             stats,
@@ -2143,15 +2248,18 @@ async def process_gaegeolmu_order(
         gmarket_bytes = await gmarket_file.read() if gmarket_file else None
         issued_excluded = await _issued_exclusions("gaegeolmu", exclude_issued)
         issued_dates = await _issued_exclusion_dates("gaegeolmu", exclude_issued)
+        reissue_keys = await _issued_stale_keys("gaegeolmu", exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
         dup_names: list[str] = []
         dup_keys: list[str] = []
         output_bytes, filename, stats = gaegeolmu_order.process(
             delivery_bytes, gmarket_bytes,
             exclude_keys=issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+            reissue_keys=reissue_keys, reissued=reissued,
         )
         await _record_issued("gaegeolmu", filename, stats)
         dup_skipped = int((stats or {}).pop("duplicate_skipped", 0) or 0)
-        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=_extract_ymd_from_filename(delivery_file.filename)
         )
@@ -2184,12 +2292,15 @@ async def process_hobak_goguma_order(
         winners_bytes = await winners_file.read() if winners_file else None
         issued_excluded = await _issued_exclusions(section, exclude_issued)
         issued_dates = await _issued_exclusion_dates(section, exclude_issued)
+        reissue_keys = await _issued_stale_keys(section, exclude_issued, issued_dates)
+        reissued: list[tuple[str, str]] = []
         dup_names: list[str] = []
         dup_keys: list[str] = []
         dup_skipped = 0
         if delivery_bytes:
             delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
-                delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+                delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+                reissue_keys=reissue_keys, reissued=reissued,
             )
 
         toss_entries: list[dict] = []
@@ -2197,7 +2308,8 @@ async def process_hobak_goguma_order(
         if toss_from_date and toss_to_date:
             try:
                 toss_entries = await goguma_order.collect_toss_orders(
-                    toss_from_date, toss_to_date, matcher=goguma_order.is_hobak_goguma_toss_order
+                    _widen_start(toss_from_date, issued_dates, reissue_keys), toss_to_date,
+                    matcher=goguma_order.is_hobak_goguma_toss_order,
                 )
             except Exception as e:
                 # 0건으로 조용히 넘기면 '토스 주문 없음'으로 오해한다 — 사유를 화면에 띄운다
@@ -2208,7 +2320,8 @@ async def process_hobak_goguma_order(
             if toss_entries:
                 before = len(dup_names)
                 toss_entries, toss_dup = issued_orders.filter_entries_by_issued(
-                    toss_entries, issued_excluded, skipped_names=dup_names
+                    toss_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
                 )
                 if toss_dup:
                     dup_skipped += toss_dup
@@ -2220,7 +2333,7 @@ async def process_hobak_goguma_order(
         event_info: dict = {}
         event_error = ""
         if winners_bytes:
-            event_excluded = await _issued_exclusions(hobak_goguma.EVENT_SECTION, exclude_issued)
+            event_excluded = await _issued_exclusions(hobak_goguma.EVENT_SECTION, exclude_issued, reissue_stale=False)
             issued_dates = {**issued_dates, **await _issued_exclusion_dates(hobak_goguma.EVENT_SECTION, exclude_issued)}
             try:
                 event_entries, event_info = hobak_goguma.prepare_event_entries(
@@ -2263,7 +2376,7 @@ async def process_hobak_goguma_order(
         await _record_issued(section, filename, stats)
         if event_options:
             await _record_issued(hobak_goguma.EVENT_SECTION, filename, {"options": event_options})
-        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
+        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
         await record_sales_from_process_stats(
             user["user_id"],
             stats,
@@ -2317,7 +2430,7 @@ async def process_hobak_goguma_event_order(
     section = hobak_goguma.EVENT_SECTION
     try:
         csv_bytes = await winners_file.read()
-        issued_excluded = await _issued_exclusions(section, exclude_issued)
+        issued_excluded = await _issued_exclusions(section, exclude_issued, reissue_stale=False)
         issued_dates = await _issued_exclusion_dates(section, exclude_issued)
         dup_names: list[str] = []
         dup_keys: list[str] = []

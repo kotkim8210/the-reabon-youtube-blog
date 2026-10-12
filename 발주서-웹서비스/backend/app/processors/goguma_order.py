@@ -347,6 +347,10 @@ def parse_alwayz_entries(alwayz_file_bytes: bytes) -> list[dict]:
         name = normalize(az_row[18].value) if len(az_row) > 18 else ""  # S(19)=idx18
         if not name:
             continue
+        # W(23)=idx22 운송장번호가 이미 있으면 출고 완료 — 기간 전체를 내려받은 주문내역이라도 다시 발주하지 않는다
+        # (미출고 자동 재발주가 올웨이즈 출고분까지 되살리면 안 되므로, 2026-10-12 리뷰)
+        if len(az_row) > 22 and normalize(az_row[22].value):
+            continue
         phone = normalize(az_row[19].value) if len(az_row) > 19 else ""  # T(20)=idx19
         zipcode = normalize(az_row[15].value) if len(az_row) > 15 else ""  # P(16)=idx15
         address = normalize(az_row[14].value) if len(az_row) > 14 else ""  # O(15)=idx14
