@@ -262,3 +262,40 @@ def test_event_reupload_on_later_day_is_excluded():
         assert "김테스트" in str(exc)
     else:
         raise AssertionError("이미 발주한 당첨자는 다시 발주서에 들어가면 안 된다")
+
+
+# ── 2026-10-12: 발주서 생성 한 번에 쿠팡 + 토스 + 이벤트 당첨자 → 해달 발주서 한 장 ──
+def test_order_merges_coupang_toss_and_event_winners_into_one_file():
+    from app.processors.issued_orders import order_ids_from_stats
+
+    dl = _delivery([{"product": HOBAK_PRODUCT, "option": HOBAK_OPTION, "name": "쿠팡손님", "order_no": "31100000000001"}])
+    toss = [{
+        "name": "토스손님", "phone": "0502", "zipcode": "08085", "address": "서울 양천구", "qty": "1",
+        "product": "호박고구마 2Kg (한입)", "memo": "", "order_id": "288000001",
+    }]
+    csv_bytes = _winners_csv([
+        "호박고구마 2kg(중상),a,x,당첨손님,010-1,서울 1,27100000000009,1,0,",
+        "호박고구마 2kg(중상),b,x,환불손님,010-2,서울 2,27100000000010,1,8400,2026/10/11 22:00",
+    ])
+    events, info = hobak_goguma.prepare_event_entries(csv_bytes)
+    assert info["refund_skipped"] == 1 and len(events) == 1
+
+    out, filename, stats = hobak_goguma.process_order(dl, toss, event_entries=events)
+    assert "이벤트" not in filename                     # 따로 나오던 '이벤트당첨' 파일이 아니라 기본 발주서 한 장
+    assert (stats["total"], stats["coupang"], stats["toss"], stats["event"]) == (3, 1, 1, 1)
+    ws = load_workbook(BytesIO(out)).active
+    rows = [(ws.cell(r, 1).value, ws.cell(r, 14).value) for r in range(2, ws.max_row + 1) if ws.cell(r, 1).value]
+    assert rows == [
+        ("쿠팡손님", "호박고구마 10Kg (특상)"),
+        ("토스손님", "호박고구마 2Kg (한입)"),
+        ("당첨손님", "호박고구마 2Kg (중상)"),
+    ]
+    # 발주 이력은 섹션별로 따로: 일반(쿠팡·토스) / 이벤트
+    assert set(order_ids_from_stats(stats)) == {"31100000000001|1박스10kg(특상:군고구마용)", "288000001|호박고구마2Kg(한입)"}
+    event_keys = set(order_ids_from_stats({"options": stats["event_options"]}))
+    assert event_keys == {"27100000000009|호박고구마2Kg(중상)"}
+
+    # 다음 날 같은 CSV를 또 넣으면 당첨자는 이전 발주분으로 빠진다(쿠팡·토스 발주는 그대로 가능)
+    names: list[str] = []
+    again, info2 = hobak_goguma.prepare_event_entries(csv_bytes, exclude_keys=event_keys, skipped_names=names)
+    assert again == [] and info2["dup"] == 1 and names == ["당첨손님"]

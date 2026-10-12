@@ -97,13 +97,17 @@ def process_order(
     delivery_file_bytes: bytes | None = None,
     toss_entries: list[dict] | None = None,
     entry_label: str = "토스",
+    event_entries: list[dict] | None = None,
 ) -> tuple[bytes, str, dict]:
-    """해달 한진양식 발주서 생성 — 쿠팡 itsoft001 DeliveryList 호박고구마 행 + 토스 호박고구마 entries.
+    """해달 한진양식 발주서 생성 — 쿠팡 itsoft001 DeliveryList 호박고구마 행 + 토스 + 이벤트 당첨자를 한 장으로.
 
     toss_entries 필드는 goguma_order.collect_toss_orders와 동일(name/phone/zipcode/address/qty/product/memo/order_id).
-    entry_label: entries 출처 이름(확인 필요 문구용) — 이벤트 당첨자 경로는 '이벤트'.
+    entry_label: toss_entries 출처 이름(확인 필요 문구용).
+    event_entries: 라이브 이벤트 당첨자(prepare_event_entries 결과) — 토스 뒤에 이어 쓴다(2026-10-12 한 파일 통합).
+        발주 이력은 일반 주문과 섹션이 달라서 stats['event_options']로 따로 돌려준다(호출부가 따로 기록).
     """
     toss_entries = list(toss_entries or [])
+    event_entries = list(event_entries or [])
     coupang_rows: list[dict] = []
     needs_check: list[str] = []
 
@@ -130,11 +134,12 @@ def process_order(
                 "option": option,   # 중복발주 이력 키 = 주문번호|L열 원문 (filter_delivery_by_issued와 동일 출처)
             })
 
-    for entry in toss_entries:
-        if not _is_parsed(entry.get("product") or ""):
-            needs_check.append(
-                f"{entry.get('name') or '이름없음'}({entry_label} {entry.get('product') or ''}) — 호박고구마 중량·등급을 못 읽음, 발주서 품목명 확인"
-            )
+    for label, entries in ((entry_label, toss_entries), ("이벤트", event_entries)):
+        for entry in entries:
+            if not _is_parsed(entry.get("product") or ""):
+                needs_check.append(
+                    f"{entry.get('name') or '이름없음'}({label} {entry.get('product') or ''}) — 호박고구마 중량·등급을 못 읽음, 발주서 품목명 확인"
+                )
 
     template_path = TEMPLATE_DIR / "해달_발주서_한진양식.xlsx"
     if not template_path.exists():
@@ -152,8 +157,10 @@ def process_order(
             row_idx = r
             break
 
-    option_totals: dict[str, dict] = {}
-    for entry in coupang_rows + toss_entries:
+    option_totals: dict[str, dict] = {}   # 쿠팡·토스 → 일반 발주 이력(section=hobak_goguma)
+    event_totals: dict[str, dict] = {}    # 이벤트 당첨자 → 이벤트 발주 이력(section=hobak_goguma_event)
+    tagged = [(e, option_totals) for e in coupang_rows + toss_entries] + [(e, event_totals) for e in event_entries]
+    for entry, totals in tagged:
         qty_int = _qty(entry.get("qty"))
         mapping = {
             1: entry.get("name", ""),
@@ -173,7 +180,7 @@ def process_order(
         row_idx += 1
 
         key = entry.get("option") or entry.get("product") or "호박고구마"
-        bucket = option_totals.setdefault(
+        bucket = totals.setdefault(
             key,
             {
                 "coupang_option_keyword": key,
@@ -193,12 +200,15 @@ def process_order(
     now = datetime.now(KST)
     filename = f"해달 발주서 한진양식_아이티소프트_호박고구마({now.strftime('%y%m%d')}).xlsx"
     stats = {
-        "total": len(coupang_rows) + len(toss_entries),
+        "total": len(coupang_rows) + len(toss_entries) + len(event_entries),
         "coupang": len(coupang_rows),
         "toss": len(toss_entries),
         "product": PRODUCT_LABEL,
         "options": list(option_totals.values()),
     }
+    if event_entries:
+        stats["event"] = len(event_entries)
+        stats["event_options"] = list(event_totals.values())
     if needs_check:
         stats["needs_check"] = needs_check
     return output.read(), filename, stats
@@ -207,20 +217,22 @@ def process_order(
 EVENT_SECTION = "hobak_goguma_event"   # 이벤트 당첨자 발주 이력 — 일반 주문 이력과 분리
 
 
-def process_event(
+def prepare_event_entries(
     csv_bytes: bytes,
     exclude_keys=None,
     skipped_names: list[str] | None = None,
     skipped_keys: list[str] | None = None,
-) -> tuple[bytes, str, dict]:
-    """라이브 이벤트 당첨자 CSV(winners_raw) → 호박고구마 경품 해달 발주서 (2026-10-06).
+) -> tuple[list[dict], dict]:
+    """라이브 이벤트 당첨자 CSV(winners_raw) → 호박고구마 경품 발주 entries + 처리 정보.
 
     CSV 읽기·환불/취소 제외·이름/주소 누락 표시는 기존 이벤트 발주(event_order.parse_winners)를
     그대로 쓴다. 경품명 '호박고구마 2kg(중상)' → 해달 품목명 '호박고구마 2Kg (중상)'.
-    호박고구마가 아닌 경품은 발주서에 넣지 않고 needs_check로 알린다(해당 상품 페이지에서 발주).
+    호박고구마가 아닌 경품은 빼고 info['others']로 알린다(해당 상품 페이지에서 발주).
     당첨자 CSV에는 우편번호 칸이 없어 해달 우편번호(선택)는 비운다.
 
     exclude_keys: 직전 영업일까지 이미 발주한 당첨 키(주문아이디|품목명) — 같은 CSV 재업로드 시 중복 발송 방지.
+    반환 info: refund_skipped(환불·취소 제외 수), incomplete(이름·주소 누락), others(호박고구마 아닌 경품), dup(이전 발주분 제외 수).
+    entries가 비어도 예외를 내지 않는다(일반 주문과 한 파일로 합칠 때 당첨자 0명일 수 있음).
     """
     from app.processors.event_order import parse_winners
     from app.processors.issued_orders import KEY_SEP, make_order_key, normalize_order_id
@@ -254,6 +266,23 @@ def process_event(
             continue
         entries.append({**w, "product": product, "option": product, "zipcode": ""})
 
+    info = {"refund_skipped": skipped_refund, "incomplete": incomplete, "others": others, "dup": dup}
+    return entries, info
+
+
+def process_event(
+    csv_bytes: bytes,
+    exclude_keys=None,
+    skipped_names: list[str] | None = None,
+    skipped_keys: list[str] | None = None,
+) -> tuple[bytes, str, dict]:
+    """당첨자만 따로 해달 발주서로 만드는 단독 경로 (2026-10-06).
+
+    2026-10-12부터 화면에서는 발주서 생성 칸에 당첨자 CSV를 같이 넣어 한 파일로 만든다
+    (process_order(event_entries=...)). 이 함수는 단독 API(/hobak-goguma-event-order) 호환용.
+    """
+    entries, info = prepare_event_entries(csv_bytes, exclude_keys, skipped_names, skipped_keys)
+    dup, others = info["dup"], info["others"]
     if not entries:
         reasons = []
         if dup:
@@ -262,15 +291,16 @@ def process_event(
             reasons.append(f"호박고구마가 아닌 경품 {len(others)}건")
         raise ValueError("발주할 호박고구마 당첨자가 없습니다." + (" (" + " / ".join(reasons) + ")" if reasons else ""))
 
-    out, _fn, stats = process_order(None, entries, entry_label="이벤트")
+    out, _fn, stats = process_order(None, None, event_entries=entries)
     stats.pop("coupang", None)
-    stats["event"] = stats.pop("toss", len(entries))
+    stats.pop("toss", None)
+    stats["options"] = stats.pop("event_options", [])   # 단독 경로는 이벤트 이력 섹션에 그대로 기록
     stats["product"] = "햇 호박고구마 이벤트 당첨(해달)"
-    if skipped_refund:
-        stats["refund_skipped"] = skipped_refund
+    if info["refund_skipped"]:
+        stats["refund_skipped"] = info["refund_skipped"]
     if dup:
         stats["duplicate_skipped"] = dup
-    extra = incomplete + others
+    extra = info["incomplete"] + others
     if extra:
         stats["needs_check"] = list(stats.get("needs_check") or []) + extra
 

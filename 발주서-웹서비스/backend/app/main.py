@@ -2168,17 +2168,20 @@ async def process_gaegeolmu_order(
 @app.post("/api/process/hobak-goguma-order")
 async def process_hobak_goguma_order(
     delivery_file: UploadFile | None = File(None),
+    winners_file: UploadFile | None = File(None),
     toss_from_date: str = Form(""),
     toss_to_date: str = Form(""),
     exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
-    """햇 호박고구마 해달 발주서 — 쿠팡 itsoft001 DeliveryList(선택) + 토스 호박고구마(API)."""
+    """햇 호박고구마 해달 발주서 — 쿠팡 itsoft001 DeliveryList(선택) + 토스 호박고구마(API)
+    + 라이브 이벤트 당첨자 CSV(선택)를 한 파일로 (2026-10-12: 당첨자 발주서가 따로 나와 불편하다는 요청)."""
     section = hobak_goguma.SECTION
     try:
         delivery_bytes = await delivery_file.read() if delivery_file else None
         if delivery_bytes:
             _require_xlsx(delivery_bytes)
+        winners_bytes = await winners_file.read() if winners_file else None
         issued_excluded = await _issued_exclusions(section, exclude_issued)
         issued_dates = await _issued_exclusion_dates(section, exclude_issued)
         dup_names: list[str] = []
@@ -2212,10 +2215,37 @@ async def process_hobak_goguma_order(
                     # 토스 제외분은 키 목록 길이를 이름 목록에 맞춘다(_annotate_excluded가 인덱스로 짝지음)
                     dup_keys.extend([""] * (len(dup_names) - before))
 
-        output_bytes, filename, stats = hobak_goguma.process_order(delivery_bytes, toss_entries)
+        # 라이브 이벤트 당첨자: 이력은 이벤트 섹션 따로(10/6 단독 카드로 낸 당첨자 이력과 이어짐)
+        event_entries: list[dict] = []
+        event_info: dict = {}
+        event_error = ""
+        if winners_bytes:
+            event_excluded = await _issued_exclusions(hobak_goguma.EVENT_SECTION, exclude_issued)
+            issued_dates = {**issued_dates, **await _issued_exclusion_dates(hobak_goguma.EVENT_SECTION, exclude_issued)}
+            try:
+                event_entries, event_info = hobak_goguma.prepare_event_entries(
+                    winners_bytes, exclude_keys=event_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+                )
+                dup_skipped += int(event_info.get("dup") or 0)
+            except ValueError as e:
+                # 당첨자 CSV가 깨졌거나 발주 가능한 당첨자가 없어도 쿠팡·토스 발주는 그대로 낸다 — 사유는 화면에
+                event_error = str(e)
+
+        output_bytes, filename, stats = hobak_goguma.process_order(
+            delivery_bytes, toss_entries, event_entries=event_entries
+        )
         if toss_error:
             stats["toss"] = "수집 실패"
             stats["needs_check"] = list(stats.get("needs_check") or []) + ["토스 주문 수집 실패 — " + toss_error]
+        if winners_bytes:
+            stats.setdefault("event", len(event_entries))
+            if event_info.get("refund_skipped"):
+                stats["refund_skipped"] = event_info["refund_skipped"]
+            extra = list(event_info.get("incomplete") or []) + list(event_info.get("others") or [])
+            if event_error:
+                extra.append("당첨자 CSV — " + event_error)
+            if extra:
+                stats["needs_check"] = list(stats.get("needs_check") or []) + extra
         if not int(stats.get("total") or 0):
             if dup_skipped:
                 raise HTTPException(
@@ -2225,9 +2255,14 @@ async def process_hobak_goguma_order(
             detail = "호박고구마 주문이 없습니다."
             if toss_error:
                 detail += f" (토스 수집 실패 — {toss_error})"
+            if event_error:
+                detail += f" (당첨자 CSV — {event_error})"
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
+        event_options = stats.pop("event_options", None)
         await _record_issued(section, filename, stats)
+        if event_options:
+            await _record_issued(hobak_goguma.EVENT_SECTION, filename, {"options": event_options})
         stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates)
         await record_sales_from_process_stats(
             user["user_id"],

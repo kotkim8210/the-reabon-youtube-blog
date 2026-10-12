@@ -107,15 +107,22 @@ interface ProductConfig {
 const productConfigs: Record<string, ProductConfig> = {
   'hobak-goguma': {
     title: '햇 호박고구마 (해달 · 쿠팡 itsoft001 + 토스)',
-    description: '취급품목: 국내산 해남 황토밭 햇 호풍미 호박고구마 — 꿀고구마와 같은 해달(한진) 발주지만 쿠팡 주문이 itsoft001 계정이라 별도 섹션 · 쿠팡은 itsoft001 DeliveryList 업로드, 토스 호박고구마는 API로 자동 수집해 한 발주서로 합침 · 발주 품목명 "호박고구마 {kg}Kg ({등급})" · 운송장 입력 시 DeliveryList 택배사(D열)를 롯데택배 → 한진택배로 바꿔 넣음 · 꿀고구마 페이지는 토스 호박고구마를 더 이상 수집하지 않음(중복 발주 방지) · 라이브 이벤트 당첨자 CSV(호박고구마 경품)도 해달 발주서로 생성',
+    description: '취급품목: 국내산 해남 황토밭 햇 호풍미 호박고구마 — 꿀고구마와 같은 해달(한진) 발주지만 쿠팡 주문이 itsoft001 계정이라 별도 섹션 · 쿠팡은 itsoft001 DeliveryList 업로드, 토스 호박고구마는 API로 자동 수집해 한 발주서로 합침 · 발주 품목명 "호박고구마 {kg}Kg ({등급})" · 운송장 입력 시 DeliveryList 택배사(D열)를 롯데택배 → 한진택배로 바꿔 넣음 · 꿀고구마 페이지는 토스 호박고구마를 더 이상 수집하지 않음(중복 발주 방지) · 라이브 이벤트 당첨자 CSV(호박고구마 경품)를 같이 올리면 같은 발주서 한 장에 합쳐짐',
     icon: '🍠',
     bgClass: 'bg-orange-50',
     order: {
-      title: '햇 호박고구마 해달 발주서 생성',
+      title: '햇 호박고구마 해달 발주서 생성 (쿠팡 + 토스 + 이벤트 당첨자)',
       icon: '📋',
       apiToolId: 'hobak-goguma-order',
       files: [
         { key: 'delivery', label: '쿠팡 DeliveryList 파일 (itsoft001 — 토스 주문만 있으면 비워도 됩니다)', optional: true },
+        {
+          key: 'winners',
+          label: '라이브 이벤트 당첨자 CSV (선택 — 올리면 같은 발주서에 합쳐짐)',
+          optional: true,
+          accept: '.csv',
+          acceptLabel: '.csv 파일',
+        },
       ],
       buttonLabel: '발주서 생성',
       tossDateRange: true,
@@ -132,15 +139,6 @@ const productConfigs: Record<string, ProductConfig> = {
         { key: 'delivery', label: '쿠팡 DeliveryList 파일 (itsoft001)' },
       ],
       buttonLabel: '운송장 입력',
-    },
-    event: {
-      title: '라이브 이벤트 당첨자 발주서 생성 (호박고구마 경품 → 해달 발주서)',
-      icon: '🎉',
-      apiToolId: 'hobak-goguma-event-order',
-      files: [
-        { key: 'winners', label: '라이브 이벤트 당첨자 CSV (winners_raw)', accept: '.csv', acceptLabel: '.csv 파일' },
-      ],
-      buttonLabel: '이벤트 발주서 생성',
     },
   },
   biseller: {
