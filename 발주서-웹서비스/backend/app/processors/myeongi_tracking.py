@@ -15,6 +15,7 @@ from app.processors.myeongi_order import (
     is_jewelry_chamoe_order,
     is_jewelry_corn_order,
     is_jewelry_baekdo_order,
+    is_jewelry_chestnut_order,
     is_jewelry_daegeukcheon_order,
     is_jewelry_geobando_order,
     is_jewelry_peach_order,
@@ -22,6 +23,7 @@ from app.processors.myeongi_order import (
     is_mango_watermelon_order,
 )
 from app.processors.tracking_match import (
+    COUPANG_CJ_NAME,
     coupang_courier_name,
     name_counts,
     normalize_courier_name,
@@ -59,6 +61,7 @@ def is_jewelryfruit_tracking_target(product_name: str, option_text: str) -> bool
         or is_jewelry_bamhobak_order(product_name, option_text)  # 미니밤호박 3·5·10kg (1kg은 제주다팜)
         or is_jewelry_corn_order(product_name, option_text)      # 초당옥수수 (2026-06 제주다팜→쥬얼리 전환)
         or is_jewelry_pijadu_order(product_name, option_text)    # 피자두 1·2·3kg (2026-08 신규)
+        or is_jewelry_chestnut_order(product_name, option_text)  # 햇밤 1·2·3·5kg (2026-10 신규, CJ 발송)
         or jewelry_rule_match(product_name, option_text) is not None  # 어드민 규칙 신규 상품
     )
 
@@ -140,6 +143,7 @@ def process(
     has_daegeukcheon = False
     has_baekdo = False
     has_bamhobak = False
+    has_chestnut = False
     delivery_name_counts = name_counts(
         normalize(dl_ws.cell(row=row_idx, column=27).value)
         for row_idx in range(2, dl_ws.max_row + 1)
@@ -224,9 +228,15 @@ def process(
         if matched:
             e_cell.value = matched["tracking"]
             d_cell = dl_ws.cell(row=row_idx, column=4)
-            d_cell.value = coupang_courier_name(matched.get("courier"), "롯데택배")
+            # 쥬얼리는 롯데로 보내지만 햇밤은 CJ대한통운 발송(공급처 상품정보 2026-10-14) —
+            # 회신 택배사 칸이 비어 있으면 품목에 맞는 기본값을 넣는다.
+            is_chestnut = is_jewelry_chestnut_order(dl_product, dl_option)
+            default_courier = COUPANG_CJ_NAME if is_chestnut else "롯데택배"
+            d_cell.value = coupang_courier_name(matched.get("courier"), default_courier)
             used_entries.add(id(matched))
             filled += 1
+            if is_chestnut:
+                has_chestnut = True
             if "명이나물" in str(dl_product or ""):
                 has_myeongi = True
             if is_apple_corn_order(dl_product, dl_option):
@@ -280,6 +290,8 @@ def process(
         product_parts.append("백도딱딱이복숭아")
     if has_bamhobak:
         product_parts.append("미니밤호박")
+    if has_chestnut:
+        product_parts.append("햇밤")
     product_label = "_".join(product_parts) if product_parts else "쥬얼리프룻"
     filename = f"DeliveryList_{product_label}_운송장입력완료_{now.strftime('%Y%m%d')}.xlsx"
     stats = {"filled": filled, "skipped": skipped}
