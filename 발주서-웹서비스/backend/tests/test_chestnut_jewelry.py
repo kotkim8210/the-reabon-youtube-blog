@@ -125,3 +125,23 @@ def test_tracking_chestnut_defaults_to_cj_and_normalizes_reply():
         ("CJ 대한통운", "600012345672"),   # 회신 'CJ대한통운'(붙여쓰기) → 띄어쓰기 표기로 정규화
         ("롯데택배", "400012345673"),      # 다른 쥬얼리 품목은 종전 기본값 유지
     ]
+
+
+def test_toss_jewelry_collect_gate_accepts_chestnut(monkeypatch):
+    """토스 수집 키워드 게이트(수박·참외·복숭아)에 햇밤이 없으면 passthrough까지 못 가 조용히 0건 — 리뷰 지적(2026-10-14)."""
+    import asyncio
+
+    from app.processors import tomato_order
+    from app.toss.client import toss_client
+
+    async def fake_get_orders(**_kwargs):
+        return [
+            {"productName": COUPANG_PRODUCT, "optionName": "1kg 1박스", "receiverName": "토스손님",
+             "receiverPhone": "0502-0000-0001", "quantity": 1, "orderProductStatus": "PAID"},
+            {"productName": "국내산 김천 피자두 특품", "optionName": "1박스 1kg", "receiverName": "자두손님",
+             "receiverPhone": "0502-0000-0002", "quantity": 1, "orderProductStatus": "PAID"},   # 토스 쥬얼리 게이트 밖(기존 동작)
+        ]
+
+    monkeypatch.setattr(toss_client, "get_orders", fake_get_orders)
+    entries = asyncio.run(tomato_order.collect_toss_jewelry_orders("2026-10-13", "2026-10-14"))
+    assert [(e["name"], e["product"]) for e in entries] == [("토스손님", "햇밤 1kg")]

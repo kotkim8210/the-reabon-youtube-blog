@@ -262,9 +262,9 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
     entries: list[dict] = []
     for item in orders:
         text = _toss_item_text(item)
-        # 수박(망고수박 포함)·성주참외·신비복숭아 토스 주문
+        # 수박(망고수박 포함)·성주참외·신비복숭아·햇밤(2026-10) 토스 주문
         # (홍감자는 2026-07 쥬얼리 품절 → 제주다팜 수집 collect_toss_jejudapam_orders로 이관)
-        if not any(k in text for k in ("수박", "참외", "복숭아")):
+        if not any(k in text for k in ("수박", "참외", "복숭아", "햇밤")):
             continue
         order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
         if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
