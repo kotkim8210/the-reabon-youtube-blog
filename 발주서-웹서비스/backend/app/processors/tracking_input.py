@@ -46,6 +46,17 @@ def _is_hwanggeum_row(option_keys: set[str]) -> bool:
     return any(key.startswith("hwanggeum:") or "황금향" in key for key in option_keys)
 
 
+def _families(keys) -> set[str]:
+    """의미키의 상품군(접두어) — 'potato:홍감자중3kg' → 'potato'. 원문 키는 접두어가 없어 빠진다."""
+    return {k.split(":", 1)[0] for k in (keys or ()) if re.match(r"^[a-z][a-z-]*:", k)}
+
+
+def _same_family(a, b) -> bool:
+    """같은 상품군인지. 거래처가 등급을 자기 이름으로 회신해(홍감자 '대_3KG' = 우리 '중 3kg')
+    등급·kg 키가 안 맞아도 같은 상품이면 '다른 상품 행'으로 보면 안 된다(2026-10-16 리뷰)."""
+    return bool(_families(a) & _families(b))
+
+
 def _phone_digits(value: object) -> str:
     """전화번호를 숫자만으로 정규화 — '010-1234-5678'과 '01012345678'을 동일 취급."""
     return re.sub(r"\D", "", str(value or ""))
@@ -265,7 +276,8 @@ def process(
             # (회신에 옵션 정보가 없으면 종전처럼 전화로 매칭 — 2026-07-14 동일인 다건 사고 보호 유지)
             if (phone_hits and dl_option_keys and delivery_name_counts.get(dl_name, 0) > 1
                     and all(c.get("option_keys") for _, c in phone_hits)
-                    and not any(options_match(c.get("option_keys"), dl_option_keys) for _, c in phone_hits)):
+                    and not any(options_match(c.get("option_keys"), dl_option_keys)
+                                or _same_family(c.get("option_keys"), dl_option_keys) for _, c in phone_hits)):
                 skipped += 1
                 skip_details.append(f"{dl_name}(같은 사람의 다른 상품 행 — 이 회신에 없음)")
                 continue
@@ -277,6 +289,8 @@ def process(
                      if c["address"] == dl_address and options_match(c.get("option_keys"), dl_option_keys)), None
                 ) or next(
                     (c for _, c in phone_hits if options_match(c.get("option_keys"), dl_option_keys)), None
+                ) or next(
+                    (c for _, c in phone_hits if _same_family(c.get("option_keys"), dl_option_keys)), None
                 ) or next(
                     (c for _, c in phone_hits if c["address"] == dl_address), None
                 ) or phone_hits[0][1]

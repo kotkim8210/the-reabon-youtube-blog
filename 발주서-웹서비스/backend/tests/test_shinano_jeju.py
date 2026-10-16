@@ -153,6 +153,60 @@ def test_tracking_same_person_other_product_row_does_not_steal():
     assert stats["filled"] == 1 and "다른 상품 행" in stats["skipped_names"]
 
 
+def _real_format_orderlist(rows: list[tuple[str, str]]) -> bytes:
+    """실제 제주다팜 회신처럼 E 상품명·G 수량·H 주문자·I 주문자연락처·N 우편번호까지 채운 회신."""
+    wb = Workbook()
+    ws = wb.active
+    for i, (product, tracking) in enumerate(rows):
+        r = i + 2
+        ws.cell(r, 5, product)
+        ws.cell(r, 7, 1)
+        ws.cell(r, 8, "식품애착")
+        ws.cell(r, 9, "010-5700-7756")
+        ws.cell(r, 11, "메리")
+        ws.cell(r, 13, "010-0000-0000")
+        ws.cell(r, 14, "12345")
+        ws.cell(r, 15, "서울시 어딘가")
+        ws.cell(r, 17, "롯데택배")
+        ws.cell(r, 18, tracking)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_tracking_potato_vendor_grade_name_still_fills_with_two_rows():
+    """리뷰 회귀(2026-10-16): 제주다팜은 홍감자를 '홍감자 대_3KG'(=우리 중 3kg)로 회신해 등급 키가 안 맞는다.
+    같은 사람이 DeliveryList에 두 줄 이상이어도 같은 상품군이면 '다른 상품 행'으로 건너뛰면 안 된다."""
+    potato = "[여름한정] 국내산 햇 홍감자 카스테라 햇감자"
+    # 홍감자 2건(같은 사람)
+    delivery = _delivery([
+        {"product": potato, "option": "1박스 3kg(중)", "name": "메리", "order_no": "P1"},
+        {"product": potato, "option": "1박스 3kg(중)", "name": "메리", "order_no": "P2"},
+    ])
+    reply = _real_format_orderlist([("홍감자 대_3KG (개당 80-110g)", "T1"), ("홍감자 대_3KG (개당 80-110g)", "T2")])
+    out, _fn, stats = tracking_input.process(reply, delivery)
+    ws = load_workbook(BytesIO(out)).active
+    assert [ws.cell(r, 5).value for r in (2, 3)] == ["T1", "T2"] and stats["filled"] == 2
+    # 홍감자 + 다른 거래처 상품(고구마) — 홍감자 행은 채우고 고구마 행은 비움
+    delivery = _delivery([
+        {"product": "해남 꿀고구마", "option": "1박스 3kg", "name": "메리", "order_no": "G1"},
+        {"product": potato, "option": "1박스 3kg(중)", "name": "메리", "order_no": "P1"},
+    ])
+    reply = _real_format_orderlist([("홍감자 대_3KG (개당 80-110g)", "T1")])
+    out, _fn, stats = tracking_input.process(reply, delivery)
+    ws = load_workbook(BytesIO(out)).active
+    assert [ws.cell(r, 5).value for r in (2, 3)] == [None, "T1"]
+    # 홍감자 + 콜라비(회신 순서 반대) — 각자 맞는 송장
+    delivery = _delivery([
+        {"product": potato, "option": "1박스 3kg(중)", "name": "메리", "order_no": "P1"},
+        {"product": "[제주직송] 고당도 100% 제주 콜라비", "option": "정품 3kg", "name": "메리", "order_no": "K1"},
+    ])
+    reply = _real_format_orderlist([("콜라비 정품 3kg", "K1"), ("홍감자 대_3KG (개당 80-110g)", "P1")])
+    out, _fn, _stats = tracking_input.process(reply, delivery)
+    ws = load_workbook(BytesIO(out)).active
+    assert [ws.cell(r, 5).value for r in (2, 3)] == ["P1", "K1"]
+
+
 def test_tracking_same_person_same_product_without_reply_options_still_fills():
     """회신에 옵션 정보가 없으면 종전처럼 전화로 매칭(2026-07-14 동일인 다건 사고 보호)."""
     delivery = _delivery([
