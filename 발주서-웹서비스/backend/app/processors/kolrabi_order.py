@@ -258,6 +258,78 @@ def convert_hongro_option(product_name: object, option_text: object) -> str | No
     return _HONGRO_JEJU_OPTIONS.get((grade, kg))
 
 
+# 시나노골드 사과 — 2026-10 제주다팜 신규 발주. 쿠팡 '시나노 골드 사과 노란사과 황금사과 경북 가정용 상등급'
+# 옵션 '1박스 소과 2kg 10~13과(한입)' → 제주다팜 판매옵션 '시나노골드(가정용) 소과 2kg(10-13과내외)'.
+# 공급처 구성상품 30종 실측(2026-10-16): 대과·중과·중소과·소과·중대과랜덤 × 1.5·2·2.5·3·4·5kg.
+# 과수 괄호 표기('내외'/'내'/'과 내외')가 옵션마다 달라 실측 문자열을 그대로 둔다.
+_SHINANO_JEJU_OPTIONS = {
+    ("대과", "5"): "시나노골드(가정용) 대과 5kg(10-14과내외)",
+    ("대과", "4"): "시나노골드(가정용) 대과 4kg(7-9과내외)",
+    ("대과", "3"): "시나노골드(가정용) 대과 3kg(6-8과내)",
+    ("대과", "2.5"): "시나노골드(가정용) 대과 2.5kg(5-7과내)",
+    ("대과", "2"): "시나노골드(가정용) 대과 2kg(5과내외)",
+    ("대과", "1.5"): "시나노골드(가정용) 대과 1.5kg(3-4과내외)",
+    ("중과", "5"): "시나노골드(가정용) 중과 5kg(15-20과내외)",
+    ("중과", "4"): "시나노골드(가정용) 중과 4kg(11-14과내외)",
+    ("중과", "3"): "시나노골드(가정용) 중과 3kg(9-12과내외)",
+    ("중과", "2.5"): "시나노골드(가정용) 중과 2.5kg(8-10과내외)",
+    ("중과", "2"): "시나노골드(가정용) 중과 2kg(6-7과내외)",
+    ("중과", "1.5"): "시나노골드(가정용) 중과 1.5kg(4-5과내외)",
+    ("중소과", "5"): "시나노골드(가정용) 중소과 5kg(21-24과내외)",
+    ("중소과", "4"): "시나노골드(가정용) 중소과 4kg(15-18과내외)",
+    ("중소과", "3"): "시나노골드(가정용) 중소과 3kg(13-15과내외)",
+    ("중소과", "2.5"): "시나노골드(가정용) 중소과 2.5kg(11-12과내외)",
+    ("중소과", "2"): "시나노골드(가정용) 중소과 2kg(8-9과내외)",
+    ("중소과", "1.5"): "시나노골드(가정용) 중소과 1.5kg(6과내외)",
+    ("소과", "5"): "시나노골드(가정용) 소과 5kg(25-30과내외)",
+    ("소과", "4"): "시나노골드(가정용) 소과 4kg(19-25과내외)",
+    ("소과", "3"): "시나노골드(가정용) 소과 3kg(16-20과내외)",
+    ("소과", "2.5"): "시나노골드(가정용) 소과 2.5kg(13-16과내외)",
+    ("소과", "2"): "시나노골드(가정용) 소과 2kg(10-13과내외)",
+    ("소과", "1.5"): "시나노골드(가정용) 소과 1.5kg(7-10과내)",
+    ("중대과랜덤", "1.5"): "시나노골드(가정용) 중대과랜덤 1.5kg(3-6과내외)",
+    ("중대과랜덤", "2"): "시나노골드(가정용) 중대과랜덤 2kg(4-8과내)",
+    ("중대과랜덤", "2.5"): "시나노골드(가정용) 중대과랜덤 2.5kg(5-11과내외)",
+    ("중대과랜덤", "3"): "시나노골드(가정용) 중대과랜덤 3kg(6-13과내외)",
+    ("중대과랜덤", "4"): "시나노골드(가정용) 중대과랜덤 4kg(3-15과내)",
+    ("중대과랜덤", "5"): "시나노골드(가정용) 중대과랜덤 5kg(10-21과 내외)",
+}
+# 등급 판정 순서: 긴 것 먼저('중대과랜덤'⊃'대과', '중소과'⊃'소과').
+# 제주다팜엔 '중대과'가 랜덤 하나뿐이라 '중대과'·'랜덤'만 적힌 옵션도 중대과랜덤으로 본다.
+_SHINANO_GRADES = ("중대과랜덤", "중대과", "랜덤", "중소과", "중과", "소과", "대과")
+_SHINANO_GRADE_ALIASES = {"중대과": "중대과랜덤", "랜덤": "중대과랜덤"}
+
+
+def is_jeju_shinano_order(product_name: object, option_text: object) -> bool:
+    """시나노골드 사과 제주다팜 발주 여부. '황금사과'만으로는 다른 품종과 섞일 수 있어 '시나노'로만 판정."""
+    return "시나노" in re.sub(r"\s+", "", _combined_text(product_name, option_text))
+
+
+def shinano_grade_and_kg(product_name: object, option_text: object) -> tuple[str, str]:
+    """(제주다팜 등급, kg) — 옵션(L)을 먼저 보고 없으면 상품명까지 본다. 못 찾으면 ''."""
+    option = re.sub(r"\s+", "", str(option_text or ""))
+    combined = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    grade = next((g for g in _SHINANO_GRADES if g in option), "") or next(
+        (g for g in _SHINANO_GRADES if g in combined), ""
+    )
+    grade = _SHINANO_GRADE_ALIASES.get(grade, grade)
+    m = re.search(r"(\d+(?:\.\d+)?)kg", option, re.IGNORECASE) or re.search(
+        r"(\d+(?:\.\d+)?)kg", combined, re.IGNORECASE
+    )
+    kg = _fmt_kg_text(m.group(1)) if m else ""
+    return grade, kg
+
+
+def convert_shinano_option(product_name: object, option_text: object) -> str | None:
+    """시나노골드 DeliveryList → 제주다팜 발주명(판매옵션 전체 문자열). 미매칭이면 None."""
+    if not is_jeju_shinano_order(product_name, option_text):
+        return None
+    grade, kg = shinano_grade_and_kg(product_name, option_text)
+    if not grade or not kg:
+        return None
+    return _SHINANO_JEJU_OPTIONS.get((grade, kg))
+
+
 # 프리미엄 햇 배 선물세트 — 2026-09 제주다팜 신규 발주. 쿠팡 옵션의 (보자기 유무·등급·kg)를
 # 제주다팜 구성상품명(발주명)으로 변환한다. adminplus 구성상품 8종 실측(2026-09-19):
 #   대과/특대과 × 5·7.5kg × 보자기 동봉/미동봉. 보자기 유무에 따라 과수 표기까지 달라 각각 실측값을 둔다.
@@ -878,6 +950,22 @@ def process_hongro(
     )
 
 
+def process_shinano(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """시나노골드 사과 제주다팜 발주 (2026-10 신규). 발주명=제주다팜 판매옵션."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_shinano_option,
+        "시나노골드사과(제주다팜)",
+        f"제주다팜_아이티소프트_시나노골드사과발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+        matcher=is_jeju_shinano_order,
+    )
+
+
 def process_pear(
     delivery_file_bytes: bytes,
     toss_entries: list[dict] | None = None,
@@ -907,6 +995,7 @@ def process_outputs(
     toss_potato_entries: list[dict] | None = None,
     toss_baekdo_entries: list[dict] | None = None,
     toss_hongro_entries: list[dict] | None = None,
+    toss_shinano_entries: list[dict] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
     """제주다팜 발주서 목록 반환 — 콜라비 + 미니밤호박 + 홍감자.
 
@@ -948,6 +1037,10 @@ def process_outputs(
     hongro_result = process_hongro(delivery_file_bytes, toss_entries=toss_hongro_entries)
     if hongro_result and _has_content(hongro_result[2]):
         results.append(hongro_result)
+
+    shinano_result = process_shinano(delivery_file_bytes, toss_entries=toss_shinano_entries)
+    if shinano_result and _has_content(shinano_result[2]):
+        results.append(shinano_result)
 
     pear_result = process_pear(delivery_file_bytes)
     if pear_result and _has_content(pear_result[2]):

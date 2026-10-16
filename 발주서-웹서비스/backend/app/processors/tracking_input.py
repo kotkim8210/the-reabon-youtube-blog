@@ -107,6 +107,13 @@ def _semantic_option_keys(*values: object) -> set[str]:
         grade = next((g for g in ("특대과", "대과") if g in compact), "")
         pear_kgs = set(re.findall(r"(\d+(?:\.\d+)?)kg", compact, flags=re.IGNORECASE))
         keys.update(f"pear:{bojagi}:{grade}:{w}kg" for w in pear_kgs)
+    if "시나노" in text:
+        # 시나노골드: orderlist(발주명 '시나노골드(가정용) {등급} {kg}kg(…)')와 DeliveryList(쿠팡 '1박스 {등급} {kg}kg …')를
+        # 제주다팜 등급+kg 의미키로 묶는다(발주 변환과 같은 함수 → '중대과'·'랜덤' 별칭까지 일치).
+        from app.processors.kolrabi_order import shinano_grade_and_kg
+        grade, kg = shinano_grade_and_kg(text, "")
+        if kg:
+            keys.add(f"shinano:{grade}:{kg}kg")
     if "청사과" in text or "아오리" in text:
         # 청사과: orderlist(발주명 '청사과 {등급}(가정용) … {kg}kg(…)')와 DeliveryList(쿠팡 옵션)의
         # 표기가 달라 등급(중소과/소과/대과)+kg 의미키로 묶는다. '중소과'가 '소과' 포함 → 긴 것 먼저.
@@ -240,6 +247,16 @@ def process(
         dl_phone_d = _phone_digits(dl_phone)
         if dl_phone_d:
             phone_hits = [(i, c) for i, c in available if _phone_digits(c.get("phone")) == dl_phone_d]
+            # 같은 사람이 한 DeliveryList에 다른 거래처 상품까지 주문한 경우(2026-10-16 황금향+시나노골드,
+            # 같은 주문번호) 앞 행(황금향)이 이 회신의 송장을 가로채 정작 시나노골드 행이 비던 문제.
+            # 이름이 여러 행이고 양쪽 다 옵션 정보가 있는데 하나도 안 맞으면 이 회신의 상품이 아니다 → 건너뜀.
+            # (회신에 옵션 정보가 없으면 종전처럼 전화로 매칭 — 2026-07-14 동일인 다건 사고 보호 유지)
+            if (phone_hits and dl_option_keys and delivery_name_counts.get(dl_name, 0) > 1
+                    and all(c.get("option_keys") for _, c in phone_hits)
+                    and not any(options_match(c.get("option_keys"), dl_option_keys) for _, c in phone_hits)):
+                skipped += 1
+                skip_details.append(f"{dl_name}(같은 사람의 다른 상품 행 — 이 회신에 없음)")
+                continue
             if phone_hits:
                 matched = next(
                     (c for _, c in phone_hits if c["address"] == dl_address), None
