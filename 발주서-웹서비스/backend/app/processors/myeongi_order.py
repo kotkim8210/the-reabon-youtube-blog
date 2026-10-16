@@ -138,11 +138,11 @@ def _jewelry_pijadu_option(product_name: object, option_text: object) -> str | N
 
 
 # 햇밤 (2026-10 신규) — 쥬얼리프룻 발주. pbfcompany 상품 '★파격특가★ [P2CB] 햇밤', 발송 택배 CJ대한통운.
-# 구성상품 24종(실측 2026-10-14): '햇밤 {등급} {kg}kg'(등급 특·대·중·소·랜덤) + 등급 없는 '햇밤 {kg}kg', kg는 1·2·3·5.
-# 쿠팡 '국내산 햇밤 생알밤 군밤 찐밤용' 옵션 '1kg 1박스'처럼 등급이 없으면 등급 없는 옵션으로 발주한다.
+# 구성상품(실측 2026-10-14)은 특·대·중·소·랜덤·등급없음 × 1·2·3·5kg이지만,
+# **쿠팡 주문은 등급과 무관하게 전부 '햇밤 대 {kg}kg'로 발주**한다(2026-10-16 사용자 지시).
 # '밤'만으로 잡으면 미니밤호박(제주다팜)·밤고구마(해달)와 섞이므로 '햇밤'이 들어가고 호박·고구마가 아닌 건만.
 CHESTNUT_JEWELRY_WEIGHTS = {"1", "2", "3", "5"}
-_CHESTNUT_GRADES = ("랜덤", "특", "대", "중", "소")
+CHESTNUT_ORDER_GRADE = "대"
 
 
 def is_jewelry_chestnut_order(product_name: object, option_text: object) -> bool:
@@ -153,32 +153,17 @@ def is_jewelry_chestnut_order(product_name: object, option_text: object) -> bool
     return "밤호박" not in text and "고구마" not in text
 
 
-def _chestnut_grade(option_text: object) -> str:
-    """옵션(L)에서 등급 토큰(특·대·중·소·랜덤)만 뽑는다. 상품명은 '특품·대용량' 같은
-    수식어가 많아 보지 않는다. 등급이 없으면 ''(등급 없는 '햇밤 {kg}kg' 옵션)."""
-    text = normalize(option_text)
-    for grade in _CHESTNUT_GRADES:
-        if re.search(rf"(?<![가-힣]){grade}(?![가-힣])", text):
-            return grade
-    return ""
-
-
 def _jewelry_chestnut_option(product_name: object, option_text: object) -> str | None:
-    """햇밤 DeliveryList → 쥬얼리프룻 발주 품목 '햇밤 [등급] {kg}kg'.
+    """햇밤 DeliveryList → 쥬얼리프룻 발주 품목 '햇밤 대 {kg}kg' (옵션 등급은 무시).
 
-    kg는 옵션(L) 우선, 없으면 상품명(K). 둘 다 없으면 '햇밤'만 적어 눈에 띄게 한다
+    kg는 옵션(L) 우선, 없으면 상품명(K). 둘 다 없으면 '햇밤 대'만 적어 눈에 띄게 한다
     (조용히 빠지는 것보다 파일에 보이는 쪽이 안전).
     """
     if not is_jewelry_chestnut_order(product_name, option_text):
         return None
     kg = _extract_kg(option_text) or _extract_kg(product_name)
-    grade = _chestnut_grade(option_text)
-    parts = ["햇밤"]
-    if grade:
-        parts.append(grade)
-    if kg:
-        parts.append(f"{kg}kg")
-    return " ".join(parts)
+    label = f"햇밤 {CHESTNUT_ORDER_GRADE}"
+    return f"{label} {kg}kg" if kg else label
 
 
 # 일반 수박 6/7/8kg — 2026-06부터 제이비티가 아닌 쥬얼리팜(쥬얼리프룻) 발주.
@@ -687,7 +672,7 @@ def process(
             filtered_rows.append(row)
             has_pijadu = True
         elif is_jewelry_chestnut_order(k_val, option):
-            # 햇밤 1·2·3·5kg(등급 특·대·중·소·랜덤·없음) → 쥬얼리프룻 (2026-10 신규)
+            # 햇밤 → 쥬얼리프룻 '햇밤 대 {kg}kg' (2026-10 신규, 등급 무관 전부 대)
             filtered_rows.append(row)
             has_chestnut = True
         else:

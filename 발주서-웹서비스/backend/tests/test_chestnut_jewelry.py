@@ -1,7 +1,7 @@
 """햇밤(쥬얼리프룻) 발주·운송장 (2026-10-14 신규).
 
 쥬얼리 공급처 상품 '★파격특가★ [P2CB] 햇밤' 구성상품 24종: '햇밤 {특·대·중·소·랜덤} {1·2·3·5}kg' + 등급 없는 '햇밤 {kg}kg'.
-쿠팡 '국내산 햇밤 생알밤 군밤 찐밤용' 옵션 '1kg 1박스'(등급 없음) → '햇밤 1kg'. 발송 택배사는 CJ대한통운.
+쿠팡 주문은 등급과 무관하게 전부 '햇밤 대 {kg}kg'로 발주(2026-10-16 사용자 지시). 발송 택배사는 CJ대한통운.
 '밤'만으로 잡으면 미니밤호박(제주다팜)·밤고구마(해달)와 섞이므로 반드시 배타 판정.
 """
 
@@ -25,21 +25,20 @@ def test_chestnut_routing_and_exclusions():
     assert myeongi_order.is_jewelry_chestnut_order("국내산 김천 피자두 특품", "1박스 1kg") is False
 
 
-def test_chestnut_vendor_option_name():
-    # 등급 없는 쿠팡 옵션 → 등급 없는 공급처 옵션
-    assert myeongi_order.convert_option("1kg 1박스", COUPANG_PRODUCT) == "햇밤 1kg"
-    assert myeongi_order.convert_option("2kg 1박스", COUPANG_PRODUCT) == "햇밤 2kg"
-    # 옵션에 등급 토큰이 있으면 '햇밤 {등급} {kg}kg'
-    assert myeongi_order.convert_option("1박스 특 3kg", COUPANG_PRODUCT) == "햇밤 특 3kg"
-    assert myeongi_order.convert_option("랜덤 5kg 1박스", COUPANG_PRODUCT) == "햇밤 랜덤 5kg"
-    assert myeongi_order.convert_option("중 2kg", COUPANG_PRODUCT) == "햇밤 중 2kg"
-    # '특품'·'대용량'처럼 수식어 속 글자는 등급이 아니다
-    assert myeongi_order.convert_option("특품 1kg 1박스", COUPANG_PRODUCT) == "햇밤 1kg"
-    assert myeongi_order.convert_option("대용량 3kg", COUPANG_PRODUCT) == "햇밤 3kg"
-    # 상품명에만 등급 비슷한 글자가 있어도 옵션만 본다
-    assert myeongi_order.convert_option("1kg 1박스", "국내산 햇밤 특대 생알밤") == "햇밤 1kg"
+def test_chestnut_vendor_option_name_is_always_dae():
+    # 쿠팡 실측 옵션(등급 없음) → '햇밤 대 {kg}kg'
+    assert myeongi_order.convert_option("1kg 1박스", COUPANG_PRODUCT) == "햇밤 대 1kg"
+    for kg in ("1", "2", "3", "5"):
+        assert myeongi_order.convert_option(f"{kg}kg 1박스", COUPANG_PRODUCT) == f"햇밤 대 {kg}kg"
+    # 옵션에 다른 등급이 적혀 있어도 전부 '대'
+    assert myeongi_order.convert_option("1박스 특 3kg", COUPANG_PRODUCT) == "햇밤 대 3kg"
+    assert myeongi_order.convert_option("랜덤 5kg 1박스", COUPANG_PRODUCT) == "햇밤 대 5kg"
+    assert myeongi_order.convert_option("중 2kg", COUPANG_PRODUCT) == "햇밤 대 2kg"
+    assert myeongi_order.convert_option("소 1kg", COUPANG_PRODUCT) == "햇밤 대 1kg"
+    # kg는 옵션 우선, 없으면 상품명
+    assert myeongi_order.convert_option("1박스", "국내산 햇밤 2kg") == "햇밤 대 2kg"
     # 토스/올웨이즈 경로(passthrough)도 같은 품목명
-    assert myeongi_order.jewelry_passthrough_product(COUPANG_PRODUCT, "1kg 1박스", set()) == "햇밤 1kg"
+    assert myeongi_order.jewelry_passthrough_product(COUPANG_PRODUCT, "1kg 1박스", set()) == "햇밤 대 1kg"
 
 
 def test_chestnut_is_tracking_target():
@@ -76,11 +75,11 @@ def test_process_outputs_chestnut_rows_and_filename():
 
     assert "햇밤" in filename
     assert stats["total"] == 2
-    assert {o["vendor_option_name"] for o in stats["options"]} == {"햇밤 1kg", "햇밤 특 3kg"}
+    assert {o["vendor_option_name"] for o in stats["options"]} == {"햇밤 대 1kg", "햇밤 대 3kg"}
 
     ws = load_workbook(BytesIO(output)).active
     rows = [(ws.cell(r, 3).value, ws.cell(r, 7).value, ws.cell(r, 8).value) for r in range(2, 4)]
-    assert rows == [("시청어린이집", "햇밤 1kg", "1"), ("박테스트", "햇밤 특 3kg", "2")]
+    assert rows == [("시청어린이집", "햇밤 대 1kg", "1"), ("박테스트", "햇밤 대 3kg", "2")]
     assert ws.cell(2, 2).value == "아이티소프트"
     assert ws.cell(2, 9).value == "식품애착"
 
@@ -92,7 +91,7 @@ def _orderlist(rows: list[dict]) -> bytes:
     for i, r in enumerate(rows):
         row = i + 2
         ws.cell(row, 4, r["order_no"])
-        ws.cell(row, 7, r.get("product", "햇밤 1kg"))
+        ws.cell(row, 7, r.get("product", "햇밤 대 1kg"))
         ws.cell(row, 11, r["name"])
         ws.cell(row, 12, r.get("option", ""))
         ws.cell(row, 13, r.get("phone", "0502-5289-0408"))
@@ -144,4 +143,4 @@ def test_toss_jewelry_collect_gate_accepts_chestnut(monkeypatch):
 
     monkeypatch.setattr(toss_client, "get_orders", fake_get_orders)
     entries = asyncio.run(tomato_order.collect_toss_jewelry_orders("2026-10-13", "2026-10-14"))
-    assert [(e["name"], e["product"]) for e in entries] == [("토스손님", "햇밤 1kg")]
+    assert [(e["name"], e["product"]) for e in entries] == [("토스손님", "햇밤 대 1kg")]
