@@ -343,8 +343,10 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
         convert_jeju_baekdo_option,
         convert_potato_option,
         convert_quantity,
+        convert_hwanggeum_option,
         convert_shinano_option,
         is_jeju_hongro_order,
+        is_jeju_hwanggeum_order,
         is_jeju_shinano_order,
     )
 
@@ -356,13 +358,15 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     baekdo: list[dict] = []
     hongro: list[dict] = []
     shinano: list[dict] = []
+    hwanggeum: list[dict] = []
     for item in orders:
         text = _toss_item_text(item)
         compact = text.replace(" ", "")
         if ("콜라비" not in compact and "밤호박" not in compact
                 and "홍감자" not in compact and "백도" not in compact
                 and not is_jeju_hongro_order(compact, "")
-                and not is_jeju_shinano_order(compact, "")):
+                and not is_jeju_shinano_order(compact, "")
+                and not is_jeju_hwanggeum_order(compact, "")):
             continue
         order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
         if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
@@ -424,9 +428,16 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
             )
             if product:
                 shinano.append(_entry(product, "toss-shinano"))
+        elif is_jeju_hwanggeum_order(product_name, option) or is_jeju_hwanggeum_order(compact, ""):
+            # 황금향(2026-10, 한진택배 발송) — 토스 상품명에 '황금향'이 빠져도 전체 주문 텍스트로 판정
+            product = convert_hwanggeum_option(product_name, option) or convert_hwanggeum_option(
+                f"황금향 {product_name}", option
+            )
+            if product:
+                hwanggeum.append(_entry(product, "toss-hwanggeum"))
 
     return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato, "baekdo": baekdo, "hongro": hongro,
-            "shinano": shinano}
+            "shinano": shinano, "hwanggeum": hwanggeum}
 
 
 async def process_toss_watermelon_order(

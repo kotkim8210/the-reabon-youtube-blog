@@ -330,6 +330,66 @@ def convert_shinano_option(product_name: object, option_text: object) -> str | N
     return _SHINANO_JEJU_OPTIONS.get((grade, kg))
 
 
+# 황금향 — 2026-10 제주다팜 신규 발주, 발송은 **한진택배**(제주다팜 다른 품목은 롯데).
+# 쿠팡 '[재구매1위] 제주 황금향 정품 하우스 고당도 평균16brix 산지직송 맛보장' 옵션 '1박스 2kg (소)'
+# → 제주다팜 판매옵션 '하우스 정품 황금향 소과(100g~150g) 2kg'. 판매옵션 9종 실측(2026-10-16):
+# 소과(100g~150g)·중과(150~220g)·중대과(220~300g) × 2·3·5kg.
+_HWANGGEUM_JEJU_OPTIONS = {
+    ("소과", "2"): "하우스 정품 황금향 소과(100g~150g) 2kg",
+    ("소과", "3"): "하우스 정품 황금향 소과(100g~150g) 3kg",
+    ("소과", "5"): "하우스 정품 황금향 소과(100g~150g) 5kg",
+    ("중과", "2"): "하우스 정품 황금향 중과(150~220g) 2kg",
+    ("중과", "3"): "하우스 정품 황금향 중과(150~220g) 3kg",
+    ("중과", "5"): "하우스 정품 황금향 중과(150~220g) 5kg",
+    ("중대과", "2"): "하우스 정품 황금향 중대과(220~300g) 2kg",
+    ("중대과", "3"): "하우스 정품 황금향 중대과(220~300g) 3kg",
+    ("중대과", "5"): "하우스 정품 황금향 중대과(220~300g) 5kg",
+}
+HWANGGEUM_COURIER = "한진택배"
+# 등급: 쿠팡은 '(소)'처럼 한 글자로도 판다. 긴 것 먼저('중대과'⊃'대과', '중대'⊃'중'·'대').
+# 제주다팜엔 '대과'가 없고 가장 큰 등급이 '중대과'라 '대'·'대과'는 중대과로 본다.
+_HWANGGEUM_FULL_GRADES = (("중대과", "중대과"), ("중과", "중과"), ("소과", "소과"), ("대과", "중대과"))
+_HWANGGEUM_SHORT_GRADES = (("중대", "중대과"), ("중", "중과"), ("소", "소과"), ("대", "중대과"))
+
+
+def is_jeju_hwanggeum_order(product_name: object, option_text: object) -> bool:
+    """황금향 제주다팜 발주 여부."""
+    return "황금향" in re.sub(r"\s+", "", _combined_text(product_name, option_text))
+
+
+def _hwanggeum_grade(compact: str) -> str:
+    for token, grade in _HWANGGEUM_FULL_GRADES:
+        if token in compact:
+            return grade
+    # 한 글자 등급은 앞뒤가 한글이 아닐 때만('(소)'·'소 2kg') — '소량'·'대용량' 같은 낱말 속 글자는 무시
+    for token, grade in _HWANGGEUM_SHORT_GRADES:
+        if re.search(rf"(?<![가-힣]){token}(?![가-힣])", compact):
+            return grade
+    return ""
+
+
+def hwanggeum_grade_and_kg(product_name: object, option_text: object) -> tuple[str, str]:
+    """(제주다팜 등급, kg) — 옵션(L) 먼저, 없으면 상품명까지. 못 찾으면 ''."""
+    option = re.sub(r"\s+", "", str(option_text or ""))
+    combined = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    grade = _hwanggeum_grade(option) or _hwanggeum_grade(combined)
+    m = re.search(r"(\d+(?:\.\d+)?)kg", option, re.IGNORECASE) or re.search(
+        r"(\d+(?:\.\d+)?)kg", combined, re.IGNORECASE
+    )
+    kg = _fmt_kg_text(m.group(1)) if m else ""
+    return grade, kg
+
+
+def convert_hwanggeum_option(product_name: object, option_text: object) -> str | None:
+    """황금향 DeliveryList → 제주다팜 발주명(판매옵션 전체 문자열). 미매칭이면 None."""
+    if not is_jeju_hwanggeum_order(product_name, option_text):
+        return None
+    grade, kg = hwanggeum_grade_and_kg(product_name, option_text)
+    if not grade or not kg:
+        return None
+    return _HWANGGEUM_JEJU_OPTIONS.get((grade, kg))
+
+
 # 프리미엄 햇 배 선물세트 — 2026-09 제주다팜 신규 발주. 쿠팡 옵션의 (보자기 유무·등급·kg)를
 # 제주다팜 구성상품명(발주명)으로 변환한다. adminplus 구성상품 8종 실측(2026-09-19):
 #   대과/특대과 × 5·7.5kg × 보자기 동봉/미동봉. 보자기 유무에 따라 과수 표기까지 달라 각각 실측값을 둔다.
@@ -966,6 +1026,22 @@ def process_shinano(
     )
 
 
+def process_hwanggeum(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """황금향 제주다팜 발주 (2026-10 신규, 한진택배 발송). 발주명=제주다팜 판매옵션."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_hwanggeum_option,
+        "황금향(제주다팜)",
+        f"제주다팜_아이티소프트_황금향발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+        matcher=is_jeju_hwanggeum_order,
+    )
+
+
 def process_pear(
     delivery_file_bytes: bytes,
     toss_entries: list[dict] | None = None,
@@ -996,6 +1072,7 @@ def process_outputs(
     toss_baekdo_entries: list[dict] | None = None,
     toss_hongro_entries: list[dict] | None = None,
     toss_shinano_entries: list[dict] | None = None,
+    toss_hwanggeum_entries: list[dict] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
     """제주다팜 발주서 목록 반환 — 콜라비 + 미니밤호박 + 홍감자.
 
@@ -1041,6 +1118,10 @@ def process_outputs(
     shinano_result = process_shinano(delivery_file_bytes, toss_entries=toss_shinano_entries)
     if shinano_result and _has_content(shinano_result[2]):
         results.append(shinano_result)
+
+    hwanggeum_result = process_hwanggeum(delivery_file_bytes, toss_entries=toss_hwanggeum_entries)
+    if hwanggeum_result and _has_content(hwanggeum_result[2]):
+        results.append(hwanggeum_result)
 
     pear_result = process_pear(delivery_file_bytes)
     if pear_result and _has_content(pear_result[2]):

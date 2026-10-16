@@ -41,6 +41,11 @@ def _is_pear_row(option_keys: set[str]) -> bool:
     return any(key.startswith("pear:") for key in option_keys)
 
 
+# 황금향은 제주다팜이지만 한진택배로 나간다(2026-10-16 사용자 지시). 회신 택배사 칸이 비면 이 값으로 채운다.
+def _is_hwanggeum_row(option_keys: set[str]) -> bool:
+    return any(key.startswith("hwanggeum:") or "황금향" in key for key in option_keys)
+
+
 def _phone_digits(value: object) -> str:
     """전화번호를 숫자만으로 정규화 — '010-1234-5678'과 '01012345678'을 동일 취급."""
     return re.sub(r"\D", "", str(value or ""))
@@ -114,6 +119,13 @@ def _semantic_option_keys(*values: object) -> set[str]:
         grade, kg = shinano_grade_and_kg(text, "")
         if kg:
             keys.add(f"shinano:{grade}:{kg}kg")
+    if "황금향" in text:
+        # 황금향: orderlist(발주명 '하우스 정품 황금향 {등급}(g범위) {kg}kg')와 DeliveryList(쿠팡 '1박스 2kg (소)')를
+        # 제주다팜 등급+kg 의미키로 묶는다(발주 변환과 같은 함수 → '(소)'·'대' 별칭까지 일치).
+        from app.processors.kolrabi_order import hwanggeum_grade_and_kg
+        grade, kg = hwanggeum_grade_and_kg(text, "")
+        if kg:
+            keys.add(f"hwanggeum:{grade}:{kg}kg")
     if "청사과" in text or "아오리" in text:
         # 청사과: orderlist(발주명 '청사과 {등급}(가정용) … {kg}kg(…)')와 DeliveryList(쿠팡 옵션)의
         # 표기가 달라 등급(중소과/소과/대과)+kg 의미키로 묶는다. '중소과'가 '소과' 포함 → 긴 것 먼저.
@@ -258,10 +270,15 @@ def process(
                 skip_details.append(f"{dl_name}(같은 사람의 다른 상품 행 — 이 회신에 없음)")
                 continue
             if phone_hits:
+                # 같은 사람·같은 주소로 여러 상품(황금향+시나노골드)을 받으면 주소로는 못 가른다 →
+                # 옵션까지 맞는 건 > 옵션만 맞는 건 > 주소만 맞는 건 > 첫 건 순. 회신에 옵션 정보가 없으면 종전과 같다.
                 matched = next(
-                    (c for _, c in phone_hits if c["address"] == dl_address), None
+                    (c for _, c in phone_hits
+                     if c["address"] == dl_address and options_match(c.get("option_keys"), dl_option_keys)), None
                 ) or next(
                     (c for _, c in phone_hits if options_match(c.get("option_keys"), dl_option_keys)), None
+                ) or next(
+                    (c for _, c in phone_hits if c["address"] == dl_address), None
                 ) or phone_hits[0][1]
 
         # 2) 전화로 못 가른 경우에만 동명이인 옵션 가드 적용 (기존 보호 유지)
@@ -291,6 +308,9 @@ def process(
             courier = normalize_courier(matched.get("courier"))
             if not courier and _is_pear_row(dl_option_keys):
                 courier = PEAR_DEFAULT_COURIER  # 햇 배 선물세트 = CJ대한통운 발송
+            if not courier and _is_hwanggeum_row(dl_option_keys):
+                from app.processors.kolrabi_order import HWANGGEUM_COURIER
+                courier = HWANGGEUM_COURIER  # 황금향 = 한진택배 발송
             if courier:
                 dl_ws.cell(row=row_idx, column=4).value = courier
             used_entries.add(id(matched))

@@ -271,7 +271,7 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
         # '사과'는 홍로사과·가을햇사과(제주다팜)와 청사과(제이비티)를 모두 덮는다 —
         # 2026-09-11 홍로 주문 2건이 여기서 걸러져 송장이 안 들어가던 사고.
         # '햇밤'(쥬얼리, 2026-10)은 '밤호박'과 겹치지 않아 따로 넣는다.
-        if not any(k in text for k in ("수박", "참외", "복숭아", "감자", "밤호박", "콜라비", "옥수수", "사과", "햇밤", "시나노")):
+        if not any(k in text for k in ("수박", "참외", "복숭아", "감자", "밤호박", "콜라비", "옥수수", "사과", "햇밤", "시나노", "황금향")):
             continue
 
         option = str(item.get("optionName") or "")
@@ -307,6 +307,8 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
             "phone_digits": phone_digits(receiver_phone),
             "address": normalize(full_address),
             "name_display": receiver_name,
+            # 황금향(제주다팜)은 한진택배 발송 — 나머지 쥬얼리·제주다팜 품목은 롯데택배
+            "expected_courier": "한진택배" if "황금향" in text.replace(" ", "") else "롯데택배",
             "option_keys": option_key_set(
                 option,
                 label,
@@ -391,9 +393,10 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
         # 이 함수의 대상(쥬얼리프룻·제주다팜 발주 품목)은 전부 롯데택배 발송이므로
         # 회신에 택배사가 비면 기본값은 롯데택배. (과거 제이비티 시절 한진 기본값 탓에
         # 수박 건이 한진으로 등록돼 배송완료가 추적 안 되던 2026-06-15 사고 재발 방지)
-        delivery_company = normalize_toss_courier(courier, default="롯데택배")
-        if delivery_company != "롯데택배":
-            # 쥬얼리·제주다팜 품목이 롯데가 아닌 택배사로 등록되는 건 이상 신호 → 눈에 보이게
+        expected = order.get("expected_courier") or "롯데택배"
+        delivery_company = normalize_toss_courier(courier, default=expected)
+        if delivery_company != expected:
+            # 품목의 원래 발송 택배사(대부분 롯데, 황금향은 한진)와 다르게 등록되는 건 이상 신호 → 눈에 보이게
             courier_warnings.append(
                 f"{order.get('name_display') or order.get('name')} → {delivery_company} {tracking} (회신 택배사 '{courier}')"
             )

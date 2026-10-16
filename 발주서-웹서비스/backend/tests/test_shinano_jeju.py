@@ -77,7 +77,8 @@ def test_process_outputs_includes_shinano_file():
     ])
     results = kolrabi_order.process_outputs(data)
     shinano = [r for r in results if "시나노골드" in r[1]]
-    assert len(shinano) == 1 and len(results) == 1   # 황금향은 제주다팜 어떤 발주서에도 안 들어감
+    # 황금향은 2026-10-16부터 별도 제주다팜 발주서(test_hwanggeum_jeju) — 시나노 파일엔 섞이지 않는다
+    assert len(shinano) == 1 and {r[2]["product"] for r in results} == {"시나노골드사과(제주다팜)", "황금향(제주다팜)"}
     out, filename, stats = shinano[0]
     assert stats["product"] == "시나노골드사과(제주다팜)" and stats["total"] == 1
     assert any("미등록옵션" in n for n in stats["needs_check"])
