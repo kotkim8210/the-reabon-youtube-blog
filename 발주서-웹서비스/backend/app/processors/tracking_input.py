@@ -137,6 +137,13 @@ def _semantic_option_keys(*values: object) -> set[str]:
         grade, kg = hwanggeum_grade_and_kg(text, "")
         if kg:
             keys.add(f"hwanggeum:{grade}:{kg}kg")
+    if "태추" in text:
+        # 태추단감: orderlist(발주명 '태추단감 {등급} {kg}kg (과수)')와 DeliveryList(쿠팡 '1박스 1kg (중과)')를
+        # 제주다팜 등급+kg 의미키로 묶는다(발주 변환과 같은 함수).
+        from app.processors.kolrabi_order import taechu_grade_and_kg
+        grade, kg = taechu_grade_and_kg(text, "")
+        if kg:
+            keys.add(f"taechu:{grade}:{kg}kg")
     if "청사과" in text or "아오리" in text:
         # 청사과: orderlist(발주명 '청사과 {등급}(가정용) … {kg}kg(…)')와 DeliveryList(쿠팡 옵션)의
         # 표기가 달라 등급(중소과/소과/대과)+kg 의미키로 묶는다. '중소과'가 '소과' 포함 → 긴 것 먼저.

@@ -35,6 +35,8 @@ def resolve_order_supplier(product_name: object, option_text: object) -> str | N
         return JEJUDAPAM
     if kolrabi_order.convert_hwanggeum_option(product_name, option_text):
         return JEJUDAPAM
+    if kolrabi_order.convert_taechu_option(product_name, option_text):
+        return JEJUDAPAM
 
     # 쥬얼리프룻(명이 메뉴)
     if myeongi_order.is_myeongi_baekdo_excluded(product_name, option_text):

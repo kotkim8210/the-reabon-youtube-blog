@@ -271,7 +271,7 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
         # '사과'는 홍로사과·가을햇사과(제주다팜)와 청사과(제이비티)를 모두 덮는다 —
         # 2026-09-11 홍로 주문 2건이 여기서 걸러져 송장이 안 들어가던 사고.
         # '햇밤'(쥬얼리, 2026-10)은 '밤호박'과 겹치지 않아 따로 넣는다.
-        if not any(k in text for k in ("수박", "참외", "복숭아", "감자", "밤호박", "콜라비", "옥수수", "사과", "햇밤", "시나노", "황금향")):
+        if not any(k in text for k in ("수박", "참외", "복숭아", "감자", "밤호박", "콜라비", "옥수수", "사과", "햇밤", "시나노", "황금향", "태추")):
             continue
 
         option = str(item.get("optionName") or "")

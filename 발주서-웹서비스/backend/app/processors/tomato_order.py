@@ -345,9 +345,11 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
         convert_quantity,
         convert_hwanggeum_option,
         convert_shinano_option,
+        convert_taechu_option,
         is_jeju_hongro_order,
         is_jeju_hwanggeum_order,
         is_jeju_shinano_order,
+        is_jeju_taechu_order,
     )
 
     orders = await toss_client.get_orders(start_date=from_date, end_date=to_date, status=None)
@@ -359,6 +361,7 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     hongro: list[dict] = []
     shinano: list[dict] = []
     hwanggeum: list[dict] = []
+    taechu: list[dict] = []
     for item in orders:
         text = _toss_item_text(item)
         compact = text.replace(" ", "")
@@ -366,7 +369,8 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
                 and "홍감자" not in compact and "백도" not in compact
                 and not is_jeju_hongro_order(compact, "")
                 and not is_jeju_shinano_order(compact, "")
-                and not is_jeju_hwanggeum_order(compact, "")):
+                and not is_jeju_hwanggeum_order(compact, "")
+                and not is_jeju_taechu_order(compact, "")):
             continue
         order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
         if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
@@ -435,9 +439,16 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
             )
             if product:
                 hwanggeum.append(_entry(product, "toss-hwanggeum"))
+        elif is_jeju_taechu_order(product_name, option) or is_jeju_taechu_order(compact, ""):
+            # 태추단감(2026-10) — 토스 상품명에 '태추'가 빠져도 전체 주문 텍스트로 판정
+            product = convert_taechu_option(product_name, option) or convert_taechu_option(
+                f"태추 {product_name}", option
+            )
+            if product:
+                taechu.append(_entry(product, "toss-taechu"))
 
     return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato, "baekdo": baekdo, "hongro": hongro,
-            "shinano": shinano, "hwanggeum": hwanggeum}
+            "shinano": shinano, "hwanggeum": hwanggeum, "taechu": taechu}
 
 
 async def process_toss_watermelon_order(

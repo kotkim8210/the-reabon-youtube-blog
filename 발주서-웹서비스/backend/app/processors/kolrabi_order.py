@@ -390,6 +390,65 @@ def convert_hwanggeum_option(product_name: object, option_text: object) -> str |
     return _HWANGGEUM_JEJU_OPTIONS.get((grade, kg))
 
 
+# 태추단감 — 2026-10 제주다팜 신규 발주. 쿠팡 '경남 태추단감 아삭달콤 제철 배단감' 옵션 '1박스 1kg (중과)'
+# → 제주다팜 판매옵션 '태추단감 중과 1kg (4-5과)'. 판매옵션 12종 실측(2026-10-19): 대과·중과·소과 × 1·1.5·2·3kg.
+# '단감'만으로는 부유단감 등 다른 품종과 섞이므로 '태추'로만 판정.
+_TAECHU_JEJU_OPTIONS = {
+    ("대과", "3"): "태추단감 대과 3kg (10-12과)",
+    ("대과", "2"): "태추단감 대과 2kg (7-8과)",
+    ("대과", "1.5"): "태추단감 대과 1.5kg (5-6과)",
+    ("대과", "1"): "태추단감 대과 1kg (3-4과)",
+    ("중과", "3"): "태추단감 중과 3kg (13-15과)",
+    ("중과", "2"): "태추단감 중과 2kg (9-10과)",
+    ("중과", "1.5"): "태추단감 중과 1.5kg (6-7과)",
+    ("중과", "1"): "태추단감 중과 1kg (4-5과)",
+    ("소과", "3"): "태추단감 소과 3kg (16-19과)",
+    ("소과", "2"): "태추단감 소과 2kg (11-12과)",
+    ("소과", "1.5"): "태추단감 소과 1.5kg (8-9과)",
+    ("소과", "1"): "태추단감 소과 1kg (5-6과)",
+}
+_TAECHU_FULL_GRADES = ("대과", "중과", "소과")
+_TAECHU_SHORT_GRADES = (("대", "대과"), ("중", "중과"), ("소", "소과"))
+
+
+def is_jeju_taechu_order(product_name: object, option_text: object) -> bool:
+    """태추단감 제주다팜 발주 여부."""
+    return "태추" in re.sub(r"\s+", "", _combined_text(product_name, option_text))
+
+
+def _taechu_grade(compact: str) -> str:
+    for grade in _TAECHU_FULL_GRADES:
+        if grade in compact:
+            return grade
+    # 한 글자 등급은 앞뒤가 한글이 아닐 때만('(중)') — '대용량'·'소포장' 같은 낱말 속 글자는 무시
+    for token, grade in _TAECHU_SHORT_GRADES:
+        if re.search(rf"(?<![가-힣]){token}(?![가-힣])", compact):
+            return grade
+    return ""
+
+
+def taechu_grade_and_kg(product_name: object, option_text: object) -> tuple[str, str]:
+    """(제주다팜 등급, kg) — 옵션(L) 먼저, 없으면 상품명까지. 못 찾으면 ''."""
+    option = re.sub(r"\s+", "", str(option_text or ""))
+    combined = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    grade = _taechu_grade(option) or _taechu_grade(combined)
+    m = re.search(r"(\d+(?:\.\d+)?)kg", option, re.IGNORECASE) or re.search(
+        r"(\d+(?:\.\d+)?)kg", combined, re.IGNORECASE
+    )
+    kg = _fmt_kg_text(m.group(1)) if m else ""
+    return grade, kg
+
+
+def convert_taechu_option(product_name: object, option_text: object) -> str | None:
+    """태추단감 DeliveryList → 제주다팜 발주명(판매옵션 전체 문자열). 미매칭이면 None."""
+    if not is_jeju_taechu_order(product_name, option_text):
+        return None
+    grade, kg = taechu_grade_and_kg(product_name, option_text)
+    if not grade or not kg:
+        return None
+    return _TAECHU_JEJU_OPTIONS.get((grade, kg))
+
+
 # 프리미엄 햇 배 선물세트 — 2026-09 제주다팜 신규 발주. 쿠팡 옵션의 (보자기 유무·등급·kg)를
 # 제주다팜 구성상품명(발주명)으로 변환한다. adminplus 구성상품 8종 실측(2026-09-19):
 #   대과/특대과 × 5·7.5kg × 보자기 동봉/미동봉. 보자기 유무에 따라 과수 표기까지 달라 각각 실측값을 둔다.
@@ -1042,6 +1101,22 @@ def process_hwanggeum(
     )
 
 
+def process_taechu(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """태추단감 제주다팜 발주 (2026-10 신규). 발주명=제주다팜 판매옵션."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_taechu_option,
+        "태추단감(제주다팜)",
+        f"제주다팜_아이티소프트_태추단감발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+        matcher=is_jeju_taechu_order,
+    )
+
+
 def process_pear(
     delivery_file_bytes: bytes,
     toss_entries: list[dict] | None = None,
@@ -1073,6 +1148,7 @@ def process_outputs(
     toss_hongro_entries: list[dict] | None = None,
     toss_shinano_entries: list[dict] | None = None,
     toss_hwanggeum_entries: list[dict] | None = None,
+    toss_taechu_entries: list[dict] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
     """제주다팜 발주서 목록 반환 — 콜라비 + 미니밤호박 + 홍감자.
 
@@ -1122,6 +1198,10 @@ def process_outputs(
     hwanggeum_result = process_hwanggeum(delivery_file_bytes, toss_entries=toss_hwanggeum_entries)
     if hwanggeum_result and _has_content(hwanggeum_result[2]):
         results.append(hwanggeum_result)
+
+    taechu_result = process_taechu(delivery_file_bytes, toss_entries=toss_taechu_entries)
+    if taechu_result and _has_content(taechu_result[2]):
+        results.append(taechu_result)
 
     pear_result = process_pear(delivery_file_bytes)
     if pear_result and _has_content(pear_result[2]):
