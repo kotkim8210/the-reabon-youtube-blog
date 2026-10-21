@@ -353,8 +353,21 @@ function OrderCollectionTab() {
           </p>
         </div>
 
-        {/* 테무·올웨이즈 주문서(선택) — 있으면 발주서에 합침 */}
+        {/* 올웨이즈·테무 주문서(선택) — 있으면 발주서에 합침. 올웨이즈가 매일 쓰는 칸이라 왼쪽(2026-10-21 사용자 요청) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+          <div>
+            <FileUpload
+              label="올웨이즈 주문내역 (선택 — 있으면 발주서에 합침)"
+              file={alwayzFile}
+              onFileSelect={setAlwayzFile}
+            />
+            {alwayzFile && (
+              <button onClick={() => setAlwayzFile(null)}
+                className="mt-1 text-xs text-gray-400 hover:text-gray-600 underline">
+                올웨이즈 파일 제거
+              </button>
+            )}
+          </div>
           <div>
             <FileUpload
               label="테무 주문서 (선택 — 있으면 발주서에 합침)"
@@ -367,19 +380,6 @@ function OrderCollectionTab() {
               <button onClick={() => setTemuFile(null)}
                 className="mt-1 text-xs text-gray-400 hover:text-gray-600 underline">
                 테무 파일 제거
-              </button>
-            )}
-          </div>
-          <div>
-            <FileUpload
-              label="올웨이즈 주문내역 (선택 — 있으면 발주서에 합침)"
-              file={alwayzFile}
-              onFileSelect={setAlwayzFile}
-            />
-            {alwayzFile && (
-              <button onClick={() => setAlwayzFile(null)}
-                className="mt-1 text-xs text-gray-400 hover:text-gray-600 underline">
-                올웨이즈 파일 제거
               </button>
             )}
           </div>
