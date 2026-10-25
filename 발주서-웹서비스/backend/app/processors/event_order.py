@@ -78,6 +78,10 @@ def event_product_name(prize: str) -> str:
     if jbt:
         return jbt
 
+    jewelry = _jewelry_event_product(text)
+    if jewelry:
+        return jewelry
+
     jejudapam = _jejudapam_event_product(text)
     if jejudapam:
         return jejudapam
@@ -96,14 +100,28 @@ def _jbt_event_product(prize: str) -> str | None:
     return jbt_apple_option(str(prize or ""), "")
 
 
+def _jewelry_event_product(prize: str) -> str | None:
+    """쥬얼리프룻에서만 파는 경품(햇밤)이면 쥬얼리 발주 품목명. 아니면 None.
+
+    제주다팜엔 햇밤이 없다(adminplus 검색 2026-10-26: 밤고구마·미니밤호박뿐) → 햇밤 당첨자는
+    쿠팡 주문과 같은 '햇밤 대 {kg}kg'로 쥬얼리프룻 양식 발주서에 따로 낸다.
+    """
+    from app.processors.myeongi_order import _jewelry_chestnut_option
+
+    return _jewelry_chestnut_option(str(prize or ""), "")
+
+
 def event_supplier(prize: str) -> str:
     """이벤트 당첨자 발주처.
 
     기본은 제주다팜이지만, **발주처가 제이비티인 품목(청사과/아오리)은 제이비티**로 보낸다
     (2026-08-31 — 발주처 이관을 이벤트 경로도 따라가야 엉뚱한 거래처로 발주된다).
+    쥬얼리프룻에서만 파는 햇밤은 쥬얼리프룻(2026-10-26).
     """
     if _jbt_event_product(prize):
         return "jbt"
+    if _jewelry_event_product(prize):
+        return "jewelry"
     return "jejudapam"
 
 
@@ -324,7 +342,8 @@ def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
 
     today = datetime.now(KST).strftime("%Y%m%d")
     jbt_entries = [e for e in entries if e.get("supplier") == "jbt"]
-    jeju_entries = [e for e in entries if e.get("supplier") != "jbt"]
+    jewelry_entries = [e for e in entries if e.get("supplier") == "jewelry"]
+    jeju_entries = [e for e in entries if e.get("supplier") not in ("jbt", "jewelry")]
     results: list[tuple[bytes, str, dict]] = []
 
     if jeju_entries:
@@ -348,6 +367,19 @@ def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
                 "supplier": "제주다팜",
                 "winners": len(jeju_entries),
             }))
+
+    if jewelry_entries:
+        # 쥬얼리프룻 양식(명이나물 발주서와 동일 템플릿). DeliveryList는 비우고 당첨자를 toss_entries로 넣는다.
+        from app.processors import myeongi_order
+
+        output_bytes, _fname, stats = myeongi_order.process(_empty_delivery_bytes(), toss_entries=jewelry_entries)
+        label = str(stats.get("product") or "햇밤").replace("+", "_")
+        results.append((output_bytes, f"이벤트당첨_쥬얼리프룻_{label}_발주({today}).xlsx", {
+            **stats,
+            "supplier": "쥬얼리프룻",
+            "product": f"이벤트 {stats.get('product') or '햇밤'}(쥬얼리프룻)",
+            "winners": len(jewelry_entries),
+        }))
 
     if jbt_entries:
         output_bytes, filename, stats = _build_jbt_event_workbook(jbt_entries, today)

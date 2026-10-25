@@ -226,7 +226,7 @@ const productConfigs: Record<string, ProductConfig> = {
       buttonLabel: '운송장 입력',
     },
     event: {
-      title: '라이브 이벤트 당첨자 발주서 생성 (모든 경품 → 제주다팜 발주서)',
+      title: '라이브 이벤트 당첨자 발주서 생성 (햇밤 → 쥬얼리프룻, 그 밖의 경품 → 제주다팜 발주서)',
       icon: '🎉',
       apiToolId: 'event-winner-order',
       files: [
@@ -262,7 +262,7 @@ const productConfigs: Record<string, ProductConfig> = {
       buttonLabel: '운송장 입력',
     },
     event: {
-      title: '라이브 이벤트 당첨자 발주서 생성 (모든 경품 → 제주다팜 발주서)',
+      title: '라이브 이벤트 당첨자 발주서 생성 (햇밤 → 쥬얼리프룻, 그 밖의 경품 → 제주다팜 발주서)',
       icon: '🎉',
       apiToolId: 'event-winner-order',
       files: [
