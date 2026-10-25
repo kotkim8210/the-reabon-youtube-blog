@@ -115,8 +115,12 @@ def _jejudapam_event_product(prize: str) -> str | None:
     """
     from app.processors.kolrabi_order import (
         convert_bamhobak_option,
+        convert_gamhong_option,
         convert_hongro_option,
+        convert_hwanggeum_option,
         convert_potato_option,
+        convert_shinano_option,
+        convert_taechu_option,
     )
 
     # 청사과(아오리)는 제이비티 이관 → _jbt_event_product가 먼저 처리한다.
@@ -125,7 +129,17 @@ def _jejudapam_event_product(prize: str) -> str | None:
         converted = converter(text, "")
         if converted:
             return converted
+    # 등급별 판매옵션만 있는 품목(감홍·태추·황금향·시나노골드, 2026-10): 라이브 경품명은 '감홍사과1.5kg'처럼
+    # 등급 없이 오는 경우가 많다 → 등급이 적혀 있으면 그대로, 없으면 백도 경품과 같은 기본값 '중과'로 발주
+    # (2026-10-26 감홍사과 당첨자 — 종전엔 경품명 원문이 그대로 나가 거래처가 옵션을 알 수 없었다).
+    for converter in (convert_gamhong_option, convert_taechu_option, convert_hwanggeum_option, convert_shinano_option):
+        converted = converter(text, "") or converter(text, EVENT_DEFAULT_GRADE)
+        if converted:
+            return converted
     return None
+
+
+EVENT_DEFAULT_GRADE = "중과"
 
 
 def _find_col(headers: list[str], *needles_groups) -> int | None:
@@ -235,6 +249,14 @@ def _labels_for(products: list[str]) -> list[str]:
         labels.append("홍감자")
     if any("콜라비" in p for p in products):
         labels.append("콜라비")
+    if any("감홍" in p for p in products):
+        labels.append("감홍사과")
+    if any("태추" in p for p in products):
+        labels.append("태추단감")
+    if any("황금향" in p for p in products):
+        labels.append("황금향")
+    if any("시나노" in p for p in products):
+        labels.append("시나노골드")
     return labels
 
 
