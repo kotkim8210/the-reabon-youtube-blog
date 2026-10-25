@@ -572,6 +572,7 @@ async def process_kolrabi_order(
         toss_shinano_entries = []
         toss_hwanggeum_entries = []
         toss_taechu_entries = []
+        toss_gamhong_entries = []
         toss_error = ""
         collect_dates = None
         if toss_from_date and toss_to_date:
@@ -624,10 +625,15 @@ async def process_kolrabi_order(
                     toss_taechu_entries, issued_excluded, skipped_names=dup_names,
                     reissue_keys=reissue_keys, reissued=reissued,
                 )
-                dup_skipped += _dup_c + _dup_b + _dup_p + _dup_bd + _dup_h + _dup_s + _dup_hg + _dup_tc
+                toss_gamhong_entries = toss_jeju.get("gamhong", [])
+                toss_gamhong_entries, _dup_gh = issued_orders.filter_entries_by_issued(
+                    toss_gamhong_entries, issued_excluded, skipped_names=dup_names,
+                    reissue_keys=reissue_keys, reissued=reissued,
+                )
+                dup_skipped += _dup_c + _dup_b + _dup_p + _dup_bd + _dup_h + _dup_s + _dup_hg + _dup_tc + _dup_gh
             except Exception as toss_exc:
                 toss_error = str(toss_exc)
-                logger.warning(f"토스 제주다팜(콜라비·미니밤호박·홍감자·백도·홍로·시나노골드·황금향·태추단감) 수집 실패(발주는 계속): {toss_exc}")
+                logger.warning(f"토스 제주다팜(콜라비·미니밤호박·홍감자·백도·홍로·시나노골드·황금향·태추단감·감홍사과) 수집 실패(발주는 계속): {toss_exc}")
 
         results = kolrabi_order.process_outputs(
             delivery_bytes,
@@ -639,12 +645,13 @@ async def process_kolrabi_order(
             toss_shinano_entries=toss_shinano_entries,
             toss_hwanggeum_entries=toss_hwanggeum_entries,
             toss_taechu_entries=toss_taechu_entries,
+            toss_gamhong_entries=toss_gamhong_entries,
         )
         if not results:
             dup_note = f" (이전 발주분 {dup_skipped}건 자동 제외됨)" if dup_skipped else ""
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자·백도딱딱이복숭아·홍로사과·시나노골드사과·황금향·태추단감 주문을 찾지 못했습니다.{dup_note}",
+                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자·백도딱딱이복숭아·홍로사과·시나노골드사과·황금향·태추단감·감홍사과 주문을 찾지 못했습니다.{dup_note}",
             )
 
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)

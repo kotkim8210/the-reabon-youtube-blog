@@ -241,6 +241,8 @@ def is_jeju_hongro_order(product_name: object, option_text: object) -> bool:
     text = re.sub(r"\s+", "", _combined_text(product_name, option_text))
     if "청사과" in text or "아오리" in text:
         return False  # 청사과는 별도 상품(convert_apple_option)
+    if "감홍" in text:
+        return False  # '감홍사과' 안에 '홍사과'가 들어 있다 → 감홍(convert_gamhong_option)이 홍로로 둔갑하던 문제(2026-10-26)
     return "홍로" in text or "홍사과" in text or "가을햇사과" in text
 
 
@@ -447,6 +449,69 @@ def convert_taechu_option(product_name: object, option_text: object) -> str | No
     if not grade or not kg:
         return None
     return _TAECHU_JEJU_OPTIONS.get((grade, kg))
+
+
+# 감홍사과 — 2026-10 제주다팜 신규 발주. 쿠팡 '[산지직송] 고당도 경북 문경 감홍사과 가정용 A등급' 옵션 '1박스 1.5kg (대과)'
+# → 제주다팜 판매옵션 '감홍사과(가정용 A등급) 대과 1.5kg(2-4과내)'. adminplus pcode=10001367 실측(2026-10-26):
+# 대과·중과 × 1.5·2·2.5·3·4·5kg = 12종(소과 없음). 과수 괄호 표기('내외'/'내')가 달라 실측 문자열 그대로 둔다.
+# ※ '감홍사과'에 '홍사과'가 들어 있어 홍로 판정(is_jeju_hongro_order)에서 반드시 제외한다.
+_GAMHONG_JEJU_OPTIONS = {
+    ("대과", "5"): "감홍사과(가정용 A등급) 대과 5kg(8-14과내외)",
+    ("대과", "4"): "감홍사과(가정용 A등급) 대과 4kg(6-9과내외)",
+    ("대과", "3"): "감홍사과(가정용 A등급) 대과 3kg(5-8과내외)",
+    ("대과", "2.5"): "감홍사과(가정용 A등급) 대과 2.5kg(4-7과내외)",
+    ("대과", "2"): "감홍사과(가정용 A등급) 대과 2kg(3-5과내외)",
+    ("대과", "1.5"): "감홍사과(가정용 A등급) 대과 1.5kg(2-4과내)",
+    ("중과", "5"): "감홍사과(가정용 A등급) 중과 5kg(15-20과내외)",
+    ("중과", "4"): "감홍사과(가정용 A등급) 중과 4kg(11-15과내외)",
+    ("중과", "3"): "감홍사과(가정용 A등급) 중과 3kg(9-13과내외)",
+    ("중과", "2.5"): "감홍사과(가정용 A등급) 중과 2.5kg(8-10과내외)",
+    ("중과", "2"): "감홍사과(가정용 A등급) 중과 2kg(6-8과내)",
+    ("중과", "1.5"): "감홍사과(가정용 A등급) 중과 1.5kg(4-5과내)",
+}
+_GAMHONG_FULL_GRADES = ("대과", "중과")
+_GAMHONG_SHORT_GRADES = (("대", "대과"), ("중", "중과"))
+
+
+def is_jeju_gamhong_order(product_name: object, option_text: object) -> bool:
+    """감홍사과 제주다팜 발주 여부."""
+    return "감홍" in re.sub(r"\s+", "", _combined_text(product_name, option_text))
+
+
+def _gamhong_grade(compact: str) -> str:
+    for grade in _GAMHONG_FULL_GRADES:
+        if grade in compact:
+            return grade
+    # 한 글자 등급은 앞뒤가 한글이 아닐 때만('(중)') — '대용량' 같은 낱말 속 글자는 무시
+    for token, grade in _GAMHONG_SHORT_GRADES:
+        if re.search(rf"(?<![가-힣]){token}(?![가-힣])", compact):
+            return grade
+    return ""
+
+
+def gamhong_grade_and_kg(product_name: object, option_text: object) -> tuple[str, str]:
+    """(제주다팜 등급, kg) — 옵션(L) 먼저, 없으면 상품명까지. 못 찾으면 ''.
+
+    상품명의 'A등급'은 등급 토큰이 아니다(대과·중과·(대)·(중)만 본다).
+    """
+    option = re.sub(r"\s+", "", str(option_text or ""))
+    combined = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    grade = _gamhong_grade(option) or _gamhong_grade(combined)
+    m = re.search(r"(\d+(?:\.\d+)?)kg", option, re.IGNORECASE) or re.search(
+        r"(\d+(?:\.\d+)?)kg", combined, re.IGNORECASE
+    )
+    kg = _fmt_kg_text(m.group(1)) if m else ""
+    return grade, kg
+
+
+def convert_gamhong_option(product_name: object, option_text: object) -> str | None:
+    """감홍사과 DeliveryList → 제주다팜 발주명(판매옵션 전체 문자열). 미매칭이면 None."""
+    if not is_jeju_gamhong_order(product_name, option_text):
+        return None
+    grade, kg = gamhong_grade_and_kg(product_name, option_text)
+    if not grade or not kg:
+        return None
+    return _GAMHONG_JEJU_OPTIONS.get((grade, kg))
 
 
 # 프리미엄 햇 배 선물세트 — 2026-09 제주다팜 신규 발주. 쿠팡 옵션의 (보자기 유무·등급·kg)를
@@ -1117,6 +1182,22 @@ def process_taechu(
     )
 
 
+def process_gamhong(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """감홍사과 제주다팜 발주 (2026-10 신규). 발주명=제주다팜 판매옵션."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_gamhong_option,
+        "감홍사과(제주다팜)",
+        f"제주다팜_아이티소프트_감홍사과발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+        matcher=is_jeju_gamhong_order,
+    )
+
+
 def process_pear(
     delivery_file_bytes: bytes,
     toss_entries: list[dict] | None = None,
@@ -1149,6 +1230,7 @@ def process_outputs(
     toss_shinano_entries: list[dict] | None = None,
     toss_hwanggeum_entries: list[dict] | None = None,
     toss_taechu_entries: list[dict] | None = None,
+    toss_gamhong_entries: list[dict] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
     """제주다팜 발주서 목록 반환 — 콜라비 + 미니밤호박 + 홍감자.
 
@@ -1202,6 +1284,10 @@ def process_outputs(
     taechu_result = process_taechu(delivery_file_bytes, toss_entries=toss_taechu_entries)
     if taechu_result and _has_content(taechu_result[2]):
         results.append(taechu_result)
+
+    gamhong_result = process_gamhong(delivery_file_bytes, toss_entries=toss_gamhong_entries)
+    if gamhong_result and _has_content(gamhong_result[2]):
+        results.append(gamhong_result)
 
     pear_result = process_pear(delivery_file_bytes)
     if pear_result and _has_content(pear_result[2]):

@@ -104,7 +104,14 @@ def _semantic_option_keys(*values: object) -> set[str]:
         # DeliveryList(쿠팡 '백도… {등급} {kg}kg')의 등급·kg가 동일 → 등급+kg 의미키로 묶는다.
         grade = "대과" if "대과" in text else ("중과" if "중과" in text else "")
         keys.update(f"baekdo:{grade}:{weight}kg" for weight in weights)
-    if "홍로" in text or "홍사과" in text or "가을햇사과" in text:
+    if "감홍" in text:
+        # 감홍사과: orderlist(발주명 '감홍사과(가정용 A등급) {등급} {kg}kg(…)')와 DeliveryList(쿠팡 '1박스 1.5kg (대과)')를
+        # 제주다팜 등급+kg 의미키로 묶는다. '감홍사과'에 '홍사과'가 들어 있어 아래 홍로 키보다 먼저·배타로 판정.
+        from app.processors.kolrabi_order import gamhong_grade_and_kg
+        grade, kg = gamhong_grade_and_kg(text, "")
+        if kg:
+            keys.add(f"gamhong:{grade}:{kg}kg")
+    elif "홍로" in text or "홍사과" in text or "가을햇사과" in text:
         # 홍로사과: orderlist(발주명 '가을햇사과(홍사과) 가정용 {등급} 포장재포함 {kg}kg(...)')와
         # DeliveryList(쿠팡 '1박스 {등급} {kg}kg(...)')를 등급+kg 의미키로 묶는다.
         # 등급은 '중소과'·'중대과'가 '소과'·'대과'를 포함하므로 긴 것 먼저.
