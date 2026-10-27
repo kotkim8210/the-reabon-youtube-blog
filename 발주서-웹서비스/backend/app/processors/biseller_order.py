@@ -1,17 +1,28 @@
-"""비셀러 발주서 생성 (LA한입갈비) — 2026-09 신규.
+"""비셀러 발주서 생성 — LA한입갈비(2026-09) + 김장·수산 시즌상품(2026-10-27 확장).
 
-쿠팡 DeliveryList에서 '한입 LA갈비' 주문을 뽑아 비셀러 발주 양식으로 채운다.
-비셀러 상품명은 800g 낱개 개수를 그대로 풀어 쓴 표기다.
-  쿠팡 '800g 4개' → '양념LA한입갈비 800g+800g+800g+800g (800G*4세트)'
-
-2026-09-15부터 양식이 메이크샵 "발주용 양식(대량주문 업로드)"으로 바뀌었다:
+쿠팡 DeliveryList에서 비셀러 소싱 주문을 뽑아 메이크샵 "발주용 양식(대량주문 업로드)"으로 채운다.
   1~3행 헤더(라벨/필드키/필수·읽기전용) · 4행부터 데이터 · 상품은 상품번호(goods_no)로 지정.
+
+매칭 규칙 (위에서 먼저 맞는 것 하나)
+1. DeliveryList Q열 '업체상품코드'가 ``BS-<비셀러 상품번호>`` 이면 비셀러 발주 대상.
+   2026-10-21부터 등록한 비셀러 소싱 상품(과메기·김장·수산)은 윙 판매자상품코드를 BS-<branduid>로
+   통일했다. 메이크샵 상품번호(goods_no)는 비셀러 branduid와 같다
+   (2026-10-27 확인: branduid 6120 = 양념LA한입갈비 2세트 = goods_no 6120).
+   → 카탈로그(app/data/biseller_catalog.json)에 있으면 회원등급 상품코드·상품명·판매가격까지 채우고,
+     없어도 상품번호·옵션번호(0)만으로 발주 행을 만든 뒤 needs_check로 알린다
+     (업로드 필수값은 상품번호·옵션번호·수량·주문자·수취인뿐이라 발주 자체는 된다).
+   → 앞으로 새 상품을 윙에 등록할 때 판매자상품코드를 BS-<branduid>로 넣기만 하면
+     코드 수정 없이 이 발주서에 자동으로 들어온다. 카탈로그는 상품명 표기용이다.
+2. LA한입갈비는 BS 코드 없이 등록된 옛 상품이라 종전처럼 상품명/옵션명에서 800g 세트 수를 읽는다.
+   쿠팡 '800g 4개' → '양념LA한입갈비 800g+800g+800g+800g (800G*4세트)'
 """
 
+import json
 import logging
 import re
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
+from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.styles import Font
@@ -28,7 +39,11 @@ DATA_START_ROW = 4                         # 1~3행은 헤더
 SENDER_NAME = "(주)아이티소프트"
 SENDER_PHONE = "010-5700-7756"
 
-# 비셀러 상품 카탈로그 — 세트 수 → 메이크샵 상품번호(goods_no). 업로드 필수값이라
+# 비셀러 상품 카탈로그(JSON) — 윙에 등록한 비셀러 상품의 branduid → 상품코드·상품명·플러스회원가.
+# 등록 때마다 여기에 추가한다(coupang-season-listing 스킬 마무리 단계). 서버 재시작 없이 매 호출마다 읽는다.
+CATALOG_PATH = Path(__file__).resolve().parents[1] / "data" / "biseller_catalog.json"
+
+# LA한입갈비 카탈로그 — 세트 수 → 메이크샵 상품번호(goods_no). 업로드 필수값이라
 # 여기 없는 세트 수는 발주서에 못 넣고 needs_check로 알린다.
 # 출처: "엑셀 대량 주문 양식 order_list_2026-09-15" (상품번호·회원등급코드·판매가격).
 BISELLER_CATALOG: dict[int, dict] = {
@@ -39,9 +54,13 @@ BISELLER_CATALOG: dict[int, dict] = {
 }
 OPTION_SNO = 0            # 옵션 없는 상품 — 메이크샵 양식의 옵션번호 필수값
 DELIVERY_CONDITION = "무료배송"
-PRODUCT_LABEL = "LA한입갈비(비셀러)"
+PRODUCT_LABEL = "비셀러"
+GALBI_PRODUCT_LABEL = "LA한입갈비(비셀러)"
 # 발주서 파일명에 쓰는 상품명(거래처 표기 없이 상품만)
-ORDER_PRODUCT_NAME = "LA한입갈비"
+ORDER_PRODUCT_NAME = "비셀러발주"
+GALBI_ORDER_PRODUCT_NAME = "LA한입갈비"
+
+_BS_CODE_RE = re.compile(r"^\s*BS[-_ ]?(\d{1,10})\s*$", re.IGNORECASE)
 
 
 def normalize(value) -> str:
@@ -54,6 +73,88 @@ def _compact(*values: object) -> str:
     return re.sub(r"\s+", "", " ".join(normalize(v) for v in values))
 
 
+# ── 카탈로그(JSON) ────────────────────────────────────────────────
+def load_catalog() -> dict[str, dict]:
+    """branduid(str) → {goods_no, code, name, price, wing_id, wing_name, wing_option, registered}.
+
+    파일이 없거나 깨져도 발주는 계속된다(상품번호만으로 행을 만든다).
+    """
+    try:
+        if not CATALOG_PATH.exists():
+            return {}
+        data = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("비셀러 카탈로그 읽기 실패(상품번호만으로 계속): %s", CATALOG_PATH)
+        return {}
+    items = data.get("items") if isinstance(data, dict) and "items" in data else data
+    if not isinstance(items, dict):
+        return {}
+    return {str(k).strip(): v for k, v in items.items() if isinstance(v, dict)}
+
+
+def upsert_catalog(entries: list[dict]) -> dict:
+    """카탈로그에 상품을 추가/갱신한다. 각 entry는 goods_no(필수)·code·name·price·wing_* 를 가진다.
+
+    반환: {"added": n, "updated": n, "total": n}
+    """
+    items = load_catalog()
+    added = updated = 0
+    now = datetime.now(KST).strftime("%Y-%m-%d")
+    for raw in entries or []:
+        goods_no = str(raw.get("goods_no") or raw.get("branduid") or "").strip()
+        if not goods_no.isdigit():
+            continue
+        current = dict(items.get(goods_no) or {})
+        is_new = not current
+        for key in ("code", "name", "price", "wing_id", "wing_name", "wing_option", "registered", "status"):
+            if raw.get(key) not in (None, ""):
+                current[key] = raw[key]
+        current["goods_no"] = int(goods_no)
+        current.setdefault("registered", now)
+        items[goods_no] = current
+        if is_new:
+            added += 1
+        else:
+            updated += 1
+    CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CATALOG_PATH.write_text(
+        json.dumps({"updated": now, "items": items}, ensure_ascii=False, indent=1),
+        encoding="utf-8",
+    )
+    return {"added": added, "updated": updated, "total": len(items)}
+
+
+def parse_bs_code(value: object) -> str | None:
+    """'BS-12326217' → '12326217'. 비셀러 코드가 아니면 None."""
+    match = _BS_CODE_RE.match(str(value or ""))
+    return match.group(1) if match else None
+
+
+def resolve_bs_item(branduid: str, catalog: dict[str, dict] | None = None) -> tuple[dict, bool]:
+    """branduid → 발주 행 item. (item, in_catalog)
+
+    카탈로그에 없으면 상품번호만 채운 item을 돌려준다(메이크샵 업로드는 상품번호·옵션번호가 핵심).
+    """
+    catalog = load_catalog() if catalog is None else catalog
+    found = catalog.get(branduid)
+    if found:
+        return {
+            "goods_no": int(found.get("goods_no") or branduid),
+            "code": str(found.get("code") or ""),
+            "name": str(found.get("name") or ""),
+            "price": found.get("price") if found.get("price") not in ("", None) else "",
+            "option_sno": int(found.get("option_sno") or OPTION_SNO),
+        }, True
+    return {
+        "goods_no": int(branduid),
+        "code": "",
+        "name": "",
+        "price": "",
+        "option_sno": OPTION_SNO,
+    }, False
+
+
+# ── LA한입갈비(세트 수 변환) ──────────────────────────────────────
 def is_biseller_galbi_order(product_name: object, option_text: object) -> bool:
     """비셀러 발주 대상(LA한입갈비) 여부."""
     text = _compact(product_name, option_text)
@@ -109,21 +210,62 @@ def galbi_set_count(product_name: object, option_text: object, *, promote_single
     return count
 
 
+def _galbi_item(sets: int | None) -> dict | None:
+    found = BISELLER_CATALOG.get(sets) if sets else None
+    if not found:
+        return None
+    return {**found, "option_sno": OPTION_SNO}
+
+
+# ── DeliveryList → 발주 행 ────────────────────────────────────────
+def _row_value(row, idx: int) -> str:
+    return normalize(row[idx].value) if len(row) > idx else ""
+
 
 def _entries_from_delivery(delivery_file_bytes: bytes) -> tuple[list[dict], list[str]]:
-    """쿠팡 DeliveryList → 발주 행 목록. 갈비 주문인데 개수를 못 읽으면 미매칭으로 보고."""
+    """쿠팡 DeliveryList → 발주 행 목록.
+
+    BS 코드 주문은 전부 넣고(카탈로그 밖이면 needs_check에 알림), 갈비 주문인데 개수를 못 읽으면 미매칭으로 보고.
+    """
     dl_ws = load_workbook(filename=BytesIO(delivery_file_bytes), data_only=True).active
+    catalog = load_catalog()
 
     entries: list[dict] = []
     unmatched: list[str] = []
     for row in dl_ws.iter_rows(min_row=2):
-        product_name = normalize(row[10].value) if len(row) > 10 else ""
-        option = normalize(row[11].value) if len(row) > 11 else ""
-        converted = convert_galbi_option(product_name, option)
-        recipient = normalize(row[26].value) if len(row) > 26 else ""
-        if not converted:
-            if is_biseller_galbi_order(product_name, option):
+        product_name = _row_value(row, 10)
+        option = _row_value(row, 11)
+        vendor_code = _row_value(row, 16)        # Q열 업체상품코드(윙 판매자상품코드)
+        recipient = _row_value(row, 26)
+        if not product_name and not option and not vendor_code:
+            continue
+
+        branduid = parse_bs_code(vendor_code)
+        item: dict | None = None
+        kind = ""
+        in_catalog = True
+        if branduid:
+            item, in_catalog = resolve_bs_item(branduid, catalog)
+            kind = "bs"
+            if not in_catalog:
+                unmatched.append(
+                    f"{recipient or '이름없음'}({option or product_name}) — 비셀러 카탈로그에 없는 {vendor_code}. "
+                    f"상품번호 {branduid}로 발주서에 넣었으니 업로드 전 비셀러 상품이 맞는지 확인"
+                )
+        elif is_biseller_galbi_order(product_name, option):
+            sets = galbi_set_count(product_name, option)
+            if not sets:
                 unmatched.append(f"{recipient or '이름없음'}({option or product_name}) — 수량 표기를 못 읽음")
+                continue
+            kind = "galbi"
+            item = _galbi_item(sets)
+            if not item:
+                # 카탈로그(상품번호)에 없는 세트 수는 업로드 자체가 안 되므로 발주서에서 빼고 알린다.
+                unmatched.append(
+                    f"{recipient or '이름없음'}({option or product_name}) — 비셀러 상품번호가 없는 세트 수({sets}세트)"
+                )
+                continue
+        else:
             continue
 
         qty_val = row[22].value if len(row) > 22 else ""
@@ -132,7 +274,7 @@ def _entries_from_delivery(delivery_file_bytes: bytes) -> tuple[list[dict], list
         except (ValueError, TypeError):
             qty_int = 1
 
-        zipcode = normalize(row[28].value) if len(row) > 28 else ""
+        zipcode = _row_value(row, 28)
         if zipcode:
             try:
                 zipcode = str(int(float(zipcode))).zfill(5)
@@ -141,15 +283,18 @@ def _entries_from_delivery(delivery_file_bytes: bytes) -> tuple[list[dict], list
 
         entries.append({
             "name": recipient,
-            "phone": normalize(row[27].value) if len(row) > 27 else "",
+            "phone": _row_value(row, 27),
             "zipcode": zipcode,
-            "address": normalize(row[29].value) if len(row) > 29 else "",
-            "memo": normalize(row[30].value) if len(row) > 30 else "",
-            "product": converted,
-            "sets": galbi_set_count(product_name, option),
+            "address": _row_value(row, 29),
+            "memo": _row_value(row, 30),
+            "product": item["name"] or f"{product_name} / {option}".strip(" /"),
+            "item": item,
+            "kind": kind,
+            "in_catalog": in_catalog,
             "qty": qty_int,
-            "order_no": normalize(row[2].value) if len(row) > 2 else "",
+            "order_no": _row_value(row, 2),
             "source_option": option or product_name,
+            "coupang_product": product_name,
         })
     return entries, unmatched
 
@@ -167,9 +312,13 @@ def _entries_from_winners(winners_bytes: bytes) -> tuple[list[dict], list[str]]:
     notes: list[str] = []
     for winner in winners:
         prize = normalize(winner.get("product"))
-        converted = convert_galbi_option(prize, "", promote_single=True)
-        if not converted:
+        sets = galbi_set_count(prize, "", promote_single=True)
+        item = _galbi_item(sets)
+        if not sets:
             notes.append(f"{winner.get('name') or '이름없음'}({prize or '경품미상'}) — 비셀러 발주 품목이 아님")
+            continue
+        if not item:
+            notes.append(f"{winner.get('name') or '이름없음'}({prize}) — 비셀러 상품번호가 없는 세트 수({sets}세트)")
             continue
         entries.append({
             "name": normalize(winner.get("name")),
@@ -177,11 +326,14 @@ def _entries_from_winners(winners_bytes: bytes) -> tuple[list[dict], list[str]]:
             "zipcode": "",   # 당첨자 CSV에는 우편번호가 없다
             "address": normalize(winner.get("address")),
             "memo": normalize(winner.get("memo")) or "문 앞",
-            "product": converted,
-            "sets": galbi_set_count(prize, "", promote_single=True),
+            "product": item["name"],
+            "item": item,
+            "kind": "galbi",
+            "in_catalog": True,
             "qty": 1,
             "order_no": normalize(winner.get("order_id")),
             "source_option": prize,
+            "coupang_product": prize,
         })
 
     if winners:
@@ -249,9 +401,6 @@ def process(
         needs_check.extend(notes)
         event_count = len(event_entries)
 
-    if needs_check:
-        logger.warning("비셀러 발주 확인필요 %d건: %s", len(needs_check), "; ".join(needs_check))
-
     template_path = TEMPLATE_DIR / TEMPLATE_NAME
     if not template_path.exists():
         raise FileNotFoundError(
@@ -265,21 +414,14 @@ def process(
         del tmpl_wb[name]
     ws = tmpl_wb[first_sheet_name]
 
-    # 카탈로그(상품번호)에 없는 세트 수는 업로드 자체가 안 되므로 발주서에서 빼고 알린다.
-    uploadable: list[dict] = []
-    for entry in entries:
-        if entry.get("sets") in BISELLER_CATALOG:
-            uploadable.append(entry)
-        else:
-            needs_check.append(
-                f"{entry['name'] or '이름없음'}({entry['source_option']}) — 비셀러 상품번호가 없는 세트 수({entry.get('sets')}세트)"
-            )
+    uploadable = [e for e in entries if e.get("item")]
 
     font11 = Font(size=11)
     option_totals: dict[str, dict] = {}
+    product_totals: dict[str, int] = {}
     for i, entry in enumerate(uploadable):
         out_row = DATA_START_ROW + i
-        item = BISELLER_CATALOG[entry["sets"]]
+        item = entry["item"]
         if not entry["zipcode"]:
             needs_check.append(f"{entry['name']} — 우편번호 없음(메이크샵 필수값). 업로드 전 N열에 직접 입력")
         mapping = {
@@ -287,7 +429,7 @@ def process(
             2: item["goods_no"],        # B 상품번호 (필수)
             3: item["code"],            # C 회원등급 상품코드
             4: item["name"],            # D 상품명
-            5: OPTION_SNO,              # E 옵션번호 (필수)
+            5: item["option_sno"],      # E 옵션번호 (필수)
             6: "",                      # F 옵션명
             7: DELIVERY_CONDITION,      # G 배송비조건
             8: item["price"],           # H 판매가격
@@ -309,7 +451,7 @@ def process(
             key,
             {
                 "coupang_option_keyword": key,
-                "vendor_option_name": item["name"],
+                "vendor_option_name": item["name"] or f"상품번호 {item['goods_no']}",
                 "quantity": 0,
                 "orders": [],
             },
@@ -317,17 +459,31 @@ def process(
         bucket["quantity"] += entry["qty"]
         if entry["order_no"]:
             bucket["orders"].append({"order_id": entry["order_no"], "quantity": entry["qty"]})
+        label = item["name"] or f"상품번호 {item['goods_no']}"
+        product_totals[label] = product_totals.get(label, 0) + entry["qty"]
+
+    if needs_check:
+        logger.warning("비셀러 발주 확인필요 %d건: %s", len(needs_check), "; ".join(needs_check))
+
     output = BytesIO()
     tmpl_wb.save(output)
     output.seek(0)
 
-    # 파일명은 상품명 + 날짜 (2026-09-09 사용자 요청). 예: LA한입갈비(20260909).xlsx
-    filename = f"{ORDER_PRODUCT_NAME}({datetime.now(KST).strftime('%Y%m%d')}).xlsx"
+    # 파일명은 상품명 + 날짜 (2026-09-09 사용자 요청). 갈비만 있으면 종전 그대로 LA한입갈비(20260909).xlsx,
+    # 김장·수산 등 BS 코드 상품이 섞이면 비셀러발주(20261027).xlsx
+    galbi_only = bool(uploadable) and all(e.get("kind") == "galbi" for e in uploadable)
+    product_name = GALBI_ORDER_PRODUCT_NAME if galbi_only else ORDER_PRODUCT_NAME
+    filename = f"{product_name}({datetime.now(KST).strftime('%Y%m%d')}).xlsx"
     stats = {
         "total": len(uploadable),
-        "product": PRODUCT_LABEL,
+        "product": GALBI_PRODUCT_LABEL if galbi_only else PRODUCT_LABEL,
         "options": list(option_totals.values()),
     }
+    if product_totals:
+        stats["발주 품목"] = ", ".join(f"{name} ×{qty}" for name, qty in product_totals.items())
+    missing = [e for e in uploadable if not e.get("in_catalog")]
+    if missing:
+        stats["catalog_missing"] = len(missing)
     if winners_bytes:
         stats["coupang"] = coupang_count
         stats["event"] = event_count

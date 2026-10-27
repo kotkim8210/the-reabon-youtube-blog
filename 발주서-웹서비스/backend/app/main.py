@@ -2264,6 +2264,44 @@ async def process_biseller_tracking(
         )
 
 
+class BisellerCatalogItem(BaseModel):
+    goods_no: int | str                 # 비셀러 상품번호(branduid) = 윙 판매자상품코드 BS-<goods_no>
+    code: str | None = None             # 회원등급 상품코드(PL…)
+    name: str | None = None             # 비셀러 상품명
+    price: int | None = None            # 플러스회원가(공급가)
+    wing_id: str | None = None
+    wing_name: str | None = None
+    wing_option: str | None = None
+    registered: str | None = None
+    status: str | None = None
+
+
+class BisellerCatalogUpsert(BaseModel):
+    items: list[BisellerCatalogItem]
+
+
+@app.get("/api/biseller/catalog")
+async def get_biseller_catalog(user: dict = Depends(verify_token)):
+    """비셀러 발주 카탈로그(윙 BS코드 → 비셀러 상품번호·상품명·공급가) 조회."""
+    items = biseller_order.load_catalog()
+    return {"total": len(items), "path": str(biseller_order.CATALOG_PATH), "items": items}
+
+
+@app.post("/api/biseller/catalog")
+async def upsert_biseller_catalog(payload: BisellerCatalogUpsert, user: dict = Depends(verify_token)):
+    """비셀러 상품을 윙에 새로 등록했을 때 카탈로그에 추가/갱신 (coupang-season-listing 스킬 마무리 단계).
+
+    카탈로그에 없어도 BS-<상품번호> 코드만 있으면 발주서는 만들어지지만, 상품명·공급가 표기를 위해 넣어둔다.
+    """
+    try:
+        result = biseller_order.upsert_catalog([item.model_dump() for item in payload.items])
+    except Exception as e:
+        logger.exception("비셀러 카탈로그 갱신 실패")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    logger.info(f"비셀러 카탈로그 갱신: {result}")
+    return result
+
+
 @app.post("/api/process/gaegeolmu-order")
 async def process_gaegeolmu_order(
     delivery_file: UploadFile = File(...),
