@@ -414,6 +414,12 @@ def process(
         del tmpl_wb[name]
     ws = tmpl_wb[first_sheet_name]
 
+    # 3행(읽기전용/필수 입력값 안내 라벨)은 값을 비운다 — 이 행에 글자가 있으면 비셀러(메이크샵)
+    # 대량주문 업로드가 파일을 인식하지 못한다(2026-10-27 사용자 확인: '내용 지우기' 후에만 업로드됨).
+    # 서식(회색 칸)은 그대로 두고 1·2행 헤더는 유지한다.
+    for col in range(1, max(ws.max_column, 16) + 1):
+        ws.cell(row=3, column=col).value = None
+
     uploadable = [e for e in entries if e.get("item")]
 
     font11 = Font(size=11)

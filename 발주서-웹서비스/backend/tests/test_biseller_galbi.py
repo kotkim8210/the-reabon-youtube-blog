@@ -58,7 +58,8 @@ def test_process_fills_template():
     ws = load_workbook(BytesIO(out)).active
     assert ws.title == "발주용 양식"
     assert [ws.cell(1, c).value for c in (1, 2, 5, 9, 12, 14)] == ["순서", "상품번호", "옵션번호", "수량", "수취인 성명", "우편번호"]
-    assert ws.cell(2, 2).value == "goods_no" and ws.cell(3, 2).value == "필수 입력값"
+    # 3행 안내 라벨은 비워서 낸다(2026-10-27: 글자가 있으면 비셀러 업로드가 파일을 인식 못 함)
+    assert ws.cell(2, 2).value == "goods_no" and ws.cell(3, 2).value in (None, "")
     # 4행: 4세트 → 상품번호 6121
     assert ws.cell(4, 1).value == 1
     assert ws.cell(4, 2).value == 6121 and ws.cell(4, 3).value == "PL0006033"

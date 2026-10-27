@@ -45,6 +45,9 @@ def test_bs_code_order_uses_branduid_as_goods_no():
     assert stats["total"] == 1
     assert filename.startswith("비셀러발주(") and filename.endswith(").xlsx")
     ws = load_workbook(BytesIO(out)).active
+    # 1·2행 헤더 유지, 3행(읽기전용/필수 입력값 라벨)은 비어 있어야 비셀러 업로드가 인식한다
+    assert ws.cell(1, 2).value == "상품번호" and ws.cell(2, 2).value == "goods_no"
+    assert all(ws.cell(3, c).value in (None, "") for c in range(1, 17))
     assert ws.cell(4, 2).value == 12326217
     assert ws.cell(4, 5).value == 0
     assert ws.cell(4, 9).value == 1
