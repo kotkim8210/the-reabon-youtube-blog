@@ -64,12 +64,12 @@ def test_process_fills_template():
     assert ws.cell(4, 1).value == 1
     assert ws.cell(4, 2).value == 6121 and ws.cell(4, 3).value == "PL0006033"
     assert ws.cell(4, 4).value == "양념LA한입갈비 800g+800g+800g+800g (800G*4세트)"
-    assert ws.cell(4, 5).value == 0 and ws.cell(4, 7).value == "무료배송" and ws.cell(4, 8).value == 37800
+    assert ws.cell(4, 5).value == 0 and ws.cell(4, 7).value == "무료배송" and ws.cell(4, 8).value == 38750
     assert ws.cell(4, 9).value == 1
     assert ws.cell(4, 10).value == "(주)아이티소프트" and ws.cell(4, 11).value == "010-5700-7756"
     assert ws.cell(4, 12).value == "김철수" and ws.cell(4, 14).value == "06236"
     # 5행: 2세트 → 상품번호 6120, 수량 2, 배송메시지
-    assert ws.cell(5, 2).value == 6120 and ws.cell(5, 8).value == 20480
+    assert ws.cell(5, 2).value == 6120 and ws.cell(5, 8).value == 21210
     assert ws.cell(5, 9).value == 2 and ws.cell(5, 12).value == "이영희"
     assert ws.cell(5, 16).value == "부재시 경비실"
 

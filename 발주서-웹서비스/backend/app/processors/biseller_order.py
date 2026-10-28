@@ -47,9 +47,10 @@ CATALOG_PATH = Path(__file__).resolve().parents[1] / "data" / "biseller_catalog.
 # 여기 없는 세트 수는 발주서에 못 넣고 needs_check로 알린다.
 # 출처: "엑셀 대량 주문 양식 order_list_2026-09-15" (상품번호·회원등급코드·판매가격).
 BISELLER_CATALOG: dict[int, dict] = {
-    2: {"goods_no": 6120, "code": "PL0006032", "price": 20480,
+    # 판매가격(H열, 읽기전용)은 2026-10-28 비셀러 공식 주문목록 기준으로 갱신(20,480→21,210 / 37,800→38,750)
+    2: {"goods_no": 6120, "code": "PL0006032", "price": 21210,
         "name": "양념LA한입갈비 800g+800g (800G*2세트)"},
-    4: {"goods_no": 6121, "code": "PL0006033", "price": 37800,
+    4: {"goods_no": 6121, "code": "PL0006033", "price": 38750,
         "name": "양념LA한입갈비 800g+800g+800g+800g (800G*4세트)"},
 }
 OPTION_SNO = 0            # 옵션 없는 상품 — 메이크샵 양식의 옵션번호 필수값
