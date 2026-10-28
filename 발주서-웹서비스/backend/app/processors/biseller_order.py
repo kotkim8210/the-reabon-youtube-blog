@@ -20,6 +20,7 @@
 import json
 import logging
 import re
+import zipfile
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -72,6 +73,97 @@ def normalize(value) -> str:
 
 def _compact(*values: object) -> str:
     return re.sub(r"\s+", "", " ".join(normalize(v) for v in values))
+
+
+# ── 비셀러 업로드 호환: 인라인 문자열 → 공용 문자열표(sharedStrings) ──────────
+# openpyxl 3.1은 글자 칸을 t="inlineStr"(칸 안에 직접 기록)로 저장하고 xl/sharedStrings.xml을 만들지 않는다.
+# 비셀러(메이크샵) 발주서 업로드는 공용 문자열표만 읽어서, 이런 파일은 1행 제목을 못 찾고
+# "상품번호 항목이 없습니다"로 거부한다(2026-10-28 확인). 비셀러 공식 양식·엑셀 저장본은 모두 sharedStrings 사용.
+# 사용자가 엑셀에서 '3행 내용 지우기' 후 저장하면 올라가던 것도, 엑셀이 다시 저장하며 이 구조로 바꿔줬기 때문.
+_SST_CT = "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"
+_SST_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"
+_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_ATTRS = r'(?:\s+[\w:]+="[^"]*")*'
+_INLINE_CELL_RE = re.compile(
+    r'<c(?P<a1>' + _ATTRS + r'?)\s+t="inlineStr"(?P<a2>' + _ATTRS + r')\s*(?:/>|>(?P<body>.*?)</c>)',
+    re.S,
+)
+_IS_RE = re.compile(r"<is>(?P<inner>.*?)</is>", re.S)
+_EMPTY_NUM_CELL_RE = re.compile(r'<c(?P<a1>' + _ATTRS + r'?)\s+t="n"(?P<a2>' + _ATTRS + r')\s*/>')
+
+
+def to_shared_strings(xlsx_bytes: bytes) -> bytes:
+    """openpyxl이 만든 xlsx의 인라인 문자열을 엑셀과 같은 공용 문자열표 구조로 바꾼다.
+
+    값·서식·열 너비는 그대로 두고 문자 저장 방식만 바꾼다. 이미 sharedStrings가 있으면 그대로 반환.
+    """
+    zin = zipfile.ZipFile(BytesIO(xlsx_bytes))
+    names = zin.namelist()
+    if "xl/sharedStrings.xml" in names:
+        return xlsx_bytes
+
+    index: dict[str, int] = {}
+    items: list[str] = []
+    total = 0
+
+    def _cell(match: re.Match) -> str:
+        nonlocal total
+        attrs = (match.group("a1") or "") + (match.group("a2") or "")
+        inner_match = _IS_RE.search(match.group("body") or "")
+        inner = inner_match.group("inner") if inner_match else ""
+        if not inner or re.fullmatch(r"<t(?:\s[^>]*)?\s*/>|<t(?:\s[^>]*)?></t>", inner):
+            return f"<c{attrs}/>"          # 빈 글자 칸 → 빈 칸
+        idx = index.get(inner)
+        if idx is None:
+            idx = len(items)
+            index[inner] = idx
+            items.append(inner)
+        total += 1
+        return f'<c{attrs} t="s"><v>{idx}</v></c>'
+
+    def _empty_num(match: re.Match) -> str:
+        return f"<c{(match.group('a1') or '') + (match.group('a2') or '')}/>"
+
+    sheets: dict[str, bytes] = {}
+    for name in names:
+        if name.startswith("xl/worksheets/") and name.endswith(".xml"):
+            text = zin.read(name).decode("utf-8")
+            text = _INLINE_CELL_RE.sub(_cell, text)
+            text = _EMPTY_NUM_CELL_RE.sub(_empty_num, text)
+            sheets[name] = text.encode("utf-8")
+
+    out = BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = sheets.get(info.filename) or zin.read(info.filename)
+            if info.filename == "[Content_Types].xml":
+                text = data.decode("utf-8")
+                if "/xl/sharedStrings.xml" not in text:
+                    text = text.replace(
+                        "</Types>",
+                        f'<Override PartName="/xl/sharedStrings.xml" ContentType="{_SST_CT}" /></Types>',
+                    )
+                data = text.encode("utf-8")
+            elif info.filename == "xl/_rels/workbook.xml.rels":
+                text = data.decode("utf-8")
+                if "sharedStrings.xml" not in text:
+                    rel_id = "rIdSst1"
+                    while f'Id="{rel_id}"' in text:
+                        rel_id += "x"
+                    text = text.replace(
+                        "</Relationships>",
+                        f'<Relationship Type="{_SST_REL}" Target="sharedStrings.xml" Id="{rel_id}" /></Relationships>',
+                    )
+                data = text.encode("utf-8")
+            zout.writestr(info, data)
+        sst = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            f'<sst xmlns="{_MAIN_NS}" count="{total}" uniqueCount="{len(items)}">'
+            + "".join(f"<si>{inner}</si>" for inner in items)
+            + "</sst>"
+        )
+        zout.writestr("xl/sharedStrings.xml", sst.encode("utf-8"))
+    return out.getvalue()
 
 
 # ── 카탈로그(JSON) ────────────────────────────────────────────────
@@ -474,7 +566,8 @@ def process(
 
     output = BytesIO()
     tmpl_wb.save(output)
-    output.seek(0)
+    # 비셀러 업로드는 공용 문자열표만 읽는다 — openpyxl 인라인 문자열을 엑셀과 같은 구조로 바꿔서 낸다(2026-10-28)
+    xlsx_bytes = to_shared_strings(output.getvalue())
 
     # 파일명은 상품명 + 날짜 (2026-09-09 사용자 요청). 갈비만 있으면 종전 그대로 LA한입갈비(20260909).xlsx,
     # 김장·수산 등 BS 코드 상품이 섞이면 비셀러발주(20261027).xlsx
@@ -499,4 +592,4 @@ def process(
     if needs_check:
         stats["needs_check"] = needs_check
 
-    return output.read(), filename, stats
+    return xlsx_bytes, filename, stats

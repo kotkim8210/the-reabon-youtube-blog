@@ -95,3 +95,47 @@ def test_upsert_catalog_roundtrip(tmp_path, monkeypatch):
     assert biseller_order.upsert_catalog([{"goods_no": 777, "price": 2000}])["updated"] == 1
     item, in_catalog = biseller_order.resolve_bs_item("777")
     assert in_catalog and item["price"] == 2000 and item["code"] == "PL1"
+
+
+def test_output_uses_shared_strings_for_beseller_upload():
+    """비셀러 업로드는 공용 문자열표(sharedStrings)만 읽는다 — 인라인 문자열이면 '상품번호 항목이 없습니다'(2026-10-28)."""
+    import re
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    payload = _delivery([
+        {"product": "백골뱅이탕 밀키트", "option": "1개 대 1팩", "code": "BS-12326217", "name": "강현진"},
+        {"product": "청어 과메기", "option": "1개 4미 8쪽 야채 혼술세트", "code": "BS-2174", "name": "권민찬"},
+    ])
+    out, _filename, stats = biseller_order.process(payload)
+    assert stats["total"] == 2
+    z = zipfile.ZipFile(BytesIO(out))
+    assert "xl/sharedStrings.xml" in z.namelist()
+    sheet = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "inlineStr" not in sheet
+    assert "/xl/sharedStrings.xml" in z.read("[Content_Types].xml").decode("utf-8")
+    assert "sharedStrings.xml" in z.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+
+    # 공용 문자열표만 읽는 단순 리더로 1행 제목·4행 상품번호를 읽을 수 있어야 한다
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    sst = ["".join(t.text or "" for t in si.iter(ns + "t"))
+           for si in ET.fromstring(z.read("xl/sharedStrings.xml")).findall(ns + "si")]
+    cells = {}
+    for c in ET.fromstring(sheet.encode("utf-8")).iter(ns + "c"):
+        v = c.find(ns + "v")
+        if v is not None:
+            cells[c.get("r")] = sst[int(v.text)] if c.get("t") == "s" else v.text
+    assert cells["B1"] == "상품번호" and cells["B2"] == "goods_no"
+    assert cells["B4"] == "12326217" and cells["B5"] == "2174"
+    assert not any(re.fullmatch(r"[A-P]3", ref) for ref in cells)   # 3행은 비어 있어야 한다
+
+    # openpyxl로 읽어도 값이 그대로여야 한다(이메일 첨부·운송장 입력 등 내부 처리 호환)
+    ws = load_workbook(BytesIO(out)).active
+    assert ws.cell(1, 2).value == "상품번호" and ws.cell(4, 2).value == 12326217
+    assert ws.cell(4, 12).value == "강현진" and ws.cell(5, 12).value == "권민찬"
+
+
+def test_to_shared_strings_is_idempotent():
+    payload = _delivery([{"product": "청어 과메기", "option": "4미", "code": "BS-2174", "name": "권민찬"}])
+    out, _fn, _stats = biseller_order.process(payload)
+    assert biseller_order.to_shared_strings(out) == out
