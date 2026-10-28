@@ -90,6 +90,25 @@ _INLINE_CELL_RE = re.compile(
 )
 _IS_RE = re.compile(r"<is>(?P<inner>.*?)</is>", re.S)
 _EMPTY_NUM_CELL_RE = re.compile(r'<c(?P<a1>' + _ATTRS + r'?)\s+t="n"(?P<a2>' + _ATTRS + r')\s*/>')
+_NCR_RE = re.compile(r"&#(x[0-9a-fA-F]+|[0-9]+);")
+
+
+def _decode_ncr(text: str) -> str:
+    """&#49345; 같은 숫자 문자 참조를 엑셀처럼 원래 글자로 푼다(&·<·>·따옴표·제어문자는 참조 그대로 둔다).
+
+    openpyxl은 PC에 lxml이 설치돼 있으면 한글을 &#…; 로 저장한다. 지금 PC는 원문 그대로 저장하지만,
+    나중에 다른 기능 때문에 lxml이 깔려도 비셀러로 나가는 파일 모양이 엑셀과 달라지지 않게 막아 둔다(2026-10-28).
+    """
+
+    def _sub(match: re.Match) -> str:
+        code = match.group(1)
+        cp = int(code[1:], 16) if code.startswith("x") else int(code)
+        valid = cp in (0x09, 0x0A) or 0x20 <= cp <= 0xD7FF or 0xE000 <= cp <= 0xFFFD or 0x10000 <= cp <= 0x10FFFF
+        if not valid or chr(cp) in "&<>\"'":
+            return match.group(0)
+        return chr(cp)
+
+    return _NCR_RE.sub(_sub, text)
 
 
 def to_shared_strings(xlsx_bytes: bytes) -> bytes:
@@ -110,7 +129,7 @@ def to_shared_strings(xlsx_bytes: bytes) -> bytes:
         nonlocal total
         attrs = (match.group("a1") or "") + (match.group("a2") or "")
         inner_match = _IS_RE.search(match.group("body") or "")
-        inner = inner_match.group("inner") if inner_match else ""
+        inner = _decode_ncr(inner_match.group("inner")) if inner_match else ""
         if not inner or re.fullmatch(r"<t(?:\s[^>]*)?\s*/>|<t(?:\s[^>]*)?></t>", inner):
             return f"<c{attrs}/>"          # 빈 글자 칸 → 빈 칸
         idx = index.get(inner)

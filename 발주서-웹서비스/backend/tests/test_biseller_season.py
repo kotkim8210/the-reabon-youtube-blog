@@ -139,3 +139,33 @@ def test_to_shared_strings_is_idempotent():
     payload = _delivery([{"product": "청어 과메기", "option": "4미", "code": "BS-2174", "name": "권민찬"}])
     out, _fn, _stats = biseller_order.process(payload)
     assert biseller_order.to_shared_strings(out) == out
+
+
+def test_to_shared_strings_writes_raw_korean_like_excel():
+    """lxml이 깔린 PC의 openpyxl은 한글을 &#…; 로 쓴다 → 엑셀처럼 원래 글자로 풀어 공용 문자열표에 넣는다(2026-10-28)."""
+    import zipfile
+
+    wb = Workbook()
+    ws = wb.active
+    ws["A1"] = "상품번호"
+    ws["B1"] = "A&B <x>"
+    buf = BytesIO()
+    wb.save(buf)
+    zin = zipfile.ZipFile(BytesIO(buf.getvalue()))
+    src = BytesIO()
+    with zipfile.ZipFile(src, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == "xl/worksheets/sheet1.xml":
+                ncr = "".join(f"&#{ord(ch)};" for ch in "상품번호")
+                data = data.decode("utf-8").replace("상품번호", ncr).encode("utf-8")
+            zout.writestr(info, data)
+    sheet_src = zipfile.ZipFile(BytesIO(src.getvalue())).read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "&#49345;" in sheet_src                     # 입력은 숫자 참조 상태
+
+    out = biseller_order.to_shared_strings(src.getvalue())
+    sst = zipfile.ZipFile(BytesIO(out)).read("xl/sharedStrings.xml").decode("utf-8")
+    assert "<t>상품번호</t>" in sst and "&#" not in sst
+    assert "A&amp;B &lt;x&gt;" in sst                  # 특수문자 이스케이프는 유지
+    ws2 = load_workbook(BytesIO(out)).active
+    assert ws2["A1"].value == "상품번호" and ws2["B1"].value == "A&B <x>"
