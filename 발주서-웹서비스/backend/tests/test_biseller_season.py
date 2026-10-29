@@ -141,6 +141,24 @@ def test_to_shared_strings_is_idempotent():
     assert biseller_order.to_shared_strings(out) == out
 
 
+def test_output_uses_relative_paths_like_excel():
+    """비셀러 업로드는 openpyxl 절대경로(/xl/worksheets/sheet1.xml)를 못 따라간다 → 상대경로로(2026-10-29 실제 업로드로 확인)."""
+    import zipfile
+
+    payload = _delivery([{"product": "청어 과메기", "option": "4미", "code": "BS-2174", "name": "권민찬"}])
+    out, _fn, _stats = biseller_order.process(payload)
+    z = zipfile.ZipFile(BytesIO(out))
+    names = [i.filename for i in z.infolist()]
+    assert names[0] == "[Content_Types].xml"
+    for name in names:
+        if name.endswith(".rels"):
+            assert 'Target="/' not in z.read(name).decode("utf-8"), name
+    rels = z.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+    assert 'Target="worksheets/sheet1.xml"' in rels and 'Target="sharedStrings.xml"' in rels
+    ws = load_workbook(BytesIO(out)).active
+    assert ws.cell(1, 2).value == "상품번호" and ws.cell(4, 2).value == 2174
+
+
 def test_to_shared_strings_writes_raw_korean_like_excel():
     """lxml이 깔린 PC의 openpyxl은 한글을 &#…; 로 쓴다 → 엑셀처럼 원래 글자로 풀어 공용 문자열표에 넣는다(2026-10-28)."""
     import zipfile

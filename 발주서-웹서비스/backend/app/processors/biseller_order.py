@@ -19,6 +19,7 @@
 
 import json
 import logging
+import posixpath
 import re
 import zipfile
 from datetime import datetime, timezone, timedelta
@@ -182,6 +183,45 @@ def to_shared_strings(xlsx_bytes: bytes) -> bytes:
             + "</sst>"
         )
         zout.writestr("xl/sharedStrings.xml", sst.encode("utf-8"))
+    return out.getvalue()
+
+
+# ── 비셀러 업로드 호환 2: 파일 안 경로 표기를 엑셀 방식(상대경로)으로 ─────────────
+# openpyxl은 xl/_rels/workbook.xml.rels에 시트 위치를 "/xl/worksheets/sheet1.xml"(절대경로)로 쓴다.
+# 비셀러 업로드는 이 경로를 못 따라가 시트를 빈 것으로 읽고 "상품번호 항목이 없습니다"로 거부한다.
+# 2026-10-29 비셀러에 직접 올려 확인: 같은 파일에서 경로(+zip 순서)만 엑셀식으로 바꾸자 제목 검사 통과.
+# 사용자가 엑셀로 열어 저장하면 올라가던 것도 엑셀이 이 경로를 상대경로로 다시 써 줬기 때문.
+_REL_TARGET_RE = re.compile(r'(<Relationship\b[^>]*?\bTarget=")(/[^"]*)(")')
+_EXCEL_ZIP_ORDER = ("[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/_rels/workbook.xml.rels")
+_EXCEL_ZIP_PREFIXES = ("xl/worksheets/", "xl/theme/", "xl/styles.xml", "xl/sharedStrings.xml", "docProps/")
+
+
+def _zip_rank(name: str) -> tuple[int, str]:
+    if name in _EXCEL_ZIP_ORDER:
+        return _EXCEL_ZIP_ORDER.index(name), name
+    for i, prefix in enumerate(_EXCEL_ZIP_PREFIXES, start=len(_EXCEL_ZIP_ORDER)):
+        if name.startswith(prefix):
+            return i, name
+    return 99, name
+
+
+def excel_like_package(xlsx_bytes: bytes) -> bytes:
+    """관계(.rels) 파일의 절대경로 Target을 엑셀처럼 상대경로로 바꾸고, zip 안 순서도 엑셀과 같게 맞춘다."""
+    zin = zipfile.ZipFile(BytesIO(xlsx_bytes))
+    out = BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in sorted(zin.infolist(), key=lambda i: _zip_rank(i.filename)):
+            data = zin.read(info.filename)
+            if info.filename.endswith(".rels"):
+                base = posixpath.dirname(posixpath.dirname(info.filename))   # xl/_rels/workbook.xml.rels → xl
+
+                def _relative(match: re.Match, base: str = base) -> str:
+                    return match.group(1) + posixpath.relpath(match.group(2).lstrip("/"), base or ".") + match.group(3)
+
+                data = _REL_TARGET_RE.sub(_relative, data.decode("utf-8")).encode("utf-8")
+            entry = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+            entry.compress_type = zipfile.ZIP_DEFLATED
+            zout.writestr(entry, data)
     return out.getvalue()
 
 
@@ -586,7 +626,7 @@ def process(
     output = BytesIO()
     tmpl_wb.save(output)
     # 비셀러 업로드는 공용 문자열표만 읽는다 — openpyxl 인라인 문자열을 엑셀과 같은 구조로 바꿔서 낸다(2026-10-28)
-    xlsx_bytes = to_shared_strings(output.getvalue())
+    xlsx_bytes = excel_like_package(to_shared_strings(output.getvalue()))  # + 경로 상대화(2026-10-29, 실제 업로드로 확인)
 
     # 파일명은 상품명 + 날짜 (2026-09-09 사용자 요청). 갈비만 있으면 종전 그대로 LA한입갈비(20260909).xlsx,
     # 김장·수산 등 BS 코드 상품이 섞이면 비셀러발주(20261027).xlsx
