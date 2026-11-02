@@ -46,30 +46,120 @@ def _is_hwanggeum_row(option_keys: set[str]) -> bool:
     return any(key.startswith("hwanggeum:") or "황금향" in key for key in option_keys)
 
 
-def _families(keys) -> set[str]:
-    """의미키의 상품군(접두어) — 'potato:홍감자중3kg' → 'potato'. 원문 키는 접두어가 없어 빠진다."""
-    return {k.split(":", 1)[0] for k in (keys or ()) if re.match(r"^[a-z][a-z-]*:", k)}
-
-
-def _same_family(a, b) -> bool:
-    """같은 상품군인지. 거래처가 등급을 자기 이름으로 회신해(홍감자 '대_3KG' = 우리 '중 3kg')
-    등급·kg 키가 안 맞아도 같은 상품이면 '다른 상품 행'으로 보면 안 된다(2026-10-16 리뷰)."""
-    return bool(_families(a) & _families(b))
-
-
 def _phone_digits(value: object) -> str:
     """전화번호를 숫자만으로 정규화 — '010-1234-5678'과 '01012345678'을 동일 취급."""
     return re.sub(r"\D", "", str(value or ""))
 
 
-def _source_option_keys(row) -> set[str]:
+def _source_option_values(row) -> list:
     # 거래처 회신 파일마다 옵션 열이 조금씩 달라서, 이름/전화/주소/송장 열을 제외한
     # 자주 쓰는 상품/옵션 후보 열만 모아 동명이인 보호용으로 비교한다.
-    values = []
-    for index in (4, 5, 6, 7, 8, 11, 13, 15):
-        if len(row) > index:
-            values.append(row[index].value)
+    return [row[index].value for index in (4, 5, 6, 7, 8, 11, 13, 15) if len(row) > index]
+
+
+def _source_option_keys(row) -> set[str]:
+    values = _source_option_values(row)
     return option_key_set(*values) | _semantic_option_keys(*values)
+
+
+def _product_families(*values: object) -> set[str]:
+    """품목(상품군)만 본다 — 의미키와 달리 등급·kg를 못 읽어도 상품명 낱말로 정한다.
+    같은 사람이 다른 거래처 상품(쥬얼리 햇밤 등)도 주문하면 그 줄은 이 회신의 품목이 아니라 송장을 받으면 안 된다
+    (2026-11-02 강본아 햇밤 줄이 주소만 보고 황금향 송장을 가져가 나머지가 한 칸씩 밀린 사고).
+    새 제주다팜 품목을 넣으면 _semantic_option_keys와 함께 여기에도 낱말을 추가한다."""
+    text = normalize(" ".join(str(value) for value in values if value not in (None, "")))
+    families: set[str] = set()
+    if "콜라비" in text:
+        families.add("kolrabi")
+    if "참외" in text and any(token in text for token in ("알뜰", "혼합", "랜덤")):
+        families.add("chamoe-altteul")
+    if "옥수수" in text:
+        families.add("corn")
+    if "밤호박" in text:
+        families.add("bamhobak")
+    if "홍감자" in text:
+        families.add("potato")
+    if "백도" in text or "딱딱이" in text:
+        families.add("baekdo")
+    if "감홍" in text:  # '감홍사과'에 '홍사과'가 들어 있어 홍로보다 먼저·배타
+        families.add("gamhong")
+    elif "홍로" in text or "홍사과" in text or "가을햇사과" in text:
+        families.add("hongro")
+    if "배선물세트" in text:
+        families.add("pear")
+    if "시나노" in text:
+        families.add("shinano")
+    if "황금향" in text:
+        families.add("hwanggeum")
+    if "태추" in text:
+        families.add("taechu")
+    if "청사과" in text or "아오리" in text:
+        families.add("apple")
+    return families
+
+
+def _phone_eq(row: dict, entry: dict) -> bool:
+    return bool(row["phone"]) and row["phone"] == entry["phone"]
+
+
+def _address_eq(row: dict, entry: dict) -> bool:
+    return bool(row["address"]) and row["address"] == entry["address"]
+
+
+def _options_eq(row: dict, entry: dict) -> bool:
+    return options_match(entry["option_keys"], row["option_keys"])
+
+
+def _family_eq(row: dict, entry: dict) -> bool:
+    """같은 품목인지. 거래처가 등급을 자기 이름으로 회신해(홍감자 '대_3KG' = 우리 '중 3kg')
+    등급·kg 키가 안 맞아도 같은 상품이면 '다른 상품 행'으로 보면 안 된다(2026-10-16 리뷰)."""
+    return bool(row["families"] & entry["families"])
+
+
+def _compatible(row: dict, entry: dict) -> bool:
+    """회신 송장의 품목을 알면 같은 품목 줄에만 넣는다(품목을 모르는 회신은 종전처럼 허용)."""
+    return not entry["families"] or _family_eq(row, entry)
+
+
+def _match_tier(rows: list[dict], used: set[int], allowed) -> None:
+    """한 단계 조건(allowed)으로 최대한 많이 짝짓는다(증가 경로). 앞 줄이 여러 송장에 맞으면
+    뒤 줄에만 맞는 송장을 양보해, 먼저 나온 줄이 남의 송장을 가로채지 않는다."""
+    owner: dict[int, tuple[dict, dict]] = {}  # id(회신 송장) → (DeliveryList 줄, 회신 송장)
+
+    def assign(row: dict, seen: set[int]) -> bool:
+        options = [entry for entry in row["candidates"] if id(entry) not in used and allowed(row, entry)]
+        for entry in options:  # 빈 송장부터 회신 순서대로(같은 상품 여러 건은 줄 순서 = 회신 순서)
+            if id(entry) not in owner:
+                owner[id(entry)] = (row, entry)
+                return True
+        for entry in options:  # 빈 게 없을 때만 앞 줄을 다른 송장으로 옮길 수 있는지 본다
+            key = id(entry)
+            if key in seen:
+                continue
+            seen.add(key)
+            if assign(owner[key][0], seen):
+                owner[key] = (row, entry)
+                return True
+        return False
+
+    for row in rows:
+        if row["matched"] is None:
+            assign(row, set())
+    for key, (row, entry) in owner.items():
+        row["matched"] = entry
+        used.add(key)
+
+
+def _skip_reason(row: dict, used: set[int]) -> str:
+    candidates = row["candidates"]
+    if not candidates:
+        return "회신에 없음"
+    same_product = [entry for entry in candidates if _compatible(row, entry)]
+    if not same_product:
+        return "같은 사람의 다른 상품 행 — 이 회신에 없음"
+    if all(id(entry) in used for entry in same_product):
+        return "회신 운송장 수 부족"
+    return "동명이인 구분 불가 — 수동 확인"
 
 
 def _semantic_option_keys(*values: object) -> set[str]:
@@ -182,7 +272,7 @@ def process(
     ol_wb = load_workbook(filename=BytesIO(orderlist_bytes), data_only=True)
     ol_ws = ol_wb.active
 
-    # Build list of order entries: (name, phone, address, tracking, option_keys)
+    # Build list of order entries: (name, phone, address, tracking, option_keys, families)
     order_entries = []
     for row in ol_ws.iter_rows(min_row=2):
         name = normalize(row[10].value) if len(row) > 10 else ""     # K = index 10
@@ -194,11 +284,12 @@ def process(
         if name and tracking:
             order_entries.append({
                 "name": name,
-                "phone": phone,
+                "phone": _phone_digits(phone),
                 "address": address,
                 "courier": courier,
                 "tracking": tracking,
                 "option_keys": _source_option_keys(row),
+                "families": _product_families(*_source_option_values(row)),
             })
 
     # Load DeliveryList
@@ -221,131 +312,95 @@ def process(
     for entry in order_entries:
         order_by_name[entry["name"]].append(entry)
 
-    # Track which order entries have been used
-    used_entries = set()
-    delivery_name_counts = name_counts(
-        normalize(dl_ws.cell(row=row_idx, column=27).value)
-        for row_idx in range(2, dl_ws.max_row + 1)
-    )
-
+    rows = []
     for row_idx in range(2, dl_ws.max_row + 1):
-        # Column E = 5 (tracking number destination)
-        e_cell = dl_ws.cell(row=row_idx, column=5)
+        e_value = dl_ws.cell(row=row_idx, column=5).value   # E 운송장 — 빈 칸만 채운다
+        product = dl_ws.cell(row=row_idx, column=11).value  # K 상품명
+        option = dl_ws.cell(row=row_idx, column=12).value   # L 옵션명
+        rows.append({
+            "row_idx": row_idx,
+            "has_tracking": e_value is not None and normalize(e_value) != "",
+            "name": normalize(dl_ws.cell(row=row_idx, column=27).value),       # AA
+            "phone": _phone_digits(dl_ws.cell(row=row_idx, column=28).value),  # AB (숫자만 비교)
+            "address": normalize(dl_ws.cell(row=row_idx, column=30).value),    # AD
+            "option_keys": _delivery_option_keys(product, option),
+            "families": _product_families(product, option),
+        })
+    delivery_name_counts = name_counts(row["name"] for row in rows)
 
-        # Only fill empty E cells
-        if e_cell.value is not None and normalize(e_cell.value) != "":
-            continue
+    # 회신 송장의 전화가 DeliveryList 어느 줄(같은 이름)과 맞으면 그 주문 몫 — 약한 신호로 다른 줄에 주지 않는다.
+    dl_phones_by_name = defaultdict(set)
+    for row in rows:
+        if row["phone"]:
+            dl_phones_by_name[row["name"]].add(row["phone"])
+    for entry in order_entries:
+        entry["claimed"] = bool(entry["phone"]) and entry["phone"] in dl_phones_by_name.get(entry["name"], ())
 
-        # Get delivery list data
-        dl_name = normalize(dl_ws.cell(row=row_idx, column=27).value)     # AA
-        dl_phone = normalize(dl_ws.cell(row=row_idx, column=28).value)    # AB
-        dl_address = normalize(dl_ws.cell(row=row_idx, column=30).value)  # AD
-        dl_option_keys = _delivery_option_keys(
-            dl_ws.cell(row=row_idx, column=11).value,  # K 상품명
-            dl_ws.cell(row=row_idx, column=12).value,  # L 옵션명
-        )
-
-        if not dl_name:
-            continue
-
-        candidates = order_by_name.get(dl_name, [])
-
+    targets = [row for row in rows if row["name"] and not row["has_tracking"]]
+    for row in targets:
+        candidates = order_by_name.get(row["name"], [])
         # 폴백: 이름 잘림(쿠팡 열폭 제한 등) 대응 - 접두어 매칭
         if not candidates:
             MIN_PREFIX_LEN = 8
             for order_name, entries in order_by_name.items():
                 if len(order_name) < MIN_PREFIX_LEN:
                     continue
-                if dl_name.startswith(order_name) or order_name.startswith(dl_name):
+                if row["name"].startswith(order_name) or order_name.startswith(row["name"]):
                     candidates = entries
                     break
+        row["candidates"] = candidates
+        row["matched"] = None
 
-        if not candidates:
-            skipped += 1
-            skip_details.append(f"{dl_name}(회신에 없음)")
-            continue
+    def needs_guard(row: dict) -> bool:
+        return requires_option_guard(row["name"], delivery_name_counts, len(row["candidates"]))
 
-        # Filter out already used entries
-        available = [
-            (i, c) for i, c in enumerate(candidates)
-            if id(c) not in used_entries
-        ]
-        if not available:
-            skipped += 1
-            skip_details.append(f"{dl_name}(회신 운송장 수 부족)")
-            continue
+    def phone_guard(row: dict, entry: dict) -> bool:
+        # 같은 이름이 여러 줄이고 양쪽 다 옵션 정보가 있는데 하나도 안 맞으면 전화가 같아도 다른 상품
+        # (2026-10-16 같은 주문번호 황금향+시나노골드). 회신에 옵션 정보가 없으면 종전처럼 전화로 매칭
+        # (2026-07-14 동일인 다건이 옵션 가드에 걸려 전부 skip되던 사고 보호).
+        return not (row["option_keys"] and entry["option_keys"]
+                    and delivery_name_counts.get(row["name"], 0) > 1
+                    and not _options_eq(row, entry) and not _family_eq(row, entry))
 
-        matched = None
+    # 줄마다 바로 배정하면 앞 줄이 약한 신호(주소)로 남의 송장을 가져가 뒤 줄이 한 칸씩 밀린다
+    # (2026-11-02 강본아: 햇밤 줄이 황금향 송장 → 황금향은 감홍, 감홍은 시나노 송장, 시나노는 빈칸).
+    # 그래서 강한 신호부터 단계별로 전체 줄을 짝짓고, 다음 단계는 남은 줄·남은 송장만 본다.
+    tiers = [
+        # 1) 전화(안심번호, 숫자만) 일치 — 주문마다 번호가 달라 가장 강한 신호.
+        #    같은 주소로 여러 상품을 받으면 주소로는 못 가르니 옵션 > 상품군 > 주소 순.
+        lambda r, e: _phone_eq(r, e) and _options_eq(r, e) and _address_eq(r, e),
+        lambda r, e: _phone_eq(r, e) and _options_eq(r, e),
+        lambda r, e: _phone_eq(r, e) and _family_eq(r, e),  # 홍감자 '대_3KG'처럼 거래처 등급명이 달라도 같은 상품
+        lambda r, e: _phone_eq(r, e) and _compatible(r, e) and phone_guard(r, e) and _address_eq(r, e),
+        lambda r, e: _phone_eq(r, e) and _compatible(r, e) and phone_guard(r, e),
+        # 2) 전화로 못 가른 줄 — 다른 줄 전화와 맞는 송장(claimed)은 건드리지 않는다.
+        lambda r, e: not e["claimed"] and _compatible(r, e) and _options_eq(r, e) and _address_eq(r, e),
+        lambda r, e: not e["claimed"] and _compatible(r, e) and _options_eq(r, e),
+        lambda r, e: not e["claimed"] and _compatible(r, e) and not needs_guard(r),
+        # 옵션으로도 못 가른 동명이인 → 같은 품목·같은 주소일 때만, 아니면 오배정 위험이라 미입력+표시
+        lambda r, e: not e["claimed"] and _compatible(r, e) and needs_guard(r) and _address_eq(r, e),
+    ]
+    used_entries: set[int] = set()
+    for allowed in tiers:
+        _match_tier(targets, used_entries, allowed)
 
-        # 1) 전화번호(숫자만 비교) 일치가 가장 강한 신호 — 옵션 가드보다 먼저.
-        #    같은 사람이 같은 상품을 여러 건 주문한 경우(전화 동일) 미사용 건을
-        #    순차 배정해 N건 전부 채워진다. 회신에 옵션 정보가 없어도 매칭됨.
-        #    (2026-07-14 제주다팜: 동일인 다건이 옵션 가드에 걸려 전부 skip되던 사고 수정)
-        dl_phone_d = _phone_digits(dl_phone)
-        if dl_phone_d:
-            phone_hits = [(i, c) for i, c in available if _phone_digits(c.get("phone")) == dl_phone_d]
-            # 같은 사람이 한 DeliveryList에 다른 거래처 상품까지 주문한 경우(2026-10-16 황금향+시나노골드,
-            # 같은 주문번호) 앞 행(황금향)이 이 회신의 송장을 가로채 정작 시나노골드 행이 비던 문제.
-            # 이름이 여러 행이고 양쪽 다 옵션 정보가 있는데 하나도 안 맞으면 이 회신의 상품이 아니다 → 건너뜀.
-            # (회신에 옵션 정보가 없으면 종전처럼 전화로 매칭 — 2026-07-14 동일인 다건 사고 보호 유지)
-            if (phone_hits and dl_option_keys and delivery_name_counts.get(dl_name, 0) > 1
-                    and all(c.get("option_keys") for _, c in phone_hits)
-                    and not any(options_match(c.get("option_keys"), dl_option_keys)
-                                or _same_family(c.get("option_keys"), dl_option_keys) for _, c in phone_hits)):
-                skipped += 1
-                skip_details.append(f"{dl_name}(같은 사람의 다른 상품 행 — 이 회신에 없음)")
-                continue
-            if phone_hits:
-                # 같은 사람·같은 주소로 여러 상품(황금향+시나노골드)을 받으면 주소로는 못 가른다 →
-                # 옵션까지 맞는 건 > 옵션만 맞는 건 > 주소만 맞는 건 > 첫 건 순. 회신에 옵션 정보가 없으면 종전과 같다.
-                matched = next(
-                    (c for _, c in phone_hits
-                     if c["address"] == dl_address and options_match(c.get("option_keys"), dl_option_keys)), None
-                ) or next(
-                    (c for _, c in phone_hits if options_match(c.get("option_keys"), dl_option_keys)), None
-                ) or next(
-                    (c for _, c in phone_hits if _same_family(c.get("option_keys"), dl_option_keys)), None
-                ) or next(
-                    (c for _, c in phone_hits if c["address"] == dl_address), None
-                ) or phone_hits[0][1]
-
-        # 2) 전화로 못 가른 경우에만 동명이인 옵션 가드 적용 (기존 보호 유지)
+    for row in targets:
+        matched = row["matched"]
         if matched is None:
-            guarded = available
-            if requires_option_guard(dl_name, delivery_name_counts, len(candidates)):
-                guarded = [
-                    (i, c) for i, c in available
-                    if options_match(c.get("option_keys"), dl_option_keys)
-                ]
-                if not guarded:
-                    # 옵션으로도 못 가름 → 주소 일치만 허용, 아니면 오배정 위험이라 미입력+표시
-                    addr_hits = [c for _, c in available if dl_address and c["address"] == dl_address]
-                    if addr_hits:
-                        matched = addr_hits[0]
-                    else:
-                        skipped += 1
-                        skip_details.append(f"{dl_name}(동명이인 구분 불가 — 수동 확인)")
-                        continue
-            if matched is None:
-                matched = next(
-                    (c for _, c in guarded if c["address"] == dl_address), None
-                ) or (guarded[0][1] if guarded else None)
-
-        if matched:
-            e_cell.value = matched["tracking"]
-            courier = normalize_courier(matched.get("courier"))
-            if not courier and _is_pear_row(dl_option_keys):
-                courier = PEAR_DEFAULT_COURIER  # 햇 배 선물세트 = CJ대한통운 발송
-            if not courier and _is_hwanggeum_row(dl_option_keys):
-                from app.processors.kolrabi_order import HWANGGEUM_COURIER
-                courier = HWANGGEUM_COURIER  # 황금향 = 한진택배 발송
-            if courier:
-                dl_ws.cell(row=row_idx, column=4).value = courier
-            used_entries.add(id(matched))
-            filled += 1
-        else:
             skipped += 1
-            skip_details.append(f"{dl_name}(매칭 실패)")
+            skip_details.append(f"{row['name']}({_skip_reason(row, used_entries)})")
+            continue
+        row_idx = row["row_idx"]
+        dl_ws.cell(row=row_idx, column=5).value = matched["tracking"]
+        courier = normalize_courier(matched.get("courier"))
+        if not courier and _is_pear_row(row["option_keys"]):
+            courier = PEAR_DEFAULT_COURIER  # 햇 배 선물세트 = CJ대한통운 발송
+        if not courier and _is_hwanggeum_row(row["option_keys"]):
+            from app.processors.kolrabi_order import HWANGGEUM_COURIER
+            courier = HWANGGEUM_COURIER  # 황금향 = 한진택배 발송
+        if courier:
+            dl_ws.cell(row=row_idx, column=4).value = courier
+        filled += 1
 
     # Save to bytes
     output = BytesIO()

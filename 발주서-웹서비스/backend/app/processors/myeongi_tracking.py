@@ -180,8 +180,14 @@ def process(
             if len(ono_avail) == 1:
                 matched = ono_avail[0]
             elif ono_avail:
-                opt_avail = [c for c in ono_avail if options_match(c.get("option_keys"), dl_option_keys)]
-                matched = opt_avail[0] if opt_avail else ono_avail[0]
+                # 라이브 이벤트 당첨 건도 당첨자의 쿠팡 주문번호를 달고 온다(2026-11-02 강본아 햇밤 + 당첨 햇밤 같은 번호).
+                # 같은 무게면 옵션으로 못 가르니 전화(안심번호, 숫자만)까지 맞는 건을 먼저 — 당첨 건은 실제 번호라 다르다.
+                dl_phone_digits = re.sub(r"\D", "", dl_phone)
+                phone_avail = [c for c in ono_avail
+                               if dl_phone_digits and re.sub(r"\D", "", c["phone"]) == dl_phone_digits]
+                pool = phone_avail or ono_avail
+                opt_avail = [c for c in pool if options_match(c.get("option_keys"), dl_option_keys)]
+                matched = opt_avail[0] if opt_avail else pool[0]
 
         # 폴백: 이름/전화/주소 매칭
         if matched is None and dl_name:

@@ -144,3 +144,23 @@ def test_toss_jewelry_collect_gate_accepts_chestnut(monkeypatch):
     monkeypatch.setattr(toss_client, "get_orders", fake_get_orders)
     entries = asyncio.run(tomato_order.collect_toss_jewelry_orders("2026-10-13", "2026-10-14"))
     assert [(e["name"], e["product"]) for e in entries] == [("토스손님", "햇밤 대 1kg")]
+
+
+def test_tracking_event_entry_with_same_order_no_does_not_take_coupang_row():
+    """라이브 이벤트 당첨 건은 당첨자의 쿠팡 주문번호를 달고 온다(2026-11-02 강본아: 쿠팡 햇밤 5kg + 당첨 햇밤 1kg 같은 번호).
+    당첨 경품과 쿠팡 주문이 같은 무게면 옵션으로 못 가르니, 회신에 당첨 줄이 먼저 있어도
+    쿠팡 주문 줄에는 전화(안심번호)까지 맞는 송장이 들어가야 한다."""
+    delivery = _delivery([
+        {"product": COUPANG_PRODUCT, "option": "1kg 1박스", "name": "강본아", "order_no": "18103968297988",
+         "phone": "0504-4924-8403"},
+    ])
+    orderlist = _orderlist([
+        {"order_no": "18103968297988", "name": "강본아", "product": "햇밤 대 1kg", "phone": "010-3721-3673",
+         "courier": "CJ대한통운", "tracking": "601227521083"},                     # 이벤트 당첨 1kg
+        {"order_no": "18103968297988", "name": "강본아", "product": "햇밤 대 1kg", "phone": "0504-4924-8403",
+         "courier": "CJ대한통운", "tracking": "601227536343"},                     # 쿠팡 주문 1kg
+    ])
+    output, _filename, stats = myeongi_tracking.process(orderlist, delivery)
+    ws = load_workbook(BytesIO(output)).active
+    assert (ws.cell(2, 4).value, ws.cell(2, 5).value) == ("CJ 대한통운", "601227536343")
+    assert stats["filled"] == 1
