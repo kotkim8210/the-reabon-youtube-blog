@@ -2,7 +2,8 @@
 
 2026-11-02 파소향: 꿀고구마 3kg(중상)+5kg(특상)을 한 주문으로 받아 해달이 송장 2개 회신 →
 같은 묶음에 서로 다른 송장 2개를 올려 쿠팡이 거부, 송장이 하나도 안 들어갔다.
-사용자 지시: "송장 2개 중에 하나만 입력" → 묶음의 첫 송장으로 모든 상품 줄을 채운다.
+사용자 지시: "송장 2개 중에 하나만 입력" — 더 비싼 옵션의 송장으로(2026-11-03).
+가격(옵션판매가, 없으면 결제액)이 가장 정확 → 가격을 모르면 무게(kg) → 크기·등급 → 모두 같으면 첫 줄.
 """
 
 import asyncio
@@ -12,6 +13,7 @@ import pytest
 from openpyxl import Workbook, load_workbook
 
 from app.processors import goguma_tracking, goguma_tracking_api as gta, hobak_goguma, myeongi_tracking, tracking_input
+from app.processors.tracking_match import option_rank
 
 BOX = "749224152907812"
 T1, T2 = "463654701296", "463654701300"
@@ -20,7 +22,7 @@ ADDR = "경기도 파주시 아침노을길 21-3"
 
 
 def _delivery(rows: list[dict]) -> bytes:
-    """쿠팡 DeliveryList: B 묶음배송번호·C 주문번호·D 택배사·E 운송장·K 상품명·L 옵션·AA 이름·AB 전화·AD 주소."""
+    """쿠팡 DeliveryList: B 묶음배송번호·C 주문번호·D 택배사·E 운송장·K 상품명·L 옵션·S 결제액·X 옵션판매가·AA 이름·AB 전화·AD 주소."""
     wb = Workbook()
     ws = wb.active
     ws.append(["헤더"] * 31)
@@ -29,6 +31,7 @@ def _delivery(rows: list[dict]) -> bytes:
         row[1], row[2] = r.get("box", BOX), r.get("order_no", "20103995210525")
         row[3], row[4] = r.get("courier", ""), r.get("tracking", "")
         row[10], row[11] = r["product"], r["option"]
+        row[18] = row[23] = r.get("price", "")
         row[26], row[27], row[29] = r.get("name", "파소향"), r.get("phone", PHONE), r.get("address", ADDR)
         ws.append(row)
     buf = BytesIO()
@@ -65,13 +68,34 @@ GOGUMA = "[해남직송] 재구매1위 고당도 선별 해남 꿀고구마 베�
 
 def test_goguma_excel_one_box_two_items_gets_one_tracking():
     delivery = _delivery([
-        {"product": GOGUMA, "option": "1박스 황금 꿀고구마 3Kg (중상)"},
-        {"product": GOGUMA, "option": "1박스 황금 꿀고구마 5Kg (특상)"},
+        {"product": GOGUMA, "option": "1박스 황금 꿀고구마 3Kg (중상)", "price": "13800"},
+        {"product": GOGUMA, "option": "1박스 황금 꿀고구마 5Kg (특상)", "price": "21900"},
     ])
     reply = _haedal_reply([("꿀고구마 3Kg (중상)", T1), ("꿀고구마 5Kg (특상)", T2)])
     out, _fn, stats = goguma_tracking.process(reply, delivery)
-    assert [t for _c, t in _cells(out)] == [T1, T1]
-    assert stats["filled"] == 2 and "파소향" in stats["한주문송장통일"]
+    assert [t for _c, t in _cells(out)] == [T2, T2]                     # 더 비싼 5kg 특상 송장
+    assert stats["filled"] == 2 and "5Kg (특상)" in stats["한주문송장통일"] and T1 in stats["한주문송장통일"]
+
+
+def test_price_beats_weight():
+    """가격이 가장 정확 — 무게가 무거워도 더 싼 옵션이면 비싼 옵션 송장을 쓴다."""
+    delivery = _delivery([
+        {"product": GOGUMA, "option": "1박스 꿀고구마 5Kg (한입)", "price": "15000"},
+        {"product": GOGUMA, "option": "1박스 꿀고구마 3Kg (특상)", "price": "18000"},
+    ])
+    reply = _haedal_reply([("꿀고구마 5Kg (한입)", T1), ("꿀고구마 3Kg (특상)", T2)])
+    out, _fn, _stats = goguma_tracking.process(reply, delivery)
+    assert [t for _c, t in _cells(out)] == [T2, T2]
+
+
+def test_option_rank_order():
+    assert option_rank("21,900", None, "5Kg (특상)") > option_rank("13800", None, "3Kg (중상)")   # 가격
+    assert option_rank(None, None, "1박스 5kg") > option_rank(None, None, "1박스 3kg")             # 가격 없으면 무게
+    assert option_rank(None, "25800", "") > option_rank(None, "12900", "")                          # 판매가 없으면 결제액
+    assert option_rank(None, None, "대과 5kg") > option_rank(None, None, "중대과 5kg") > option_rank(None, None, "중과 5kg")
+    assert option_rank(None, None, "중과 5kg") > option_rank(None, None, "중소과 5kg") > option_rank(None, None, "소과 5kg")
+    assert option_rank(None, None, "황금향 2kg (대)") > option_rank(None, None, "황금향 2kg (소)")
+    assert option_rank(None, None, "800g") < option_rank(None, None, "1kg")
 
 
 def test_hobak_excel_one_box_two_items_gets_one_tracking():
@@ -83,7 +107,7 @@ def test_hobak_excel_one_box_two_items_gets_one_tracking():
     reply = _haedal_reply([("호박고구마 3kg (중상)", T1), ("호박고구마 5kg (특상)", T2)])
     out, _fn, stats = hobak_goguma.process_tracking(reply, delivery)
     cells = _cells(out)
-    assert [t for _c, t in cells] == [T1, T1] and cells[0][0] == cells[1][0]
+    assert [t for _c, t in cells] == [T2, T2] and cells[0][0] == cells[1][0]   # 가격 없음 → 더 무거운 5kg
     assert "파소향" in stats["한주문송장통일"]
 
 
@@ -113,8 +137,27 @@ def test_jejudapam_one_box_two_items_gets_one_tracking():
     reply = _jeju_reply([("시나노골드(가정용) 중과 5kg(15-20과내외) 포장재포함", T1),
                          ("시나노골드(가정용) 소과 2kg(10-13과내외) 포장재포함", T2)])
     out, _fn, stats = tracking_input.process(reply, delivery)
-    assert _cells(out) == [("롯데택배", T1), ("롯데택배", T1)]
+    assert _cells(out) == [("롯데택배", T1), ("롯데택배", T1)]          # 가격 없음 → 더 무거운 중과 5kg(첫 줄)
     assert stats["filled"] == 2 and "파소향" in stats["한주문송장통일"]
+
+
+def test_same_weight_bigger_size_wins_and_all_equal_keeps_first():
+    delivery = _delivery([
+        {"product": SHINANO, "option": "1박스 중과 5kg(15~20과)"},
+        {"product": SHINANO, "option": "1박스 대과 5kg(10~14과)"},
+    ])
+    reply = _jeju_reply([("시나노골드(가정용) 중과 5kg(15-20과내외) 포장재포함", T1),
+                         ("시나노골드(가정용) 대과 5kg(10-14과내외) 포장재포함", T2)])
+    out, _fn, _stats = tracking_input.process(reply, delivery)
+    assert [t for _c, t in _cells(out)] == [T2, T2]                      # 같은 5kg → 더 큰 대과
+    delivery = _delivery([
+        {"product": SHINANO, "option": "1박스 중과 5kg(15~20과)"},
+        {"product": SHINANO, "option": "1박스 중과 5kg(15~20과)"},
+    ])
+    reply = _jeju_reply([("시나노골드(가정용) 중과 5kg(15-20과내외) 포장재포함", T1),
+                         ("시나노골드(가정용) 중과 5kg(15-20과내외) 포장재포함", T2)])
+    out, _fn, _stats = tracking_input.process(reply, delivery)
+    assert [t for _c, t in _cells(out)] == [T1, T1]                      # 모두 같으면 첫 줄
 
 
 def test_prefilled_row_of_same_box_is_not_overwritten():
@@ -148,7 +191,7 @@ def test_jewelry_one_box_two_items_gets_one_tracking():
     buf = BytesIO()
     wb.save(buf)
     out, _fn, stats = myeongi_tracking.process(buf.getvalue(), delivery)
-    assert [t for _c, t in _cells(out)] == [T1, T1]
+    assert [t for _c, t in _cells(out)] == [T2, T2]                      # 가격 없음 → 더 무거운 2kg
     assert "파소향" in stats["한주문송장통일"]
 
 
@@ -169,15 +212,16 @@ async def _no_sleep(_seconds):
 
 
 def test_coupang_api_one_box_two_items_registers_one_invoice(monkeypatch):
-    """쿠팡 API로 등록할 때도 같은 묶음(shipmentBoxId)은 송장 하나 — 상품 2개 모두 첫 송장으로."""
+    """쿠팡 API로 등록할 때도 같은 묶음(shipmentBoxId)은 송장 하나 — 더 비싼 5kg 특상(21,900원) 송장으로."""
     client = _FakeClient()
     monkeypatch.setattr(gta, "coupang_goguma_client", client)
     monkeypatch.setattr(gta.asyncio, "sleep", _no_sleep)
 
-    def order(item_id, option):
+    def order(item_id, option, price):
         return {"shipment_box_id": int(BOX), "order_id": 20103995210525, "vendor_item_id": item_id,
                 "name": "파소향", "phone": "050246632343", "address": "경기도파주시아침노을길21-3",
-                "name_display": "파소향", "order_status": "INSTRUCT", "option_keys": {option}}
+                "name_display": "파소향", "order_status": "INSTRUCT", "option_keys": {option},
+                "price": price, "order_price": price, "item_name": option}
 
     def entry(option, tracking):
         return {"name": "파소향", "phone": "050246632343", "address": "", "tracking": tracking,
@@ -186,11 +230,13 @@ def test_coupang_api_one_box_two_items_registers_one_invoice(monkeypatch):
     monkeypatch.setattr(gta, "parse_haedal_file", lambda _b: [entry("꿀고구마3Kg(중상)", T1), entry("꿀고구마5Kg(특상)", T2)])
 
     async def fake_fetch():
-        return [order(94707754634, "[해남직송]…황금꿀고구마3Kg(중상)"), order(94707754635, "[해남직송]…황금꿀고구마5Kg(특상)")]
+        return [order(94707754634, "[해남직송]…황금꿀고구마3Kg(중상)", 13800),
+                order(94707754635, "[해남직송]…황금꿀고구마5Kg(특상)", 21900)]
     monkeypatch.setattr(gta, "fetch_pending_orders", fake_fetch)
 
     result = asyncio.run(gta.process_tracking_api(b"fake"))
     dtos = client.upload_calls[0]
-    assert [(d["vendorItemId"], d["invoiceNumber"]) for d in dtos] == [(94707754634, T1), (94707754635, T1)]
+    assert [(d["vendorItemId"], d["invoiceNumber"]) for d in dtos] == [(94707754634, T2), (94707754635, T2)]
     assert result["success"] == 2 and result["fail"] == 0
-    assert all(T2 in r["message"] and "하나로" in r["message"] for r in result["results"])
+    assert all("더 비싼" in r["message"] and "5Kg(특상)" in r["message"] and T1 in r["message"]
+               for r in result["results"])

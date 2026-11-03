@@ -85,6 +85,39 @@ def filled_tracking_rows(ws, tracking_col: int = 5) -> set[int]:
     return {r for r in range(2, ws.max_row + 1) if match_key(ws.cell(row=r, column=tracking_col).value)}
 
 
+def amount(value: object) -> float:
+    """금액 칸(숫자·'25,800'·'25800원')을 숫자로. 못 읽으면 -1(비교에서 가장 낮게)."""
+    digits = re.sub(r"[^\d.]", "", str(value if value is not None else ""))
+    try:
+        return float(digits) if digits else -1.0
+    except ValueError:
+        return -1.0
+
+
+# 크기·등급이 큰 순위(클수록 비쌈). '중대과'·'중소과'·'특대과'가 '대과'·'소과'를 품고 있어 긴 낱말을 먼저 본다.
+# 꿀고구마 등급은 정산단가 순(특상 > 중상 > 대 > 한입), 과일은 과 크기 순(특대과 > 대과 > 중대과 > 중과 > 중소과 > 소과).
+_SIZE_RANKS = (
+    ("특대", 9), ("특상", 8), ("중대", 6), ("대과", 7), ("중상", 5), ("중소", 3), ("중과", 4),
+    ("소과", 2), ("한입", 1), ("대", 4), ("중", 3), ("소", 2),
+)
+
+
+def option_rank(price: object, paid: object, option_text: object) -> tuple[float, float, int]:
+    """한 묶음에 송장이 여러 개일 때 고를 '더 비싼 옵션'의 순위(2026-11-03 사용자 기준).
+    가격이 가장 정확(옵션판매가, 없으면 결제액) → 가격을 모르거나 같으면 무게(kg)가 큰 것 →
+    그래도 같으면 크기·등급이 큰 것. 모두 같으면 고르는 쪽(max)이 앞의 것을 쓴다."""
+    price_value = amount(price)
+    if price_value <= 0:
+        price_value = amount(paid)
+    text = match_key(option_text).lower()
+    weights = [
+        float(number) / (1000 if unit == "g" else 1)
+        for number, unit in re.findall(r"(\d+(?:\.\d+)?)(kg|g)(?![a-z])", text)
+    ]
+    size = next((rank for word, rank in _SIZE_RANKS if word in text), 0)
+    return (price_value, max(weights, default=-1.0), size)
+
+
 def unify_bundle_tracking(
     ws,
     prefilled: set[int],
@@ -92,12 +125,17 @@ def unify_bundle_tracking(
     tracking_col: int = 5,
     courier_col: int = 4,
     name_col: int = 27,
+    option_col: int = 12,
+    product_col: int = 11,
+    price_col: int = 24,
+    paid_col: int = 19,
 ) -> list[str]:
     """쿠팡은 묶음배송번호(B열) 하나에 송장 하나만 받는다(분리배송이 아니면).
     거래처가 상품마다 박스·송장을 따로 보내 같은 묶음 줄들에 송장이 다르게 들어가면 업로드가 거부돼
     그 주문이 통째로 빠진다(2026-11-02 파소향 꿀고구마 3kg+5kg 한 주문 → 해달 송장 2개 → 미입력).
-    사용자 지시 "송장 2개 중에 하나만 입력" — 이번에 채운 줄끼리 같은 묶음이면 첫 줄의 송장·택배사로 맞춘다.
-    이미 채워져 있던 줄(다른 거래처 회신)은 건드리지 않는다. 반환: 결과 화면 표시용 설명."""
+    사용자 지시: 송장은 하나만, **더 비싼 옵션의 송장**으로(2026-11-03 — 파소향은 5kg 특상 송장).
+    이번에 채운 줄끼리 같은 묶음이면 option_rank(옵션판매가 X열·결제액 S열 → 무게 → 크기)가 가장 큰 줄의
+    송장·택배사로 맞춘다. 이미 채워져 있던 줄(다른 거래처 회신)은 건드리지 않는다. 반환: 결과 화면 표시용 설명."""
     bundles: dict[str, list[int]] = {}
     for r in range(2, ws.max_row + 1):
         if r in prefilled or not match_key(ws.cell(row=r, column=tracking_col).value):
@@ -108,21 +146,30 @@ def unify_bundle_tracking(
 
     notes: list[str] = []
     for rows in bundles.values():
-        tracking = ws.cell(row=rows[0], column=tracking_col).value
-        courier = ws.cell(row=rows[0], column=courier_col).value
+        if len({match_key(ws.cell(row=r, column=tracking_col).value) for r in rows}) < 2:
+            continue
+        # max는 순위가 같으면 앞의 것을 고른다 → 가격·무게·크기가 모두 같으면 첫 줄
+        keep = max(rows, key=lambda r: option_rank(
+            ws.cell(row=r, column=price_col).value,
+            ws.cell(row=r, column=paid_col).value,
+            ws.cell(row=r, column=option_col).value or ws.cell(row=r, column=product_col).value,
+        ))
+        tracking = ws.cell(row=keep, column=tracking_col).value
+        courier = ws.cell(row=keep, column=courier_col).value
         others: list[str] = []
-        for r in rows[1:]:
+        for r in rows:
             cell = ws.cell(row=r, column=tracking_col)
             if match_key(cell.value) == match_key(tracking):
                 continue
-            others.append(match_key(cell.value))
+            if match_key(cell.value) not in others:
+                others.append(match_key(cell.value))
             cell.value = tracking
             ws.cell(row=r, column=courier_col).value = courier
-        if others:
-            notes.append(
-                f"{ws.cell(row=rows[0], column=name_col).value}"
-                f"(한 주문 송장 {len(others) + 1}개 → {match_key(tracking)} 하나로, {'·'.join(others)}는 같은 주문 다른 박스)"
-            )
+        notes.append(
+            f"{ws.cell(row=keep, column=name_col).value}(한 주문 송장 {len(others) + 1}개 → "
+            f"더 비싼 '{ws.cell(row=keep, column=option_col).value}' 송장 {match_key(tracking)} 하나로, "
+            f"{'·'.join(others)}는 같은 주문 다른 박스)"
+        )
     return notes
 
 

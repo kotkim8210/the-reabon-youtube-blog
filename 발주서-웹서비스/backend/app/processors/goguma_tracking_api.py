@@ -21,6 +21,7 @@ from app.processors.haedal_tracking_parser import (
 from app.processors.tracking_match import (
     name_counts,
     option_key_set,
+    option_rank,
     options_match,
     requires_option_guard,
 )
@@ -153,6 +154,10 @@ async def _fetch_orders_by_status(order_status: str, from_date: str, to_date: st
                         "address": normalize(address_raw),
                         "name_display": receiver.get("name") or "",
                         "order_status": order_status,
+                        # 한 묶음 송장 여러 개면 더 비싼 옵션 송장을 쓴다(salesPrice=옵션 판매가, orderPrice=결제액)
+                        "price": item.get("salesPrice"),
+                        "order_price": item.get("orderPrice"),
+                        "item_name": item.get("vendorItemName") or "",
                         "option_keys": option_key_set(
                             item.get("vendorItemName"),
                             transform_option(item.get("vendorItemName") or ""),
@@ -292,26 +297,34 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
 
     # 한 주문(묶음 shipmentBoxId)에 상품이 여럿이면 해달은 상품마다 박스·송장을 따로 보낸다. 쿠팡은 분리배송이
     # 아니면 묶음 하나에 송장 하나만 받아, 서로 다른 송장을 같이 올리면 거부돼 하나도 안 들어갔다
-    # (2026-11-02 파소향 3kg+5kg). 사용자 지시 "송장 2개 중에 하나만 입력" → 묶음의 첫 송장·택배사로 통일.
-    box_first: dict = {}
-    box_others: dict = defaultdict(list)
+    # (2026-11-02 파소향 3kg+5kg). 사용자 지시: 송장은 하나만, 더 비싼 옵션의 송장으로(2026-11-03 — 5kg 특상 송장).
+    box_pairs: dict = defaultdict(list)
     for order, tracking in matched_pairs:
-        first_tracking, _code = box_first.setdefault(order["shipment_box_id"], (tracking, order.get("delivery_code")))
-        if tracking != first_tracking:
-            box_others[order["shipment_box_id"]].append(tracking)
+        box_pairs[order["shipment_box_id"]].append((order, tracking))
     bundle_notes: dict[int, str] = {}  # id(order) -> 결과 표시용 설명
-    if box_others:
+    box_keep: dict = {}
+    for box, pairs in box_pairs.items():
+        trackings = list(dict.fromkeys(tracking for _order, tracking in pairs))
+        if len(trackings) < 2:
+            continue
+        # 가격(salesPrice, 없으면 orderPrice) → 무게 → 크기 순. max는 순위가 같으면 앞의 것 → 모두 같으면 첫 송장
+        keep_order, keep_tracking = max(
+            pairs, key=lambda pair: option_rank(pair[0].get("price"), pair[0].get("order_price"), pair[0].get("item_name"))
+        )
+        box_keep[box] = (keep_tracking, keep_order.get("delivery_code"))
+        others = "·".join(t for t in trackings if t != keep_tracking)
+        option_label = (keep_order.get("item_name") or "").split(",")[-1].strip()  # '상품명, 1박스, 옵션' → 옵션
+        for order, _tracking in pairs:
+            bundle_notes[id(order)] = (
+                f"한 주문 송장 {len(trackings)}개 → 더 비싼 '{option_label}' 송장 "
+                f"{keep_tracking} 하나로, {others}는 같은 주문 다른 박스"
+            )
+    if box_keep:
         unified_pairs = []
         for order, tracking in matched_pairs:
-            box = order["shipment_box_id"]
-            if box in box_others:
-                first_tracking, first_code = box_first[box]
-                order["delivery_code"] = first_code
-                others = "·".join(box_others[box])
-                bundle_notes[id(order)] = (
-                    f"한 주문 송장 {len(box_others[box]) + 1}개 → {first_tracking} 하나로, {others}는 같은 주문 다른 박스"
-                )
-                tracking = first_tracking
+            keep = box_keep.get(order["shipment_box_id"])
+            if keep:
+                tracking, order["delivery_code"] = keep
             unified_pairs.append((order, tracking))
         matched_pairs = unified_pairs
 
