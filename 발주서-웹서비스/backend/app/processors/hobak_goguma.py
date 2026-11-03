@@ -29,10 +29,12 @@ from app.processors.haedal_tracking_parser import (
 )
 from app.processors.tracking_match import (
     coupang_courier_name,
+    filled_tracking_rows,
     name_counts,
     option_key_set,
     options_match,
     requires_option_guard,
+    unify_bundle_tracking,
 )
 
 KST = timezone(timedelta(hours=9))
@@ -347,6 +349,7 @@ def process_tracking(haedal_bytes: bytes, delivery_bytes: bytes) -> tuple[bytes,
     for sheet_name in dl_wb.sheetnames[1:]:
         del dl_wb[sheet_name]
     dl_ws = dl_wb[dl_wb.sheetnames[0]]
+    prefilled = filled_tracking_rows(dl_ws)
 
     by_name: dict[str, list[dict]] = defaultdict(list)
     by_phone: dict[str, list[dict]] = defaultdict(list)
@@ -405,6 +408,9 @@ def process_tracking(haedal_bytes: bytes, delivery_bytes: bytes) -> tuple[bytes,
         used.add(id(matched))
         filled += 1
 
+    # 한 주문(묶음)에 상품이 여럿이면 해달 송장도 여럿 → 쿠팡은 하나만 받으니 첫 송장으로 통일(2026-11-02 파소향)
+    bundle_notes = unify_bundle_tracking(dl_ws, prefilled)
+
     output = BytesIO()
     dl_wb.save(output)
     output.seek(0)
@@ -421,6 +427,8 @@ def process_tracking(haedal_bytes: bytes, delivery_bytes: bytes) -> tuple[bytes,
         stats["already_filled"] = already
     if skip_details:
         stats["skipped_names"] = ", ".join(skip_details)
+    if bundle_notes:
+        stats["한주문송장통일"] = ", ".join(bundle_notes)
     if not hobak_rows:
         stats["needs_check"] = ["DeliveryList에 호박고구마 주문이 없습니다 — itsoft001 쿠팡 DeliveryList가 맞는지 확인하세요."]
     return output.read(), filename, stats

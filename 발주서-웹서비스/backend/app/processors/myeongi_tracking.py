@@ -25,11 +25,13 @@ from app.processors.myeongi_order import (
 from app.processors.tracking_match import (
     COUPANG_CJ_NAME,
     coupang_courier_name,
+    filled_tracking_rows,
     name_counts,
     normalize_courier_name,
     option_key_set,
     options_match,
     requires_option_guard,
+    unify_bundle_tracking,
 )
 
 
@@ -128,6 +130,7 @@ def process(
     for sheet_name in dl_wb.sheetnames[1:]:
         del dl_wb[sheet_name]
     dl_ws = dl_wb[first_sheet_name]
+    prefilled = filled_tracking_rows(dl_ws)
 
     used_entries = set()
     filled = 0
@@ -268,6 +271,9 @@ def process(
         else:
             skipped += 1
 
+    # 한 주문(묶음)에 상품이 여럿이면 회신 송장도 여럿 → 쿠팡은 하나만 받으니 첫 송장으로 통일(2026-11-02 파소향)
+    bundle_notes = unify_bundle_tracking(dl_ws, prefilled)
+
     output = BytesIO()
     dl_wb.save(output)
     output.seek(0)
@@ -301,5 +307,7 @@ def process(
     product_label = "_".join(product_parts) if product_parts else "쥬얼리프룻"
     filename = f"DeliveryList_{product_label}_운송장입력완료_{now.strftime('%Y%m%d')}.xlsx"
     stats = {"filled": filled, "skipped": skipped}
+    if bundle_notes:
+        stats["한주문송장통일"] = ", ".join(bundle_notes)
 
     return output.read(), filename, stats

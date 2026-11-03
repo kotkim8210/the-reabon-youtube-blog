@@ -14,6 +14,7 @@ from app.processors.tracking_match import (
     option_key_set,
     options_match,
     requires_option_guard,
+    unify_bundle_tracking,
 )
 
 
@@ -402,6 +403,9 @@ def process(
             dl_ws.cell(row=row_idx, column=4).value = courier
         filled += 1
 
+    # 한 주문(묶음)에 상품이 여럿이면 회신 송장도 여럿 → 쿠팡은 하나만 받으니 첫 송장으로 통일(2026-11-02 파소향)
+    bundle_notes = unify_bundle_tracking(dl_ws, {row["row_idx"] for row in rows if row["has_tracking"]})
+
     # Save to bytes
     output = BytesIO()
     dl_wb.save(output)
@@ -412,5 +416,7 @@ def process(
     stats = {"filled": filled, "skipped": skipped}
     if skip_details:
         stats["skipped_names"] = ", ".join(skip_details)
+    if bundle_notes:
+        stats["한주문송장통일"] = ", ".join(bundle_notes)
 
     return output.read(), filename, stats

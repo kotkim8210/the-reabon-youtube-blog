@@ -290,6 +290,31 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
         if matched_via_phone_only:
             matched_via_phone[id(order)] = matched["name"]
 
+    # 한 주문(묶음 shipmentBoxId)에 상품이 여럿이면 해달은 상품마다 박스·송장을 따로 보낸다. 쿠팡은 분리배송이
+    # 아니면 묶음 하나에 송장 하나만 받아, 서로 다른 송장을 같이 올리면 거부돼 하나도 안 들어갔다
+    # (2026-11-02 파소향 3kg+5kg). 사용자 지시 "송장 2개 중에 하나만 입력" → 묶음의 첫 송장·택배사로 통일.
+    box_first: dict = {}
+    box_others: dict = defaultdict(list)
+    for order, tracking in matched_pairs:
+        first_tracking, _code = box_first.setdefault(order["shipment_box_id"], (tracking, order.get("delivery_code")))
+        if tracking != first_tracking:
+            box_others[order["shipment_box_id"]].append(tracking)
+    bundle_notes: dict[int, str] = {}  # id(order) -> 결과 표시용 설명
+    if box_others:
+        unified_pairs = []
+        for order, tracking in matched_pairs:
+            box = order["shipment_box_id"]
+            if box in box_others:
+                first_tracking, first_code = box_first[box]
+                order["delivery_code"] = first_code
+                others = "·".join(box_others[box])
+                bundle_notes[id(order)] = (
+                    f"한 주문 송장 {len(box_others[box]) + 1}개 → {first_tracking} 하나로, {others}는 같은 주문 다른 박스"
+                )
+                tracking = first_tracking
+            unified_pairs.append((order, tracking))
+        matched_pairs = unified_pairs
+
     success_count = 0
     fail_count = 0
 
@@ -474,6 +499,8 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
                 message = f"운송장 등록 완료 (전화번호 매칭: 해달 '{haedal_name}' → 쿠팡 '{order['name_display']}')"
             else:
                 message = "운송장 등록 완료"
+            if id(order) in bundle_notes:
+                message = f"{message} ({bundle_notes[id(order)]})"
             results.append(
                 {
                     "order_id": str(order["order_id"]),
@@ -485,6 +512,8 @@ async def process_tracking_api(haedal_bytes: bytes) -> dict:
             )
         for order, tracking, message, _ in fail_items:
             fail_count += 1
+            if id(order) in bundle_notes:
+                message = f"{message} ({bundle_notes[id(order)]})"
             results.append(
                 {
                     "order_id": str(order["order_id"]),
