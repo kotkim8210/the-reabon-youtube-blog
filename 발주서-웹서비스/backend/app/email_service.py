@@ -17,8 +17,6 @@ KST = timezone(timedelta(hours=9))
 GMAIL_USER = os.getenv("GMAIL_USER", "shach457@gmail.com")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 HAEDAL_ORDER_EMAIL_TO = os.getenv("HAEDAL_ORDER_EMAIL_TO", "farmers2022@naver.com")
-# 비셀러(리앤유커머스) 발주 메일 — 거래처 안내: 상품명은 반드시 비셀러 상품명으로 작성
-BISELLER_ORDER_EMAIL_TO = os.getenv("BISELLER_ORDER_EMAIL_TO", "naeun_order@naver.com")
 
 # 발주처별 수신자·제목·본문. 키는 API의 supplier 값.
 ORDER_EMAIL_TARGETS = {
@@ -26,11 +24,6 @@ ORDER_EMAIL_TARGETS = {
         "to": HAEDAL_ORDER_EMAIL_TO,
         "subject": "{ymd} 알제이시스템 발주서",
         "body": "발주서 첨부합니다.\n감사합니다.",
-    },
-    "biseller": {
-        "to": BISELLER_ORDER_EMAIL_TO,
-        "subject": "{ymd} 아이티소프트 발주서",
-        "body": "발주서 첨부합니다.\n상품명은 비셀러 상품명으로 작성했습니다.\n감사합니다.",
     },
 }
 

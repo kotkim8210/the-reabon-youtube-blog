@@ -141,41 +141,6 @@ const productConfigs: Record<string, ProductConfig> = {
       buttonLabel: '운송장 입력',
     },
   },
-  biseller: {
-    title: '비셀러 (LA한입갈비 · 김장 · 수산 시즌상품)',
-    description: '취급품목: 양념LA한입갈비 800g 세트 + 비셀러 소싱 시즌상품 전부(10/21 꽁치과메기 · 10/23 김장 김치·젓갈·양념·절임배추 158옵션 · 10/27 수산 꼬막무침·홍가리비·백골뱅이·골뱅이탕 밀키트·청어과메기·홍게간장·홍게액젓·홍게다리살·자숙홍게·홍합·전복장·대게·가리비무침·방어회·삼배체굴 56옵션) — 비셀러 발주서 생성 + 운송장번호 입력 · DeliveryList Q열 업체상품코드가 BS-<비셀러 상품번호>인 주문은 전부 자동으로 발주서에 들어감(상품번호 = 비셀러 branduid, 옵션번호 0) · 앞으로 윙에 새로 등록하는 비셀러 상품도 판매자상품코드를 BS-<상품번호>로 넣으면 코드 수정 없이 자동 포함 · 카탈로그(backend/app/data/biseller_catalog.json)에 없는 BS 코드는 "확인 필요"로 표시되지만 발주서에는 들어감 · 메이크샵 발주용 양식(4행부터 데이터) 출력 · LA한입갈비는 쿠팡 옵션 800g N개 → 세트 수로 변환(2세트 6120·4세트 6121) · 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐지고 당첨 1팩은 2세트로 발주(우편번호는 직접 입력)',
-    icon: '🦀',
-    bgClass: 'bg-red-50',
-    order: {
-      title: '비셀러 발주서 생성 (LA한입갈비 + 김장 + 수산 — BS코드 자동 매칭)',
-      icon: '📋',
-      apiToolId: 'biseller-order',
-      emailSupplier: 'biseller',
-      emailTo: 'naeun_order@naver.com',
-      files: [
-        { key: 'delivery', label: '쿠팡 DeliveryList 파일 (당첨자 CSV만 있으면 비워도 됩니다)', optional: true },
-        {
-          key: 'winners',
-          label: '라이브 이벤트 당첨자 CSV (선택 — 발주서에 합쳐짐)',
-          optional: true,
-          accept: '.csv',
-          acceptLabel: '.csv 파일',
-        },
-      ],
-      buttonLabel: '발주서 생성',
-    },
-    tracking: {
-      title: '비셀러 운송장번호 입력 (LA한입갈비 · 김장 · 수산 공통 — 받는분 이름·연락처로 매칭)',
-      icon: '📦',
-      apiToolId: 'biseller-tracking',
-      files: [
-        { key: 'tracking', label: '비셀러 회신 파일 (택배사·송장번호 포함)' },
-        { key: 'tracking2', label: '비셀러 회신 파일 2 (선택 — 추가 회신분)', optional: true },
-        { key: 'delivery', label: 'DeliveryList 파일' },
-      ],
-      buttonLabel: '운송장 입력',
-    },
-  },
   chamdureup: {
     title: '참두릅',
     description: '발주서 생성 + 운송장번호 입력',
@@ -317,7 +282,6 @@ function formatStats(stats: Record<string, unknown>): string[] {
     reissued: '🔁 미출고 재발주',
     reissued_names: '재발주 주문(받는분·직전 발주일)',
     needs_check: '⚠️ 확인 필요(발주서에 못 넣음)',
-    catalog_missing: '⚠️ 비셀러 카탈로그 미등록(상품번호만으로 발주서에 넣음)',
     event: '이벤트 당첨자',
     refund_skipped: '환불·취소로 제외',
   };
@@ -378,8 +342,7 @@ function ProcessSection({
   };
 
   const requiredFiles = section.files.filter((f) => !f.optional);
-  // 필수 파일이 하나도 없는 섹션(예: 비셀러 발주 = DeliveryList 또는 당첨자 CSV)은
-  // 둘 중 하나만 올려도 실행할 수 있어야 한다.
+  // 필수 파일이 하나도 없는 섹션은 하나만 올려도 실행할 수 있어야 한다.
   // 토스 수집 기간이 잡혀 있으면 파일 없이 토스 주문만으로도 실행할 수 있다(예: 호박고구마 토스만 들어온 날).
   const tossOnlyReady = Boolean(
     section.tossDateRange && section.files.every((f) => f.optional)

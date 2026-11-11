@@ -46,8 +46,6 @@ from app.processors import (
     tomato_order,
     tomato_tracking,
     toss_auto,
-    biseller_order,
-    biseller_tracking,
     tracking_input,
 )
 from app.sabang import client as sabang_client
@@ -1297,8 +1295,7 @@ async def send_order_email(
 ):
     """업로드한 발주서 파일(1개 이상)을 발주처 메일로 첨부 발송.
 
-    supplier=haedal(기본) → farmers2022@naver.com,
-    supplier=biseller → naeun_order@naver.com (비셀러/리앤유커머스).
+    supplier=haedal(기본) → farmers2022@naver.com.
     테무 해달 발주서를 따로 뽑았거나 발주서를 수정해서 재발송할 때 사용.
     """
     attachments: list[tuple[bytes, str]] = []
@@ -2191,115 +2188,6 @@ async def process_goguma_tracking(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"처리 중 오류가 발생했습니다: {str(e)}",
         )
-
-
-@app.post("/api/process/biseller-order")
-async def process_biseller_order(
-    delivery_file: UploadFile | None = File(None),
-    winners_file: UploadFile | None = File(None),
-    exclude_issued: str = Form("true"),
-    user: dict = Depends(verify_token),
-):
-    try:
-        delivery_bytes = await delivery_file.read() if delivery_file else None
-        winners_bytes = await winners_file.read() if winners_file else None
-        issued_excluded = await _issued_exclusions("biseller", exclude_issued)
-        # 당첨자 CSV엔 "아직 미출고"라는 신호가 없어(같은 명단이 다시 올 수 있음) 영구 제외 목록을 따로 쓴다
-        issued_all = await _issued_exclusions("biseller", exclude_issued, reissue_stale=False)
-        issued_dates = await _issued_exclusion_dates("biseller", exclude_issued)
-        reissue_keys = await _issued_stale_keys("biseller", exclude_issued, issued_dates)
-        reissued: list[tuple[str, str]] = []
-        dup_names: list[str] = []
-        dup_keys: list[str] = []
-        dup_skipped = 0
-        if delivery_bytes:
-            delivery_bytes, dup_skipped = issued_orders.filter_delivery_by_issued(
-                delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
-                reissue_keys=reissue_keys, reissued=reissued,
-            )
-        output_bytes, filename, stats = biseller_order.process(
-            delivery_bytes, winners_bytes, issued_all, dup_names
-        )
-        await _record_issued("biseller", filename, stats)
-        dup_skipped += int((stats or {}).pop("duplicate_skipped", 0) or 0)
-        stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
-        await record_sales_from_process_stats(
-            user["user_id"],
-            stats,
-            ymd=_extract_ymd_from_filename(delivery_file.filename if delivery_file else None),
-        )
-        logger.info(f"비셀러 발주 처리 완료: {stats}")
-        return make_excel_response(output_bytes, filename, stats)
-    except Exception as e:
-        logger.exception("비셀러 발주 처리 중 오류")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
-        )
-
-
-@app.post("/api/process/biseller-tracking")
-async def process_biseller_tracking(
-    delivery_file: UploadFile = File(...),
-    tracking_file: UploadFile | None = File(None),
-    tracking_file2: UploadFile | None = File(None),
-    user: dict = Depends(verify_token),
-):
-    try:
-        delivery_bytes = await delivery_file.read()
-        replies = []
-        for upload in (tracking_file, tracking_file2):
-            if upload:
-                replies.append(await upload.read())
-        output_bytes, filename, stats = biseller_tracking.process(delivery_bytes, replies)
-        logger.info(f"비셀러 운송장 입력 완료: {stats}")
-        return make_excel_response(output_bytes, filename, stats)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.exception("비셀러 운송장 입력 중 오류")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"처리 중 오류가 발생했습니다: {str(e)}",
-        )
-
-
-class BisellerCatalogItem(BaseModel):
-    goods_no: int | str                 # 비셀러 상품번호(branduid) = 윙 판매자상품코드 BS-<goods_no>
-    code: str | None = None             # 회원등급 상품코드(PL…)
-    name: str | None = None             # 비셀러 상품명
-    price: int | None = None            # 플러스회원가(공급가)
-    wing_id: str | None = None
-    wing_name: str | None = None
-    wing_option: str | None = None
-    registered: str | None = None
-    status: str | None = None
-
-
-class BisellerCatalogUpsert(BaseModel):
-    items: list[BisellerCatalogItem]
-
-
-@app.get("/api/biseller/catalog")
-async def get_biseller_catalog(user: dict = Depends(verify_token)):
-    """비셀러 발주 카탈로그(윙 BS코드 → 비셀러 상품번호·상품명·공급가) 조회."""
-    items = biseller_order.load_catalog()
-    return {"total": len(items), "path": str(biseller_order.CATALOG_PATH), "items": items}
-
-
-@app.post("/api/biseller/catalog")
-async def upsert_biseller_catalog(payload: BisellerCatalogUpsert, user: dict = Depends(verify_token)):
-    """비셀러 상품을 윙에 새로 등록했을 때 카탈로그에 추가/갱신 (coupang-season-listing 스킬 마무리 단계).
-
-    카탈로그에 없어도 BS-<상품번호> 코드만 있으면 발주서는 만들어지지만, 상품명·공급가 표기를 위해 넣어둔다.
-    """
-    try:
-        result = biseller_order.upsert_catalog([item.model_dump() for item in payload.items])
-    except Exception as e:
-        logger.exception("비셀러 카탈로그 갱신 실패")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    logger.info(f"비셀러 카탈로그 갱신: {result}")
-    return result
 
 
 @app.post("/api/process/gaegeolmu-order")

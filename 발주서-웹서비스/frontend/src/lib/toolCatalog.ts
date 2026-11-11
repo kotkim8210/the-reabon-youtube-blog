@@ -92,14 +92,6 @@ export const TOOL_CATALOG: ToolConfig[] = [
     kind: 'order',
   },
   {
-    id: 'biseller-unified',
-    title: '비셀러 (LA한입갈비 · 김장 · 수산 시즌상품)',
-    description: '취급품목: 양념LA한입갈비 + 비셀러 소싱 김장(158옵션)·수산(56옵션)·꽁치과메기 전부 — 발주서 생성 + 운송장번호 입력. DeliveryList 업체상품코드 BS-<비셀러 상품번호> 주문은 자동 매칭(새로 등록하는 비셀러 상품도 BS코드만 넣으면 자동 포함), 갈비는 800g N개 → 800G*N세트 변환, 라이브 이벤트 당첨자 CSV도 같은 발주서로 합쳐집니다.',
-    icon: '🦀',
-    color: 'red',
-    kind: 'unified',
-  },
-  {
     id: 'gaegeolmu-order',
     title: '게걸무씨앗기름 발주서 생성',
     description: 'DeliveryList에서 게걸무씨앗기름 주문을 추출하여 발주서를 생성합니다.',
