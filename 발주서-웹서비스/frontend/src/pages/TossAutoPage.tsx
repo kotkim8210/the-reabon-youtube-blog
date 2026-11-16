@@ -377,6 +377,9 @@ function ClaimsTab({ claimType, approveAction, rejectAction }: {
   };
 
   const handleApprove = async (orderProductId: number) => {
+    // 이전 처리의 '완료' 문구가 이번 실패 옆에 남지 않게 먼저 지운다
+    setError('');
+    setActionMsg('');
     try {
       await approveAction(orderProductId);
       setActionMsg(`${typeLabel} 승인 완료`);
@@ -388,6 +391,8 @@ function ClaimsTab({ claimType, approveAction, rejectAction }: {
 
   const handleReject = async () => {
     if (!rejectTarget || !rejectReason) return;
+    setError('');
+    setActionMsg('');
     try {
       await rejectAction(rejectTarget, rejectReason);
       setActionMsg(`${typeLabel} 거부 완료`);

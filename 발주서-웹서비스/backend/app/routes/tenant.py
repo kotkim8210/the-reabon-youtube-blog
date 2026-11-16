@@ -188,7 +188,7 @@ async def process_delivery(
         }
         if stats:
             import json
-            headers["X-Stats"] = json.dumps(stats, ensure_ascii=False)
+            headers["X-Stats"] = json.dumps(stats, ensure_ascii=True)   # 헤더는 latin-1만 — 한글은 \uXXXX로
         return StreamingResponse(
             output,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -219,7 +219,8 @@ async def process_delivery(
 
 @router.post("/tracking")
 async def tenant_tracking(
-    reply_files: list[UploadFile] | None = File(default=None),
+    # list[UploadFile] | None 은 FastAPI 0.109가 목록으로 못 읽어 파일을 올려도 422였다 → 빈 목록 기본값(2026-11-16)
+    reply_files: list[UploadFile] = File(default=[]),
     reply_file: UploadFile | None = File(default=None),
     delivery_file: UploadFile = File(...),
     user: dict = Depends(verify_token),
@@ -261,7 +262,7 @@ async def tenant_tracking(
     headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"}
     if stats:
         import json
-        headers["X-Stats"] = json.dumps(stats, ensure_ascii=False)
+        headers["X-Stats"] = json.dumps(stats, ensure_ascii=True)   # 헤더는 latin-1만 — 한글은 \uXXXX로
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

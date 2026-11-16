@@ -669,7 +669,7 @@ async def process_kolrabi_order(
             dup_note = f" (이전 발주분 {dup_skipped}건 자동 제외됨)" if dup_skipped else ""
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자·백도딱딱이복숭아·홍로사과·시나노골드사과·황금향·태추단감·감홍사과 주문을 찾지 못했습니다.{dup_note}",
+                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자·백도딱딱이복숭아·홍로사과·시나노골드사과·황금향·태추단감·감홍사과 주문을 찾지 못했습니다.{dup_note}" + (f" (토스 수집 실패 — {toss_error})" if toss_error else ""),
             )
 
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
@@ -976,25 +976,34 @@ async def process_tomato_order(
 
         results = tomato_order.process_outputs(delivery_bytes, toss_peach_entries=toss_peach_entries)
         if not results:
+            # 그날 주문이 전부 이전 발주분이면 '찾지 못했습니다'만으로는 왜 비었는지 모른다 → 건수·받는분(발주일)을 붙인다
+            dup_note = ""
+            if dup_skipped:
+                labels = _annotate_excluded({}, dup_skipped, dup_names, dup_keys, issued_dates).get("duplicate_skipped_names")
+                dup_note = f" (이전 발주분 {dup_skipped}건 자동 제외됨: {labels})" if labels else f" (이전 발주분 {dup_skipped}건 자동 제외됨)"
+            # 토스 수집이 실패했으면 함께 알린다 — '주문 없음'으로 덮으면 토스 신비복숭아가 조용히 빠진다
+            toss_note = f" (토스 신비복숭아 수집 실패 — {toss_peach_error})" if toss_peach_error else ""
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="제이비티 발주로 출력할 대저토마토·남해땅두릅·초당옥수수·신비복숭아 주문을 찾지 못했습니다. 수박·성주참외는 쥬얼리프룻 메뉴에서 출력됩니다.",
+                detail=f"제이비티 발주로 출력할 대저토마토·남해땅두릅·초당옥수수·신비복숭아 주문을 찾지 못했습니다.{dup_note} 수박·성주참외는 쥬얼리프룻 메뉴에서 출력됩니다." + toss_note,
             )
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
         for _, _, item_stats in results:
             await record_sales_from_process_stats(user["user_id"], item_stats, ymd=sales_ymd)
-        await _record_issued("tomato", results[0][1], *[item_stats for _, _, item_stats in results])
+        # 제이비티 stats는 버킷이 품목별 sales_groups 안에 있다 → 기록용 'options'로 펴서 넘긴다(그대로 넘기면 키 0개)
+        await _record_issued(
+            "tomato", results[0][1], *[tomato_order.issued_record_stats(item_stats) for _, _, item_stats in results]
+        )
 
         toss_peach_info = {}
-        if dup_skipped:
-            toss_peach_info["duplicate_skipped"] = dup_skipped
-            if dup_names:
-                toss_peach_info["duplicate_skipped_names"] = ", ".join(n for n in dup_names if n)
         if toss_peach_entries:
             toss_peach_info["toss_peach_orders"] = len(toss_peach_entries)
         if toss_peach_error:
             toss_peach_info["toss_peach_error"] = toss_peach_error
-        toss_peach_info = _annotate_excluded(toss_peach_info, 0, [], [], issued_dates, reissued=reissued)
+        # 제외·재발주 받는분 옆에 발주일을 붙인다(콜라비 등 다른 메뉴와 같은 표시) — 동명이인 새 주문과 구분
+        toss_peach_info = _annotate_excluded(
+            toss_peach_info, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued,
+        )
 
         if len(results) == 1:
             output_bytes, filename, stats = results[0]
@@ -1625,6 +1634,9 @@ async def process_toss_watermelon_tracking(
         stats = await tomato_tracking.process_toss_watermelon_tracking(tomato_reply_bytes)
         logger.info(f"토스 수박 6/7/8kg 송장 처리 완료: {stats}")
         return {"status": "ok", **stats}
+    except TossApiError as e:
+        logger.warning("Toss watermelon tracking API failed: %s", e.message)
+        _raise_toss_http_error(e)
     except Exception as e:
         logger.exception("토스 수박 6/7/8kg 송장 처리 중 오류")
         raise HTTPException(
@@ -2419,7 +2431,8 @@ async def process_hobak_goguma_order(
             if dup_skipped:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"신규 호박고구마 주문이 없습니다 (이전 발주분 {dup_skipped}건 자동 제외: {', '.join(n for n in dup_names if n)}).",
+                    detail=f"신규 호박고구마 주문이 없습니다 (이전 발주분 {dup_skipped}건 자동 제외: {', '.join(n for n in dup_names if n)})."
+                    + (f" (토스 수집 실패 — {toss_error})" if toss_error else ""),   # 토스 실패를 '신규 없음'으로 덮지 않는다
                 )
             detail = "호박고구마 주문이 없습니다."
             if toss_error:

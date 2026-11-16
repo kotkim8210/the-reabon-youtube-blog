@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from app import config
-from app.coupang.client import coupang_goguma_client
+from app.coupang.client import CoupangApiError, coupang_goguma_client
 from app.processors.coupang_cs_guide import CsGuideInput, build_cs_guide
 
 logger = logging.getLogger(__name__)
@@ -217,11 +217,19 @@ async def list_inquiries(days: int = 7) -> dict:
 
     inquiries: list[dict] = []
     seen_ids: set = set()
+    cc_failures: dict[str, str] = {}   # 고객센터 문의 조회 실패 — 상태별 첫 사유(화면에 확인 필요로 띄운다)
 
     window_start = start
     while window_start <= today:
         window_end = min(window_start + timedelta(days=_MAX_WINDOW_DAYS - 1), today)
-        unanswered = await _fetch_all("NOANSWER", window_start, window_end)
+        try:
+            unanswered = await _fetch_all("NOANSWER", window_start, window_end)
+        except CoupangApiError as exc:
+            # 미답변 조회가 실패했는데 빈 목록으로 넘기면 모든 문의가 '답변완료'로 보이고 답변칸이 숨는다
+            # (2026-11-16 리뷰 2순위) → 목록을 만들지 않고 실패로 올린다.
+            raise CoupangApiError(
+                exc.status_code, f"미답변 조회 실패 — {exc.message}", exc.response_text, exc.blocked_ip,
+            ) from exc
         unanswered_ids = {u.get("inquiryId") for u in unanswered}
         all_items = await _fetch_all("ALL", window_start, window_end)
         for item in all_items:
@@ -254,8 +262,11 @@ async def list_inquiries(days: int = 7) -> dict:
                     if page >= total_pages or not items:
                         break
                     page += 1
-            except Exception:
+            except Exception as exc:
                 logger.exception("고객센터 문의(%s) 조회 실패 — 상품문의만 표시", cc_status)
+                # 로그만 남기면 '답변필요' 고객센터 문의가 화면에서 조용히 사라진다(2026-11-16 리뷰) → 확인 필요로 알린다
+                reason = exc.message if isinstance(exc, CoupangApiError) else (str(exc) or type(exc).__name__)
+                cc_failures.setdefault(cc_status, reason)
         window_start = window_end + timedelta(days=1)
 
     # 긴급 먼저 → 미답변 → 최신순
@@ -265,7 +276,7 @@ async def list_inquiries(days: int = 7) -> dict:
 
     inquiries.sort(key=_sort_key)
     unanswered_count = sum(1 for x in inquiries if not x["answered"])
-    return {
+    result = {
         "total": len(inquiries),
         "unanswered": unanswered_count,
         "answered": len(inquiries) - unanswered_count,
@@ -273,6 +284,12 @@ async def list_inquiries(days: int = 7) -> dict:
         "period": f"{start.isoformat()} ~ {today.isoformat()}",
         "inquiries": inquiries,
     }
+    if cc_failures:
+        cc_labels = {"NO_ANSWER": "답변필요", "TRANSFER": "확인필요"}
+        result["needs_check"] = [
+            f"고객센터 문의({cc_labels.get(s, s)}) 조회 실패 — {reason}" for s, reason in cc_failures.items()
+        ]
+    return result
 
 
 def _neg_key(s: str) -> str:

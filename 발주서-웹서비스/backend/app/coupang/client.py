@@ -35,6 +35,16 @@ class CoupangApiError(RuntimeError):
         self.blocked_ip = blocked_ip
 
 
+# 같은 클래스의 다른 표기(작업 지시서 이름) — 어느 쪽으로 import해도 같은 예외다.
+CoupangAPIError = CoupangApiError
+
+
+def _retry_exhausted_message(status_code: int | None) -> str:
+    """429/5xx 재시도 소진 메시지. 응답 본문은 넣지 않는다(상태코드·요약만)."""
+    kind = "요청 한도 초과" if status_code == 429 else "서버 오류"
+    return f"쿠팡 {kind}(HTTP {status_code}) — {MAX_RETRIES}회 재시도 실패, 잠시 뒤 다시 시도해 주세요"
+
+
 def _parse_coupang_error(response: httpx.Response) -> tuple[str, str | None]:
     """Extract Coupang's useful error text and blocked egress IP when present."""
     text = response.text or ""
@@ -108,6 +118,7 @@ class CoupangClient:
             if query_string:
                 full_url += "?" + query_string
 
+            last_status: int | None = None
             for attempt in range(MAX_RETRIES):
                 auth_header = generate_hmac_signature(
                     method=method,
@@ -130,12 +141,14 @@ class CoupangClient:
                     )
 
                     if response.status_code == 429:
+                        last_status = response.status_code
                         wait = 2 ** attempt
                         logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt + 1})")
                         await asyncio.sleep(wait)
                         continue
 
                     if response.status_code >= 500:
+                        last_status = response.status_code
                         wait = 2 ** attempt
                         logger.warning(f"Server error {response.status_code}, retrying in {wait}s")
                         await asyncio.sleep(wait)
@@ -169,7 +182,10 @@ class CoupangClient:
                     if attempt == MAX_RETRIES - 1:
                         raise
 
-            return None
+            # 429/5xx를 끝까지 받으면 None을 돌려주지 않는다 — 호출부가 '송장 등록 성공'·'주문 0건'·
+            # '모든 문의 답변완료'로 오해했다(2026-11-16 리뷰 2순위). 응답 본문은 넣지 않는다.
+            logger.error("Coupang API %s %s: HTTP %s, %s회 재시도 소진", method, path, last_status, MAX_RETRIES)
+            raise CoupangApiError(last_status or 0, _retry_exhausted_message(last_status))
 
     # --- Product APIs ---
 

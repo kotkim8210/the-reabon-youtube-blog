@@ -1,6 +1,8 @@
-fastapi==0.109.0
+fastapi==0.133.1
+# fastapi 0.133.1은 starlette 상한이 없어 직접 고정(알려진 CVE 없는 최소 버전, 2026-11-16 리뷰 2순위)
+starlette==1.3.1
 uvicorn[standard]==0.27.0
-python-multipart==0.0.6
+python-multipart==0.0.32
 python-jose[cryptography]==3.3.0
 openpyxl==3.1.2
 httpx==0.27.0

@@ -105,6 +105,11 @@ def _phone_eq(row: dict, entry: dict) -> bool:
     return bool(row["phone"]) and row["phone"] == entry["phone"]
 
 
+def _phone_conflict(row: dict, entry: dict) -> bool:
+    """회신 송장과 DeliveryList 줄 양쪽에 전화가 있는데 숫자가 다르다 — 다른 사람(동명이인)일 수 있다."""
+    return bool(row["phone"]) and bool(entry["phone"]) and row["phone"] != entry["phone"]
+
+
 def _address_eq(row: dict, entry: dict) -> bool:
     return bool(row["address"]) and row["address"] == entry["address"]
 
@@ -162,6 +167,9 @@ def _skip_reason(row: dict, used: set[int]) -> str:
         return "같은 사람의 다른 상품 행 — 이 회신에 없음"
     if all(id(entry) in used for entry in same_product):
         return "회신 운송장 수 부족"
+    if all(_phone_conflict(row, entry) and not _address_eq(row, entry)
+           for entry in same_product if id(entry) not in used):
+        return "전화·주소 불일치 — 동명이인 의심, 수동 확인"
     return "동명이인 구분 불가 — 수동 확인"
 
 
@@ -373,6 +381,11 @@ def process(
                     and delivery_name_counts.get(row["name"], 0) > 1
                     and not _options_eq(row, entry) and not _family_eq(row, entry))
 
+    def phone_or_address(row: dict, entry: dict) -> bool:
+        # 양쪽에 전화가 있는데 숫자가 다르면 다른 사람일 수 있어 주소(공백 무시)까지 같아야 넣는다.
+        # 회신 전화가 비어 있으면 종전처럼 허용(2026-11-16 리뷰 — 부산 김철수 줄에 서울 토스 고객 김철수 송장).
+        return not _phone_conflict(row, entry) or _address_eq(row, entry)
+
     # 줄마다 바로 배정하면 앞 줄이 약한 신호(주소)로 남의 송장을 가져가 뒤 줄이 한 칸씩 밀린다
     # (2026-11-02 강본아: 햇밤 줄이 황금향 송장 → 황금향은 감홍, 감홍은 시나노 송장, 시나노는 빈칸).
     # 그래서 강한 신호부터 단계별로 전체 줄을 짝짓고, 다음 단계는 남은 줄·남은 송장만 본다.
@@ -386,8 +399,8 @@ def process(
         lambda r, e: _phone_eq(r, e) and _compatible(r, e) and phone_guard(r, e),
         # 2) 전화로 못 가른 줄 — 다른 줄 전화와 맞는 송장(claimed)은 건드리지 않는다.
         lambda r, e: not e["claimed"] and _compatible(r, e) and _options_eq(r, e) and _address_eq(r, e),
-        lambda r, e: not e["claimed"] and _compatible(r, e) and _options_eq(r, e),
-        lambda r, e: not e["claimed"] and _compatible(r, e) and not needs_guard(r),
+        lambda r, e: not e["claimed"] and _compatible(r, e) and _options_eq(r, e) and phone_or_address(r, e),
+        lambda r, e: not e["claimed"] and _compatible(r, e) and not needs_guard(r) and phone_or_address(r, e),
         # 옵션으로도 못 가른 동명이인 → 같은 품목·같은 주소일 때만, 아니면 오배정 위험이라 미입력+표시
         lambda r, e: not e["claimed"] and _compatible(r, e) and needs_guard(r) and _address_eq(r, e),
     ]

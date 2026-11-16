@@ -16,8 +16,8 @@ from app.processors.tracking_match import (
     name_counts,
     option_key_set,
     options_match,
-    requires_option_guard,
 )
+from app.processors.tracking_input import _match_tier
 from app.processors.goguma_order import is_hobak_goguma_text
 from app.processors.goguma_order import transform_toss_option as normalize_goguma_toss_option
 from app.processors.haedal_tracking_parser import (
@@ -300,10 +300,14 @@ def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
             entries.append({
                 "name": name,
                 "phone": phone,
+                # 전화는 숫자만 비교 — 회신 '010-1234-5678'과 토스 API '01012345678'은 같은 번호(2026-11-16 리뷰)
+                "phone_digits": re.sub(r"\D", "", phone),
                 "address": address,
                 "tracking": tracking,
                 "courier": courier,
                 "option_keys": option_key_set(product, transform_toss_option("", str(product or ""))),
+                # 꿀·호박고구마 구분(품목명이 비면 모름=None) — 같은 사람의 다른 상품 박스 송장을 넣지 않게
+                "hobak": is_hobak_goguma_text(product) if normalize_strip(product) else None,
             })
 
     return entries
@@ -323,6 +327,66 @@ def _masked_name_match(masked: str, full_names) -> list[str]:
         if len(name) == len(masked)
         and all(m == "*" or m == c for m, c in zip(masked, name))
     ]
+
+
+def _tracking_key(value: object) -> str:
+    """송장번호 비교용 — 숫자만(하이픈·공백 표기 차이 무시). 숫자가 없으면 공백만 뺀 글자."""
+    return re.sub(r"\D", "", str(value or "")) or normalize_strip(value)
+
+
+# ── 토스 주문 ↔ 해달 회신 송장 짝짓기 (order = 토스 주문, entry = 회신 줄) ──
+def _phone_key(value: object) -> str:
+    """전화 비교용 숫자 — 엑셀이 앞자리 0을 떨군 '1011112222'도 '01011112222'로 본다."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    return "0" + digits if digits and not digits.startswith("0") else digits
+
+
+def _entry_phone(entry: dict) -> object:
+    # 회신 파서는 phone_digits를 채우지만, 다른 경로에서 온 줄은 전화 원문(phone)만 있을 수 있다
+    return entry.get("phone_digits") or entry.get("phone")
+
+
+def _phone_same(order: dict, entry: dict) -> bool:
+    key = _phone_key(order["phone_digits"])
+    return bool(key) and key == _phone_key(_entry_phone(entry))
+
+
+def _phone_conflict(order: dict, entry: dict) -> bool:
+    """양쪽 다 전화가 있는데 다르다 — 안심번호는 주문마다 달라 다른 주문일 가능성이 크다(옵션만으로는 안 넣는다)."""
+    a, b = _phone_key(order["phone_digits"]), _phone_key(_entry_phone(entry))
+    return bool(a and b) and a != b
+
+
+def _option_same(order: dict, entry: dict) -> bool:
+    return options_match(entry.get("option_keys"), order.get("option_keys"))
+
+
+def _address_same(order: dict, entry: dict) -> bool:
+    return bool(order["address"]) and order["address"] == entry.get("address")
+
+
+def _same_goguma_kind(order: dict, entry: dict) -> bool:
+    """꿀고구마 주문에 호박고구마 박스 송장(또는 그 반대)을 넣지 않는다. 회신 품목명이 비면 모른다고 보고 통과."""
+    return entry.get("hobak") is None or entry["hobak"] == order["hobak"]
+
+
+def _goguma_skip_reason(order: dict, used: set[int]) -> str:
+    candidates = order["candidates"]
+    if not candidates:
+        return "매칭되는 수령인 없음"
+    same_kind = [entry for entry in candidates if _same_goguma_kind(order, entry)]
+    if not same_kind:
+        return "다른 상품 송장뿐 — 이 회신에 없음"
+    signal = [entry for entry in same_kind if _phone_same(order, entry) or _option_same(order, entry)]
+    if not signal:
+        return "이름만 같음(전화·옵션 다름) — 수동 확인"
+    usable = [entry for entry in signal
+              if _phone_same(order, entry) or not _phone_conflict(order, entry) or _address_same(order, entry)]
+    if not usable:
+        return "전화 다름(옵션만 같음) — 수동 확인"
+    if all(id(entry) in used for entry in usable):
+        return "사용 가능한 운송장번호 없음"
+    return "동명이인 구분 불가 — 수동 확인"
 
 
 async def process_toss_tracking(
@@ -359,9 +423,13 @@ async def process_toss_tracking(
         )
     except Exception as e:
         raise ValueError(f"토스 API 조회 실패: {e}") from e
+    if toss_orders_raw is None:
+        # 빈 목록으로 보면 '고구마 주문 없음'으로 잘못 안내된다 — 조회 실패는 실패로 멈춘다(2026-11-16 리뷰)
+        raise ValueError("토스 API 조회 실패: 응답 없음 — 잠시 후 다시 시도하세요.")
 
     # Filter goguma orders
     toss_orders = []
+    tracked_orders = []  # 이미 송장 있는 주문 — 등록은 안 하고 짝짓기에서 그 송장 줄을 먼저 뺀다
     pre_skipped_results = []
     seen_order_product_ids = set()
     for item in toss_orders_raw:
@@ -382,6 +450,23 @@ async def process_toss_tracking(
         existing_tracking = normalize_strip(item.get("shippingTrackingNumber") or "")
         order_id = item.get("orderId") or item.get("orderNumber") or ""
 
+        order = {
+            "order_product_id": order_product_id,
+            "order_id": order_id,
+            "name": normalize_strip(receiver_name),
+            "phone": normalize_strip(receiver_phone),
+            "phone_digits": re.sub(r"\D", "", str(receiver_phone)),
+            "address": normalize_strip(full_address),
+            "name_display": receiver_name,
+            "order_status": order_status,
+            "option_keys": option_key_set(
+                item.get("optionName"),
+                transform_toss_option(item.get("productName") or "", item.get("optionName") or ""),
+            )
+            or option_key_set(item.get("productName")),
+            "hobak": is_hobak_goguma_text(item.get("productName"), item.get("optionName")),
+        }
+
         if existing_tracking:
             pre_skipped_results.append({
                 "order_id": str(order_id),
@@ -390,6 +475,8 @@ async def process_toss_tracking(
                 "status": "skip",
                 "message": "이미 운송장번호가 등록된 주문",
             })
+            order["tracking_key"] = _tracking_key(existing_tracking)
+            tracked_orders.append(order)
             continue
 
         if order_status not in TRACKABLE_TOSS_STATUSES:
@@ -401,20 +488,7 @@ async def process_toss_tracking(
             })
             continue
 
-        toss_orders.append({
-            "order_product_id": order_product_id,
-            "order_id": order_id,
-            "name": normalize_strip(receiver_name),
-            "phone": normalize_strip(receiver_phone),
-            "address": normalize_strip(full_address),
-            "name_display": receiver_name,
-            "order_status": order_status,
-            "option_keys": option_key_set(
-                item.get("optionName"),
-                transform_toss_option(item.get("productName") or "", item.get("optionName") or ""),
-            )
-            or option_key_set(item.get("productName")),
-        })
+        toss_orders.append(order)
 
     if not toss_orders:
         goguma_total = len(seen_order_product_ids)
@@ -437,75 +511,76 @@ async def process_toss_tracking(
             f"(조회 기간: {from_date} ~ {to_date})"
         )
 
-    # 3. Match
+    # 3. Match — 이름만 같으면 동명이인 주문·같은 사람의 다른 박스에 송장이 들어간다(2026-11-16 리뷰).
+    # 전화(숫자만 비교) 또는 옵션(kg·등급)이 맞아야 하고, 강한 신호부터 단계별로 전체를 1:1로 짝짓는다
+    # (주문마다 바로 배정하면 앞 주문이 약한 신호로 남의 박스를 가져간다 — tracking_input과 같은 방식).
     entry_by_name = defaultdict(list)
+    entry_by_tracking = defaultdict(list)
     for entry in haedal_entries:
+        entry["claimed"] = False
         entry_by_name[entry["name"]].append(entry)
+        entry_by_tracking[_tracking_key(entry["tracking"])].append(entry)
 
-    used_entries = set()
-    matched_pairs = []
-    results = list(pre_skipped_results)
-    skip_count = len(pre_skipped_results)
-    toss_name_counts = name_counts(order["name"] for order in toss_orders)
+    # 이미 토스에 등록된 송장의 회신 줄은 그 주문 몫으로 먼저 뺀다 — 실패 건 재시도로 같은 해달 파일을 다시 올리면
+    # 진짜 주인이 빠진 그 줄이 동명이인·같은 사람의 다른 박스 주문에 또 등록됐다(2026-11-16 리뷰). 합포장으로 같은
+    # 송장 줄이 여럿이면 주문마다 하나만(그 주문과 가장 잘 맞는 줄) 차지해, 남은 줄은 같은 상자의 재시도 주문이 받는다.
+    used_entries: set[int] = set()
+    for order in tracked_orders:
+        same = [entry for entry in entry_by_tracking.get(order["tracking_key"], []) if id(entry) not in used_entries]
+        if same:
+            best = max(same, key=lambda e: (_same_goguma_kind(order, e), _option_same(order, e), _phone_same(order, e)))
+            used_entries.add(id(best))
 
-    for order in toss_orders:
+    # 이름 수·전화 선점에는 이미 송장 있는 주문도 넣는다 — 다시 올려도 첫 실행과 같은 가드가 걸리게
+    toss_name_counts = name_counts(order["name"] for order in [*toss_orders, *tracked_orders])
+    for order in [*toss_orders, *tracked_orders]:
         candidates = entry_by_name.get(order["name"], [])
         # 토스가 수취인명을 가린 경우('정*순')에도 풀네임 해달 항목과 와일드카드 매칭
         if not candidates and "*" in order["name"]:
             for masked_name in _masked_name_match(order["name"], entry_by_name.keys()):
                 candidates = candidates + entry_by_name[masked_name]
-        if not candidates:
+        order["candidates"] = candidates
+        order["matched"] = None
+        for entry in candidates:
+            if _phone_same(order, entry) and _same_goguma_kind(order, entry):
+                entry["claimed"] = True  # 이 주문 전화와 맞는 박스 — 다른 주문이 옵션만으로 가져가지 않게
+
+    def eligible(order: dict, entry: dict) -> bool:
+        return _same_goguma_kind(order, entry) and (_phone_same(order, entry) or _option_same(order, entry))
+
+    def phone_guard(order: dict, entry: dict) -> bool:
+        # 같은 사람이 토스로 여러 박스를 주문했으면 전화가 같아도 옵션이 다른 박스는 그 주문 것이 아니다 — 옵션으로 1:1
+        return not (order["option_keys"] and entry.get("option_keys")
+                    and toss_name_counts.get(order["name"], 0) > 1 and not _option_same(order, entry))
+
+    tiers = [
+        lambda o, e: eligible(o, e) and _phone_same(o, e) and _option_same(o, e) and _address_same(o, e),
+        lambda o, e: eligible(o, e) and _phone_same(o, e) and _option_same(o, e),
+        lambda o, e: eligible(o, e) and _phone_same(o, e) and phone_guard(o, e) and _address_same(o, e),
+        lambda o, e: eligible(o, e) and _phone_same(o, e) and phone_guard(o, e),
+        # 전화가 다르면 옵션이 맞는 박스만 — 다른 주문 전화와 맞는 박스(claimed)는 건드리지 않는다.
+        # 양쪽 다 전화가 있는데 다르면(같은 옵션의 동명이인·쿠팡 고객 줄) 주소까지 맞아야 한다.
+        lambda o, e: eligible(o, e) and not e["claimed"] and _option_same(o, e) and _address_same(o, e),
+        lambda o, e: eligible(o, e) and not e["claimed"] and _option_same(o, e) and not _phone_conflict(o, e),
+    ]
+    # used_entries는 위에서 이미 송장 있는 주문 몫으로 뺀 회신 줄을 담고 있다 — 여기서 비우면 안 된다.
+    for allowed in tiers:
+        _match_tier(toss_orders, used_entries, allowed)
+
+    matched_pairs = []
+    results = list(pre_skipped_results)
+    skip_count = len(pre_skipped_results)
+    for order in toss_orders:
+        matched = order["matched"]
+        if matched is None:
             skip_count += 1
             results.append({
                 "order_id": str(order["order_id"]),
                 "name": order["name_display"],
                 "status": "skip",
-                "message": "매칭되는 수령인 없음",
+                "message": _goguma_skip_reason(order, used_entries),
             })
             continue
-
-        available = [
-            (i, c) for i, c in enumerate(candidates)
-            if id(c) not in used_entries
-        ]
-        if requires_option_guard(order["name"], toss_name_counts, len(candidates)):
-            available = [
-                (i, c) for i, c in available
-                if options_match(c.get("option_keys"), order.get("option_keys"))
-            ]
-        if not available:
-            skip_count += 1
-            results.append({
-                "order_id": str(order["order_id"]),
-                "name": order["name_display"],
-                "status": "skip",
-                "message": "사용 가능한 운송장번호 없음",
-            })
-            continue
-
-        matched = None
-
-        for _, c in available:
-            if c["phone"] == order["phone"] and c["address"] == order["address"]:
-                matched = c
-                break
-
-        if matched is None:
-            for _, c in available:
-                if c["phone"] == order["phone"]:
-                    matched = c
-                    break
-
-        if matched is None:
-            for _, c in available:
-                if c["address"] == order["address"]:
-                    matched = c
-                    break
-
-        if matched is None:
-            matched = available[0][1]
-
-        used_entries.add(id(matched))
         matched_pairs.append((order, matched["tracking"], matched.get("courier") or ""))
 
     # 4. Register tracking numbers via Toss API
@@ -533,6 +608,18 @@ async def process_toss_tracking(
                 delivery_company=delivery_company,
                 tracking_number=tracking,
             )
+            if resp is None:
+                # 재시도를 다 써도 응답이 없으면 클라이언트가 None을 준다 — 성공으로 세면 빠진 송장을 모른다
+                fail_count += 1
+                logger.error(f"토스 운송장 등록 실패 (orderProductId={order_product_id}): 응답 없음")
+                results.append({
+                    "order_id": str(order["order_id"]),
+                    "name": order["name_display"],
+                    "tracking": tracking,
+                    "status": "fail",
+                    "message": "토스 응답 없음(재시도 소진) — 다시 등록 필요",
+                })
+                continue
             success_count += 1
             results.append({
                 "order_id": str(order["order_id"]),

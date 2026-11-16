@@ -105,6 +105,11 @@ def _toss_item_text(value) -> str:
     return normalize(" ".join(parts))
 
 
+def _toss_product_text(item: dict) -> str:
+    """품목 판정용 텍스트 — 토스 상품명+옵션만. 수령인 이름·주소·배송메모는 넣지 않는다."""
+    return normalize(f"{item.get('productName') or ''} {item.get('optionName') or ''}")
+
+
 def is_toss_watermelon_order(item: dict) -> bool:
     text = _toss_item_text(item)
     # 망고수박은 제이비티 일반수박 발주 대상이 아니다
@@ -366,7 +371,10 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
     taechu: list[dict] = []
     gamhong: list[dict] = []
     for item in orders:
-        text = _toss_item_text(item)
+        # 품목 판정·변환은 상품명+옵션만 본다(아래 분기의 '전체 주문 텍스트'도 이 텍스트).
+        # 종전엔 이름·주소·배송메모까지 합쳐 이름에 '백도'가 든 손님 주문이 백도 분기로 빠져 누락되고,
+        # 메모에 '콜라비'가 든 주문이 콜라비로 둔갑했다(2026-11-16 리뷰).
+        text = _toss_product_text(item)
         compact = text.replace(" ", "")
         if ("콜라비" not in compact and "밤호박" not in compact
                 and "홍감자" not in compact and "백도" not in compact
@@ -732,10 +740,13 @@ def build_main_order_workbook(
         else:
             product_label = "제이비티"
 
+        # 발주 이력 키(주문번호|옵션)의 옵션 — 다음 발주 때 filter_delivery_by_issued가 대조하는 값과
+        # 같아야 하므로 L열 옵션, 비었으면 K열 상품명을 쓴다.
+        option_key = option or (normalize(row[10].value) if len(row) > 10 else "")
         option_bucket = sales_groups.setdefault(product_label, {}).setdefault(
-            option,
+            option_key,
             {
-                "coupang_option_keyword": option,
+                "coupang_option_keyword": option_key,
                 "vendor_option_name": product,
                 "quantity": 0,
                 "orders": [],
@@ -802,6 +813,18 @@ def build_main_order_workbook(
         ],
     }
     return output.read(), filename, stats
+
+
+def issued_record_stats(stats: dict | None) -> dict:
+    """발주 이력 기록용 stats — sales_groups의 품목별 버킷을 order_ids_from_stats가 읽는 'options'로 편다.
+
+    build_main_order_workbook stats는 버킷이 sales_groups 안에만 있어 그대로 _record_issued에 넘기면 키가
+    0개 기록된다(7/7 도입 이후 제이비티 이전 발주분 제외·미출고 재발주가 한 번도 안 됨, 2026-11-16 리뷰).
+    응답 stats에 'options'를 같이 싣지 않는 것은 같은 주문 목록이 두 번 실려 X-Stats 헤더가 2배가 되고
+    화면에 'options: [object Object]' 줄이 생기기 때문이다.
+    """
+    groups = (stats or {}).get("sales_groups") or []
+    return {"options": [bucket for group in groups for bucket in (group.get("options") or [])]}
 
 
 def process_outputs(

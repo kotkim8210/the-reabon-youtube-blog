@@ -812,6 +812,7 @@ export interface GogumaCsInquiriesResult {
   days: number;
   period: string;
   inquiries: GogumaCsInquiry[];
+  needs_check?: string[];  // 고객센터 문의 조회 실패 등 — 목록에서 빠졌을 수 있음
 }
 
 export const fetchGogumaCsInquiries = (days = 7) =>

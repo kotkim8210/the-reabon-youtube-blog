@@ -831,12 +831,14 @@ function CoupangInquiryTab() {
   const [sentIds, setSentIds] = useState<number[]>([]);
   const [onlyUnanswered, setOnlyUnanswered] = useState(false);
   const [fetched, setFetched] = useState(false);
+  const [warnings, setWarnings] = useState<string[]>([]);  // 고객센터 문의 조회 실패 등(목록에서 빠졌을 수 있음)
 
   const handleFetch = useCallback(async (d: number) => {
     setLoading(true);
     setError('');
     try {
       const res = await fetchGogumaCsInquiries(d);
+      setWarnings(res.needs_check ?? []);
       setInquiries(res.inquiries);
       setCounts({ total: res.total, unanswered: res.unanswered, answered: res.answered });
       setPeriod(res.period);
@@ -920,9 +922,11 @@ function CoupangInquiryTab() {
       </div>
 
       {error && <ErrorBanner message={error} />}
+      {warnings.length > 0 && <ErrorBanner message={warnings.join(' / ')} />}
       {loading && <Spinner text="쿠팡 고객 문의를 불러오고 있습니다..." color="orange" />}
 
-      {!loading && fetched && visible.length === 0 && (
+      {/* 조회 일부가 실패했으면 '문의 없음'으로 보이지 않게 한다 */}
+      {!loading && fetched && visible.length === 0 && warnings.length === 0 && (
         <div className="bg-green-50 border border-green-200 rounded-2xl p-6 text-center animate-fade-in">
           <p className="text-sm font-bold text-green-700">
             {onlyUnanswered ? '미답변 문의가 없습니다. 🎉'
@@ -1071,6 +1075,9 @@ function ClaimsTab({ claimType, approveAction, rejectAction }: {
   };
 
   const handleApprove = async (orderProductId: number) => {
+    // 이전 처리의 '완료' 문구가 이번 실패 옆에 남지 않게 먼저 지운다
+    setError('');
+    setActionMsg('');
     try {
       await approveAction(orderProductId);
       setActionMsg(`${typeLabel} 승인 완료`);
@@ -1082,6 +1089,8 @@ function ClaimsTab({ claimType, approveAction, rejectAction }: {
 
   const handleReject = async () => {
     if (!rejectTarget || !rejectReason) return;
+    setError('');
+    setActionMsg('');
     try {
       await rejectAction(rejectTarget, rejectReason);
       setActionMsg(`${typeLabel} 거부 완료`);

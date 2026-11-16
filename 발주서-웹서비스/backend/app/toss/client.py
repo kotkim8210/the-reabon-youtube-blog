@@ -22,17 +22,37 @@ INVALID_IP_RE = re.compile(r"INVALID_IP|허가되지 않은 IP", re.IGNORECASE)
 class TossApiError(RuntimeError):
     """Toss Shopping API error that should be shown clearly to the operator."""
 
-    def __init__(self, message: str, *, error_code: str = "", reason: str = "", raw: object | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "",
+        reason: str = "",
+        raw: object | None = None,
+        status_code: int | None = None,
+    ):
         super().__init__(message)
         self.message = message
         self.error_code = error_code
         self.reason = reason
         self.raw = raw
+        # HTTP 상태코드 — 429/5xx 재시도 소진일 때만 있다(resultType=FAIL 거절은 None).
+        self.status_code = status_code
 
     @property
     def is_invalid_ip(self) -> bool:
         haystack = f"{self.error_code} {self.reason} {self.message}"
         return bool(INVALID_IP_RE.search(haystack))
+
+
+# 같은 클래스의 다른 표기(작업 지시서 이름) — 어느 쪽으로 import해도 같은 예외다.
+TossAPIError = TossApiError
+
+
+def _retry_exhausted_message(status_code: int | None) -> str:
+    """429/5xx 재시도 소진 메시지. 응답 본문은 넣지 않는다(상태코드·요약만)."""
+    kind = "요청 한도 초과" if status_code == 429 else "서버 오류"
+    return f"토스 {kind}(HTTP {status_code}) — {MAX_RETRIES}회 재시도 실패, 잠시 뒤 다시 시도해 주세요"
 
 
 class TossClient:
@@ -93,6 +113,7 @@ class TossClient:
         async with RATE_LIMIT:
             client = await self._get_client()
 
+            last_status: int | None = None
             for attempt in range(MAX_RETRIES):
                 await self._ensure_token()
 
@@ -117,12 +138,14 @@ class TossClient:
                         response.raise_for_status()
 
                     if response.status_code == 429:
+                        last_status = response.status_code
                         wait = 2 ** attempt
                         logger.warning(f"Toss rate limited, waiting {wait}s")
                         await asyncio.sleep(wait)
                         continue
 
                     if response.status_code >= 500:
+                        last_status = response.status_code
                         wait = 2 ** attempt
                         logger.warning(f"Toss server error {response.status_code}, retrying in {wait}s")
                         await asyncio.sleep(wait)
@@ -148,11 +171,21 @@ class TossClient:
                     if attempt == MAX_RETRIES - 1:
                         raise
 
-            return None
+            # 429/5xx를 끝까지 받으면 None을 돌려주지 않는다 — 호출부가 '운송장 등록 성공'·'주문 0건'으로
+            # 오해했다(2026-11-16 리뷰 2순위). 응답 본문은 넣지 않는다.
+            logger.error("Toss API %s %s: HTTP %s, %s회 재시도 소진", method, path, last_status, MAX_RETRIES)
+            raise TossApiError(
+                _retry_exhausted_message(last_status),
+                error_code=f"HTTP_{last_status}",
+                status_code=last_status,
+            )
 
     @staticmethod
     def _raise_if_failed(result: dict | None, fallback_message: str) -> None:
-        if not result or result.get("resultType") != "FAIL":
+        if not isinstance(result, dict):
+            # 쓰기 API 응답이 비면 처리됐는지 알 수 없다 — 성공으로 넘기지 않는다
+            raise TossApiError(f"{fallback_message} — 응답 없음", error_code="EMPTY_RESPONSE", reason="응답 없음")
+        if result.get("resultType") != "FAIL":
             return
         error_info = result.get("error") or {}
         error_code = str(error_info.get("errorCode") or "INVALID_REQUEST")
@@ -271,6 +304,8 @@ class TossClient:
             if isinstance(exc, httpx.HTTPStatusError):
                 return exc.response.status_code == 400
             if isinstance(exc, TossApiError):
+                if exc.status_code is not None:
+                    return False  # 429/5xx 재시도 소진 — 주문 상태 문제가 아니다
                 text = f"{getattr(exc, 'reason', '') or ''} {exc}"
                 return ("상품준비중" in text) or ("배송중" in text) or ("상태" in text)
             return False
@@ -387,56 +422,70 @@ class TossClient:
             })
         return claims
 
+    # 클레임 승인/거부는 토스가 HTTP 200 + resultType=FAIL로 거절할 수 있다 — 그대로 돌려주면
+    # 화면에 '완료'로 떴다(2026-11-16 리뷰 2순위). FAIL·빈 응답은 TossApiError로 올린다.
     async def approve_cancel(self, order_product_id: int) -> dict | None:
         """Approve a cancellation request."""
-        return await self._request(
+        result = await self._request(
             "PUT",
             f"/api/v3/shopping-fep/orders/products/{order_product_id}/cancel/approve",
         )
+        self._raise_if_failed(result, "토스 취소 승인 실패")
+        return result
 
     async def reject_cancel(
         self, order_product_id: int, reason: str
     ) -> dict | None:
         """Reject a cancellation request."""
-        return await self._request(
+        result = await self._request(
             "PUT",
             f"/api/v3/shopping-fep/orders/products/{order_product_id}/cancel/reject",
             json_body={"rejectReason": reason},
         )
+        self._raise_if_failed(result, "토스 취소 거부 실패")
+        return result
 
     async def approve_exchange(self, order_product_id: int) -> dict | None:
         """Approve an exchange request."""
-        return await self._request(
+        result = await self._request(
             "PUT",
             f"/api/v3/shopping-fep/orders/products/{order_product_id}/exchange/approve",
         )
+        self._raise_if_failed(result, "토스 교환 승인 실패")
+        return result
 
     async def reject_exchange(
         self, order_product_id: int, reason: str
     ) -> dict | None:
         """Reject an exchange request."""
-        return await self._request(
+        result = await self._request(
             "PUT",
             f"/api/v3/shopping-fep/orders/products/{order_product_id}/exchange/reject",
             json_body={"rejectReason": reason},
         )
+        self._raise_if_failed(result, "토스 교환 거부 실패")
+        return result
 
     async def approve_return(self, order_product_id: int) -> dict | None:
         """Approve a return request."""
-        return await self._request(
+        result = await self._request(
             "PUT",
             f"/api/v3/shopping-fep/orders/products/{order_product_id}/return/approve",
         )
+        self._raise_if_failed(result, "토스 반품 승인 실패")
+        return result
 
     async def reject_return(
         self, order_product_id: int, reason: str
     ) -> dict | None:
         """Reject a return request."""
-        return await self._request(
+        result = await self._request(
             "PUT",
             f"/api/v3/shopping-fep/orders/products/{order_product_id}/return/reject",
             json_body={"rejectReason": reason},
         )
+        self._raise_if_failed(result, "토스 반품 거부 실패")
+        return result
 
     async def test_connection(self) -> dict:
         """Test API connection by attempting token acquisition."""

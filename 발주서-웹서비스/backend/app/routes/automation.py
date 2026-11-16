@@ -51,7 +51,7 @@ def _batch_excel_response(
         filename,
         "Content-Disposition, X-Stats, X-Batch-Id, X-Sync-Status",
         {
-            "X-Stats": json.dumps(stats, ensure_ascii=False),
+            "X-Stats": json.dumps(stats, ensure_ascii=True),   # 헤더는 latin-1만 — 한글은 \uXXXX로
             "X-Batch-Id": str(batch_id),
             "X-Sync-Status": sync_status,
         },
@@ -61,7 +61,8 @@ def _batch_excel_response(
 def _download_response(output_bytes: bytes, filename: str, stats: dict | None = None) -> StreamingResponse:
     headers: dict[str, str] = {}
     if stats is not None:
-        headers["X-Stats"] = json.dumps(stats, ensure_ascii=False)
+        # ensure_ascii=False면 한글 stats에서 latin-1 헤더 오류 → 홈 '송장번호 입력' 카드가 항상 실패했다(2026-11-16 리뷰)
+        headers["X-Stats"] = json.dumps(stats, ensure_ascii=True)
     return _stream_excel(output_bytes, filename, "Content-Disposition, X-Stats", headers)
 
 
@@ -150,7 +151,8 @@ async def process_danharu(
 
 @router.post("/tracking/danharu")
 async def process_danharu_tracking(
-    reply_files: list[UploadFile] | None = File(default=None),
+    # list[UploadFile] | None 은 FastAPI 0.109가 목록으로 못 읽어 파일을 올려도 422였다 → 빈 목록 기본값(2026-11-16)
+    reply_files: list[UploadFile] = File(default=[]),
     reply_file: UploadFile | None = File(default=None),
     delivery_file: UploadFile = File(...),
     user: dict = Depends(verify_token),
@@ -183,7 +185,9 @@ async def process_danharu_tracking(
 
 @router.post("/tracking/unified")
 async def process_unified_tracking(
-    reply_files: list[UploadFile] | None = File(default=None),
+    # 홈 '송장번호 입력' 카드. list[UploadFile] | None 은 FastAPI 0.109가 목록으로 못 읽어
+    # reply_files를 올리면 항상 422였다 → 빈 목록 기본값(2026-11-16)
+    reply_files: list[UploadFile] = File(default=[]),
     reply_file: UploadFile | None = File(default=None),
     delivery_file: UploadFile = File(...),
     user: dict = Depends(verify_token),

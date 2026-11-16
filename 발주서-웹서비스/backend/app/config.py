@@ -53,7 +53,11 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "/data/suyikolla.db")
 
 # Deployment mode: 'saas' (hosted, multi-tenant, billing enabled) or 'onprem' (self-hosted, no billing)
 DEPLOYMENT_MODE = os.getenv("DEPLOYMENT_MODE", "saas").lower()
-DISABLE_SIGNUP = os.getenv("DISABLE_SIGNUP", "false").lower() == "true"
+# 개인용(사용자 1명) 기본값: 신규 가입 막기 + 관리자(role=admin) 계정만 로그인·API 사용.
+# 끄려면 .env에 DISABLE_SIGNUP=false / ADMIN_ONLY=false. 종전 기본값(가입 허용)에선 외부인이
+# 카카오·구글 로그인만으로 계정을 만들어 발주 API를 쓸 수 있었다(2026-11-16 리뷰).
+DISABLE_SIGNUP = os.getenv("DISABLE_SIGNUP", "true").strip().lower() not in ("false", "0", "no", "off")
+ADMIN_ONLY = os.getenv("ADMIN_ONLY", "true").strip().lower() not in ("false", "0", "no", "off")
 DISABLE_BILLING = os.getenv("DISABLE_BILLING", "false").lower() == "true" or DEPLOYMENT_MODE == "onprem"
 DISABLE_QUOTA = os.getenv("DISABLE_QUOTA", "false").lower() == "true" or DEPLOYMENT_MODE == "onprem"
 LICENSE_KEY = os.getenv("LICENSE_KEY", "")

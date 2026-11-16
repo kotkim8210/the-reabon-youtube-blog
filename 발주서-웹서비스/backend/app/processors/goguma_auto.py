@@ -201,9 +201,11 @@ async def process_from_api(
         duplicate_skipped = dup_c + dup_t
 
     if not orders and not toss_entries and not allow_empty:
+        # 토스 수집이 실패했으면 '주문 없음'으로 덮지 않는다 — 토스 주문이 있었을 수 있다(2026-11-16 리뷰)
+        toss_note = f" (토스 주문 수집 실패 — {toss_error})" if toss_error else ""
         if duplicate_skipped:
-            raise ValueError(f"신규 고구마 주문이 없습니다 (이전 발주분 {duplicate_skipped}건 자동 제외).")
-        raise ValueError("해당 기간에 고구마 주문이 없습니다.")
+            raise ValueError(f"신규 고구마 주문이 없습니다 (이전 발주분 {duplicate_skipped}건 자동 제외).{toss_note}")
+        raise ValueError(f"해당 기간에 고구마 주문이 없습니다.{toss_note}")
 
     # Load template
     template_path = TEMPLATE_DIR / "해달_발주서_한진양식.xlsx"
