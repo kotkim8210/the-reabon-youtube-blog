@@ -133,6 +133,7 @@ def _jejudapam_event_product(prize: str) -> str | None:
     """
     from app.processors.kolrabi_order import (
         convert_bamhobak_option,
+        convert_busa_option,
         convert_gamhong_option,
         convert_hongro_option,
         convert_hwanggeum_option,
@@ -154,6 +155,11 @@ def _jejudapam_event_product(prize: str) -> str | None:
         converted = converter(text, "") or converter(text, EVENT_DEFAULT_GRADE)
         if converted:
             return converted
+    # 부사사과(2026-11-16): 경품명 '부사 사과2kg(소과)'가 원문 그대로 나가 거래처 사이트에서 수동 연결해야 했다
+    # → '부사 정품 소과 실중량 2kg(11-13과)'. 등급이 없으면 다른 경품처럼 중과.
+    converted = convert_busa_option(text, "") or convert_busa_option(text, EVENT_DEFAULT_GRADE)
+    if converted:
+        return converted
     return None
 
 
@@ -275,6 +281,8 @@ def _labels_for(products: list[str]) -> list[str]:
         labels.append("황금향")
     if any("시나노" in p for p in products):
         labels.append("시나노골드")
+    if any("부사" in p for p in products):
+        labels.append("부사사과")
     return labels
 
 

@@ -65,3 +65,18 @@ def test_process_outputs_includes_busa_order_file():
     names = [ws.cell(r, c).value for r in range(2, ws.max_row + 1) for c in range(1, ws.max_column + 1)]
     assert "부사 정품 중과 실중량 2kg(8-9과)" in names and "부사 정품 대과 실중량 5kg(12-16과)" in names
     assert not any("시나노" in str(v) for v in names if v)
+
+
+@pytest.mark.parametrize(
+    "prize, expected",
+    [
+        ("부사 사과2kg(소과)", "부사 정품 소과 실중량 2kg(11-13과)"),  # 2026-11-16 실제 경품명(원문 그대로 나가던 사고)
+        ("부사사과 3kg", "부사 정품 중과 실중량 3kg(11-12과)"),       # 등급 없으면 중과
+    ],
+)
+def test_event_winner_busa_prize_uses_jejudapam_option(prize, expected):
+    from app.processors import event_order
+
+    assert event_order.event_product_name(prize) == expected
+    assert event_order.event_supplier(prize) == "jejudapam"
+    assert event_order._labels_for([expected]) == ["부사사과"]
