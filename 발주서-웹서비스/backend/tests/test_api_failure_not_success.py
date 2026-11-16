@@ -18,6 +18,8 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
+from app import api_common
+from app.routes import process_fruit, process_goguma
 from app.coupang import client as coupang_mod
 from app.coupang.client import CoupangApiError, CoupangClient
 from app.toss import client as toss_mod
@@ -206,17 +208,16 @@ def test_toss_watermelon_tracking_endpoint_api_error_is_502(monkeypatch):
 
     from fastapi import UploadFile
 
-    from app import main
 
     async def failing(_reply_bytes):
         raise TossApiError(
             "토스 서버 오류(HTTP 503) — 3회 재시도 실패, 잠시 뒤 다시 시도해 주세요", status_code=503,
         )
 
-    monkeypatch.setattr(main.tomato_tracking, "process_toss_watermelon_tracking", failing)
+    monkeypatch.setattr(process_fruit.tomato_tracking, "process_toss_watermelon_tracking", failing)
     upload = UploadFile(file=BytesIO(b"reply"), filename="reply.xlsx")
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(main.process_toss_watermelon_tracking(tomato_reply_file=upload, _token={}))
+        asyncio.run(process_fruit.process_toss_watermelon_tracking(tomato_reply_file=upload, _token={}))
     assert exc.value.status_code == 502
     assert "HTTP 503" in exc.value.detail
 
@@ -258,13 +259,12 @@ def test_cs_unanswered_fetch_failure_is_error_not_all_answered(monkeypatch):
 
 
 def test_cs_endpoint_shows_unanswered_failure(monkeypatch):
-    from app import main
     from app.processors import goguma_cs
 
-    monkeypatch.setattr(main, "_goguma_proxy_enabled", lambda: False)
+    monkeypatch.setattr(api_common, "_goguma_proxy_enabled", lambda: False)
     monkeypatch.setattr(goguma_cs, "coupang_goguma_client", _coupang(_cs_handler(429)))
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(main.get_goguma_cs_inquiries(days=7, _token={}))
+        asyncio.run(process_goguma.get_goguma_cs_inquiries(days=7, _token={}))
     assert exc.value.status_code == 502
     assert "미답변 조회 실패" in exc.value.detail
 
@@ -426,11 +426,11 @@ def _no_issued_history(monkeypatch, main):
     async def no_sales(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(main, "_issued_exclusions", no_exclusions)
-    monkeypatch.setattr(main, "_issued_exclusion_dates", no_dates)
-    monkeypatch.setattr(main, "_issued_stale_keys", no_stale)
-    monkeypatch.setattr(main, "_goguma_proxy_enabled", lambda: False)
-    monkeypatch.setattr(main, "record_sales_from_process_stats", no_sales)
+    monkeypatch.setattr(api_common, "_issued_exclusions", no_exclusions)
+    monkeypatch.setattr(api_common, "_issued_exclusion_dates", no_dates)
+    monkeypatch.setattr(api_common, "_issued_stale_keys", no_stale)
+    monkeypatch.setattr(api_common, "_goguma_proxy_enabled", lambda: False)
+    monkeypatch.setattr(api_common, "record_sales_from_process_stats", no_sales)
 
 
 def _toss_always_503(monkeypatch) -> list[str]:
@@ -449,7 +449,7 @@ EMPTY_COUPANG_ORDERS = {"code": 200, "message": "OK", "data": [], "nextToken": "
 
 
 def _run_goguma_auto(main):
-    return asyncio.run(main.process_goguma_auto(
+    return asyncio.run(process_goguma.process_goguma_auto(
         from_date="2026-11-16", to_date="2026-11-16", include_toss="true", send_email="false",
         exclude_issued="true", alwayz_file=None, temu_file=None, winners_file=None, user={"user_id": 1},
     ))
@@ -521,7 +521,7 @@ def test_tomato_order_no_jbt_items_toss_fail_shows_toss_failure(monkeypatch):
     _no_issued_history(monkeypatch, main)
     toss_calls = _toss_always_503(monkeypatch)
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(main.process_tomato_order(
+        asyncio.run(process_fruit.process_tomato_order(
             delivery_file=_upload(_xlsx_header_only()), toss_from_date="2026-11-16", toss_to_date="2026-11-16",
             include_toss="", exclude_issued="true", user={"user_id": 1},
         ))
@@ -537,7 +537,7 @@ def test_kolrabi_order_no_items_toss_fail_shows_toss_failure(monkeypatch):
     _no_issued_history(monkeypatch, main)
     toss_calls = _toss_always_503(monkeypatch)
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(main.process_kolrabi_order(
+        asyncio.run(process_fruit.process_kolrabi_order(
             delivery_file=_upload(_xlsx_header_only()), toss_from_date="2026-11-16", toss_to_date="2026-11-16",
             include_toss="", exclude_issued="true", user={"user_id": 1},
         ))
@@ -561,9 +561,9 @@ def test_hobak_goguma_all_duplicates_toss_fail_shows_toss_failure(monkeypatch):
             skipped_keys.append("1010|호박고구마 3kg")
         return delivery_bytes, 1
 
-    monkeypatch.setattr(main.issued_orders, "filter_delivery_by_issued", one_duplicate)
+    monkeypatch.setattr(api_common.issued_orders, "filter_delivery_by_issued", one_duplicate)
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(main.process_hobak_goguma_order(
+        asyncio.run(process_goguma.process_hobak_goguma_order(
             delivery_file=_upload(_xlsx_header_only()), winners_file=None,
             toss_from_date="2026-11-16", toss_to_date="2026-11-16", exclude_issued="true", user={"user_id": 1},
         ))

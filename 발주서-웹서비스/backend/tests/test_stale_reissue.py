@@ -121,7 +121,7 @@ def test_alwayz_rows_with_tracking_are_skipped():
 
 
 def test_widen_start_reaches_back_to_stale_issue_date(monkeypatch):
-    from app import main as app_main
+    from app import api_common as app_main  # main.py에서 분리(2026-11-17)
     monkeypatch.setattr(app_main, "_today_kst", lambda: "2026-10-12")
     dates = {"A|x": "2026-10-08", "B|x": "2026-09-01"}
     assert app_main._widen_start("2026-10-11", dates, {"A|x"}) == "2026-10-08"

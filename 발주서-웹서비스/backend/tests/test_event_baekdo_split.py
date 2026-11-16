@@ -97,7 +97,7 @@ def test_delivery_slot_rejects_winners_csv_with_guidance():
     import pytest
     from fastapi import HTTPException
 
-    from app.main import _require_xlsx
+    from app.api_common import _require_xlsx
 
     csv_bytes = _csv([_row("백도 딱딱이복숭아 대과 2kg", "당첨자")])
     with pytest.raises(HTTPException) as exc:

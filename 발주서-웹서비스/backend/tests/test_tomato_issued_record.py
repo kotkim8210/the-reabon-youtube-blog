@@ -20,6 +20,8 @@ from fastapi import HTTPException, UploadFile
 from openpyxl import Workbook, load_workbook
 
 from app import main
+from app import api_common
+from app.routes import process_fruit
 from app.processors import event_order, issued_orders, tomato_order
 
 KST = timezone(timedelta(hours=9))
@@ -151,7 +153,7 @@ def _endpoint(monkeypatch, tmp_path):
         def now(cls, tz=None):
             return cls.at.astimezone(tz) if tz else cls.at
 
-    monkeypatch.setattr(main, "datetime", _Frozen)
+    monkeypatch.setattr(api_common, "datetime", _Frozen)
     monkeypatch.setattr(main.database, "DATABASE_PATH", str(tmp_path / "issued.db"))
     monkeypatch.setattr(main.database, "_db", None)
     monkeypatch.setattr(toss_module, "toss_client", _FakeTossClient([TOSS_PEACH_ITEM]), raising=False)
@@ -160,7 +162,7 @@ def _endpoint(monkeypatch, tmp_path):
         _Frozen.at = day
         ymd = day.strftime("%Y-%m-%d")
         upload = UploadFile(file=BytesIO(_delivery(rows)), filename=f"DeliveryList({ymd}).xlsx")
-        response = await main.process_tomato_order(
+        response = await process_fruit.process_tomato_order(
             delivery_file=upload,
             toss_from_date=ymd if with_toss else "",
             toss_to_date=ymd if with_toss else "",

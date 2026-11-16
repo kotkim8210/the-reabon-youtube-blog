@@ -8,7 +8,9 @@ import re
 from pathlib import Path
 
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend" / "src"
-BACKEND_MAIN = Path(__file__).resolve().parents[1] / "app" / "main.py"
+BACKEND_APP = Path(__file__).resolve().parents[1] / "app"
+# 라우트는 main.py에서 routes/process_*.py로 분리(2026-11-17) — 둘 다 본다
+BACKEND_ROUTE_FILES = [BACKEND_APP / "main.py", *sorted((BACKEND_APP / "routes").glob("process_*.py"))]
 
 
 def _field_name_map() -> dict[str, str]:
@@ -29,7 +31,7 @@ def _upload_keys() -> dict[str, str]:
 
 
 def _backend_upload_params() -> set[str]:
-    src = BACKEND_MAIN.read_text(encoding="utf-8")
+    src = "\n".join(path.read_text(encoding="utf-8") for path in BACKEND_ROUTE_FILES)
     return set(re.findall(r"^\s*(\w+):\s*UploadFile", src, re.M))
 
 

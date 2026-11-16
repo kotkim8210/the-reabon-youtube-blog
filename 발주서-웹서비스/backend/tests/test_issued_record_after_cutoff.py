@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import main
+from app import api_common
 
 KST = timezone(timedelta(hours=9))
 
@@ -52,7 +53,7 @@ def recorded(monkeypatch):
 
 def _freeze(monkeypatch, at: datetime) -> None:
     _FrozenDateTime.frozen = at
-    monkeypatch.setattr(main, "datetime", _FrozenDateTime)
+    monkeypatch.setattr(api_common, "datetime", _FrozenDateTime)
 
 
 @pytest.mark.parametrize(
@@ -67,7 +68,7 @@ def test_records_regardless_of_generation_time(monkeypatch, recorded, at, label)
     _freeze(monkeypatch, at)
 
     asyncio.run(
-        main._record_issued(
+        api_common._record_issued(
             "kolrabi",
             "제주다팜_아이티소프트_청사과발주(20260817).xlsx",
             _stats("30012345678", "청사과 소과(가정용) 2kg"),
@@ -85,7 +86,7 @@ def test_extra_ids_merged_after_cutoff(monkeypatch, recorded):
     _freeze(monkeypatch, datetime(2026, 8, 17, 16, 20, tzinfo=KST))
 
     asyncio.run(
-        main._record_issued(
+        api_common._record_issued(
             "kolrabi",
             "제주다팜_아이티소프트_미니밤호박발주 추가건(20260817).xlsx",
             _stats("30099999999", "미니밤호박 3kg"),

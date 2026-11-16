@@ -13,6 +13,8 @@ from fastapi import UploadFile
 from openpyxl import Workbook
 
 from app import main
+from app import api_common
+from app.routes import process_fruit
 
 BUSA = "경북 부사사과 정품 실중량"
 
@@ -40,7 +42,7 @@ def test_merge_needs_check_labels_each_file():
         (b"", "b.xlsx", {"product": "부사사과(제주다팜)", "total": 0, "needs_check": ["김부사(1박스 3kg (중대과)) — 거래처 판매옵션에 없음"]}),
         (b"", "c.xlsx", {"needs_check": "문자열 경고"}),
     ]
-    assert main._merge_needs_check(results) == [
+    assert api_common._merge_needs_check(results) == [
         "부사사과(제주다팜): 김부사(1박스 3kg (중대과)) — 거래처 판매옵션에 없음",
         "문자열 경고",
     ]
@@ -63,15 +65,15 @@ def run_kolrabi(monkeypatch):
     async def fake_record(*_a, **_k):
         return None
 
-    monkeypatch.setattr(main, "_issued_exclusions", fake_exclusions)
-    monkeypatch.setattr(main, "_issued_exclusion_dates", fake_dates)
-    monkeypatch.setattr(main, "_issued_stale_keys", fake_stale)
-    monkeypatch.setattr(main, "record_sales_from_process_stats", fake_sales)
+    monkeypatch.setattr(api_common, "_issued_exclusions", fake_exclusions)
+    monkeypatch.setattr(api_common, "_issued_exclusion_dates", fake_dates)
+    monkeypatch.setattr(api_common, "_issued_stale_keys", fake_stale)
+    monkeypatch.setattr(api_common, "record_sales_from_process_stats", fake_sales)
     monkeypatch.setattr(main.database, "record_issued_orders", fake_record)
 
     def run(delivery: bytes):
         upload = UploadFile(file=BytesIO(delivery), filename="DeliveryList(2026-11-16)_(0).xlsx")
-        return asyncio.run(main.process_kolrabi_order(
+        return asyncio.run(process_fruit.process_kolrabi_order(
             delivery_file=upload, toss_from_date="", toss_to_date="", include_toss="",
             exclude_issued="true", user={"user_id": 1},
         ))

@@ -12,6 +12,8 @@ from fastapi import HTTPException
 from openpyxl import load_workbook
 
 from app import main
+from app import api_common
+from app.routes import process_goguma
 from app.processors import goguma_order, issued_orders, toss_auto
 
 
@@ -47,7 +49,7 @@ def endpoint(monkeypatch):
 
     async def fake_exclusions(section, flag, reissue_stale=True):
         assert section == "goguma"                       # '전체 수집'과 같은 이력
-        return set(issued) if main._exclude_issued_enabled(flag) else set()
+        return set(issued) if api_common._exclude_issued_enabled(flag) else set()
 
     async def fake_dates(section, flag):
         return {}
@@ -62,17 +64,17 @@ def endpoint(monkeypatch):
         recorded.append({"section": section, "ids": list(order_ids)})
 
     monkeypatch.setattr(toss_auto, "toss_client", FakeToss())
-    monkeypatch.setattr(main, "_goguma_proxy_enabled", lambda: False)
-    monkeypatch.setattr(main, "_issued_exclusions", fake_exclusions)
-    monkeypatch.setattr(main, "_issued_exclusion_dates", fake_dates)
-    monkeypatch.setattr(main, "_issued_stale_keys", fake_stale)
-    monkeypatch.setattr(main, "record_sales_from_process_stats", fake_sales)
+    monkeypatch.setattr(api_common, "_goguma_proxy_enabled", lambda: False)
+    monkeypatch.setattr(api_common, "_issued_exclusions", fake_exclusions)
+    monkeypatch.setattr(api_common, "_issued_exclusion_dates", fake_dates)
+    monkeypatch.setattr(api_common, "_issued_stale_keys", fake_stale)
+    monkeypatch.setattr(api_common, "record_sales_from_process_stats", fake_sales)
     monkeypatch.setattr(main.database, "record_issued_orders", fake_record)
-    monkeypatch.setattr(main, "make_excel_response", lambda b, f, s=None: (b, f, s))
+    monkeypatch.setattr(api_common, "make_excel_response", lambda b, f, s=None: (b, f, s))
 
     def run(exclude_issued: bool = True):
-        req = main.TossAutoRequest(from_date="2026-11-15", to_date="2026-11-16", exclude_issued=exclude_issued)
-        return asyncio.run(main.process_toss_order(req=req, user={"user_id": 1}))
+        req = process_goguma.TossAutoRequest(from_date="2026-11-15", to_date="2026-11-16", exclude_issued=exclude_issued)
+        return asyncio.run(process_goguma.process_toss_order(req=req, user={"user_id": 1}))
 
     run.issued = issued
     return run, recorded
@@ -113,5 +115,5 @@ def test_toss_only_unchecked_box_issues_again(endpoint):
 
 def test_request_without_flag_defaults_to_exclude():
     """다른 화면(토스 자동 페이지)은 플래그 없이 보낸다 → 기본은 제외(중복 방지)."""
-    req = main.TossAutoRequest(from_date="2026-11-16", to_date="2026-11-16")
+    req = process_goguma.TossAutoRequest(from_date="2026-11-16", to_date="2026-11-16")
     assert req.exclude_issued is True

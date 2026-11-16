@@ -5,7 +5,7 @@
 """
 from datetime import date, timedelta
 
-from app import main as app_main
+from app import api_common as app_main  # 헬퍼는 main.py에서 api_common으로 분리(2026-11-17)
 from app.processors import issued_orders
 
 

@@ -15,6 +15,8 @@ from fastapi import HTTPException, UploadFile
 from openpyxl import load_workbook
 
 from app import main
+from app import api_common
+from app.routes import process_goguma
 from app.processors import goguma_auto, goguma_order, issued_orders
 
 HEADER = "경품명,별명,개인 식별 정보 확인,이름,연락처,주소,주문 아이디,구매 금액,환불/취소 금액,환불/날짜/시간"
@@ -110,18 +112,18 @@ def endpoint(monkeypatch):
     async def fake_collect(_from, _to):
         return list(coupang_orders)
 
-    monkeypatch.setattr(main, "_issued_exclusions", fake_exclusions)
-    monkeypatch.setattr(main, "_issued_exclusion_dates", fake_dates)
-    monkeypatch.setattr(main, "_issued_stale_keys", fake_stale)
-    monkeypatch.setattr(main, "_goguma_proxy_enabled", lambda: False)
-    monkeypatch.setattr(main, "record_sales_from_process_stats", fake_sales)
+    monkeypatch.setattr(api_common, "_issued_exclusions", fake_exclusions)
+    monkeypatch.setattr(api_common, "_issued_exclusion_dates", fake_dates)
+    monkeypatch.setattr(api_common, "_issued_stale_keys", fake_stale)
+    monkeypatch.setattr(api_common, "_goguma_proxy_enabled", lambda: False)
+    monkeypatch.setattr(api_common, "record_sales_from_process_stats", fake_sales)
     monkeypatch.setattr(main.database, "record_issued_orders", fake_record)
-    monkeypatch.setattr(main, "make_excel_response", lambda b, f, s=None: (b, f, s))
+    monkeypatch.setattr(api_common, "make_excel_response", lambda b, f, s=None: (b, f, s))
     monkeypatch.setattr(goguma_auto, "collect_orders", fake_collect)
 
     def run(csv_bytes: bytes | None):
         winners = UploadFile(file=BytesIO(csv_bytes), filename="winners_raw.csv") if csv_bytes else None
-        return asyncio.run(main.process_goguma_auto(
+        return asyncio.run(process_goguma.process_goguma_auto(
             from_date="2026-11-16", to_date="2026-11-16", include_toss="false", send_email="false",
             exclude_issued="true", alwayz_file=None, temu_file=None, winners_file=winners,
             user={"user_id": 1},

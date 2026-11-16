@@ -17,6 +17,8 @@ from fastapi import HTTPException, UploadFile
 from openpyxl import load_workbook
 
 from app import main
+from app import api_common
+from app.routes import process_fruit
 from app.processors import event_order, issued_orders
 
 HEADER = "경품명,별명,개인 식별 정보 확인,이름,연락처,주소,주문 아이디,구매 금액,환불/취소 금액,환불/날짜/시간"
@@ -45,7 +47,7 @@ def endpoint(monkeypatch):
 
     async def fake_exclusions(section, flag, reissue_stale=True):
         assert section == event_order.EVENT_SECTION and reissue_stale is False   # 당첨자는 재발주 없이 영구 제외
-        return set(issued) if main._exclude_issued_enabled(flag) else set()
+        return set(issued) if api_common._exclude_issued_enabled(flag) else set()
 
     async def fake_dates(section, flag):
         return {}
@@ -53,13 +55,13 @@ def endpoint(monkeypatch):
     async def fake_record(section, order_ids, filename, ymd):
         recorded.append({"section": section, "ids": list(order_ids), "filename": filename})
 
-    monkeypatch.setattr(main, "_issued_exclusions", fake_exclusions)
-    monkeypatch.setattr(main, "_issued_exclusion_dates", fake_dates)
+    monkeypatch.setattr(api_common, "_issued_exclusions", fake_exclusions)
+    monkeypatch.setattr(api_common, "_issued_exclusion_dates", fake_dates)
     monkeypatch.setattr(main.database, "record_issued_orders", fake_record)
 
     def run(csv_bytes: bytes, exclude_issued: str = "true"):
         upload = UploadFile(file=BytesIO(csv_bytes), filename="winners_raw.csv")
-        return asyncio.run(main.process_event_winner_order(
+        return asyncio.run(process_fruit.process_event_winner_order(
             winners_file=upload, exclude_issued=exclude_issued, user={"user_id": 1},
         ))
 
