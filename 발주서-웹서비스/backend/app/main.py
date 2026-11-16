@@ -1337,9 +1337,10 @@ async def process_goguma_auto(
     exclude_issued: str = Form("true"),
     alwayz_file: UploadFile = File(None),
     temu_file: UploadFile = File(None),
+    winners_file: UploadFile = File(None),
     user: dict = Depends(verify_token),
 ):
-    """쿠팡(+토스) 자동 수집 발주서에 올웨이즈·테무 주문서(선택)를 합치고, 옵션으로 발주 이메일 자동 발송."""
+    """쿠팡(+토스) 자동 수집 발주서에 올웨이즈·테무 주문서·라이브 이벤트 당첨자 CSV(선택)를 합치고, 옵션으로 발주 이메일 자동 발송."""
     try:
         include_toss_flag = include_toss.strip().lower() in ("true", "1", "on")
         send_email_flag = send_email.strip().lower() in ("true", "1", "on")
@@ -1358,6 +1359,11 @@ async def process_goguma_auto(
             alwayz_bytes = await alwayz_file.read()
             if len(alwayz_bytes) == 0:
                 alwayz_bytes = None
+        winners_bytes = None
+        if winners_file is not None:
+            winners_bytes = await winners_file.read()
+            if len(winners_bytes) == 0:
+                winners_bytes = None
 
         if _goguma_proxy_enabled():
             proxy_response = await _post_proxy_json(
@@ -1381,6 +1387,7 @@ async def process_goguma_auto(
                 _widen_start(from_date, issued_dates, reissue_keys), to_date, include_toss=include_toss_flag,
                 exclude_order_ids=issued_excluded or None,
                 skipped_names=dup_names, reissue_keys=reissue_keys, reissued=reissued,
+                allow_empty=bool(winners_bytes),   # 당첨자만 발주하는 날도 발주서가 나오게
             )
             await record_sales_from_process_stats(
                 user["user_id"], stats, ymd=from_date if from_date == to_date else None
@@ -1423,8 +1430,55 @@ async def process_goguma_auto(
             _bump_stats("temu", len(temu_entries), _dup_temu)
             extra_issued_ids += [issued_orders.normalize_order_id(e.get("order_id")) for e in temu_entries]
 
+        # 라이브 이벤트 당첨자 CSV(선택)의 꿀고구마 경품을 같은 해달 발주서에 합친다(2026-11-16 — 호박고구마와 같은 방식).
+        # 이력은 일반 주문과 섹션을 나눠 영구 제외한다(같은 명단을 다시 올려도 중복 발송 없음).
+        event_keys: list[str] = []
+        if winners_bytes:
+            event_excluded = await _issued_exclusions(goguma_order.EVENT_SECTION, exclude_issued, reissue_stale=False)
+            issued_dates = {**issued_dates, **await _issued_exclusion_dates(goguma_order.EVENT_SECTION, exclude_issued)}
+            event_notes: list[str] = []
+            try:
+                event_entries, event_info = goguma_order.prepare_event_entries(
+                    winners_bytes, exclude_keys=event_excluded, skipped_names=dup_names
+                )
+            except ValueError as e:
+                # 당첨자 CSV가 깨졌거나 발주할 당첨자가 없어도 쿠팡·토스 발주는 그대로 낸다 — 사유는 화면에
+                event_entries, event_info = [], {}
+                event_notes.append("당첨자 CSV — " + str(e))
+            output_bytes = goguma_order.append_entries_to_haedal(output_bytes, event_entries)
+            _bump_stats("event", len(event_entries), int(event_info.get("dup") or 0))
+            event_keys = [issued_orders.make_order_key(e.get("order_id"), e.get("product")) for e in event_entries]
+            if event_info.get("refund_skipped"):
+                stats["refund_skipped"] = event_info["refund_skipped"]
+            event_notes = (
+                list(event_info.get("incomplete") or []) + list(event_info.get("others") or [])
+                + list(event_info.get("unreadable") or []) + event_notes
+            )
+            if event_notes:
+                stats["needs_check"] = list(stats.get("needs_check") or []) + event_notes
+            try:
+                total_now = int(stats.get("total") or 0)
+            except (TypeError, ValueError):
+                total_now = 1
+            if not total_now:
+                # 쿠팡·토스 0건인데 당첨자도 전부 제외·오류 → 빈 발주서를 내지 않고 사유를 띄운다
+                try:
+                    dup_total = int(stats.get("duplicate_skipped") or 0)
+                except (TypeError, ValueError):
+                    dup_total = 0
+                message = (
+                    f"신규 고구마 주문이 없습니다 (이전 발주분 {dup_total}건 자동 제외"
+                    + (f": {', '.join(n for n in dup_names if n)}" if dup_names else "") + ")."
+                    if dup_total else "해당 기간에 고구마 주문·당첨자가 없습니다."
+                )
+                if stats.get("needs_check"):
+                    message += " (" + " / ".join(str(n) for n in stats["needs_check"]) + ")"
+                raise ValueError(message)
+
         # 발주 이력 기록 (다음 영업일 중복발주 방지)
         await _record_issued("goguma", filename, stats, extra_ids=extra_issued_ids)
+        if event_keys:
+            await _record_issued(goguma_order.EVENT_SECTION, filename, extra_ids=event_keys)
 
         # 발주 이메일 자동 발송 (shach457@gmail.com -> farmers2022@naver.com)
         if send_email_flag:

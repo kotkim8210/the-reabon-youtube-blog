@@ -433,6 +433,71 @@ def append_entries_to_haedal(xlsx_bytes: bytes, entries: list[dict]) -> bytes:
     return output.read()
 
 
+# 라이브 이벤트 당첨자(winners_raw CSV)의 꿀고구마 경품 — 호박고구마(hobak_goguma.prepare_event_entries)처럼
+# 같은 해달 발주서에 합친다(2026-11-16 사용자 요청: 고구마 발주 화면의 테무 칸 대신 당첨자 칸).
+# 발주 이력은 일반 주문과 섹션을 나눠, 같은 명단을 다시 올려도 영구 제외한다(당첨자 CSV엔 '아직 미출고' 신호가 없음).
+EVENT_SECTION = "goguma_event"
+_HAEDAL_GOGUMA_NAME = re.compile(r"꿀고구마 \d+Kg \(.+\)")
+
+
+def prepare_event_entries(
+    csv_bytes: bytes,
+    exclude_keys=None,
+    skipped_names: list[str] | None = None,
+) -> tuple[list[dict], dict]:
+    """당첨자 CSV → 꿀고구마 경품 entries(append_entries_to_haedal 형식) + 처리 정보.
+
+    CSV 읽기·환불/취소 제외·이름/주소 누락 표시는 event_order.parse_winners를 그대로 쓴다.
+    경품명 '꿀고구마 중상 2kg' → 해달 품목명 '꿀고구마 2Kg (중상)'. 꿀고구마가 아닌 경품(호박고구마 포함)은
+    빼고 info['others']로 알린다. 당첨자 CSV엔 우편번호가 없어 비운다.
+    exclude_keys: 이미 발주한 당첨 키(주문아이디|품목명) — 같은 CSV 재업로드 시 중복 발송 방지.
+    반환 info: refund_skipped, incomplete(이름·주소 누락), others(꿀고구마 아닌 경품),
+        unreadable(중량·등급 못 읽음 — 발주서엔 넣음), dup(이전 발주분 제외 수).
+    """
+    from app.processors.event_order import parse_winners
+    from app.processors.issued_orders import KEY_SEP, make_order_key, normalize_order_id
+
+    winners = parse_winners(csv_bytes)
+    skipped_refund = winners[-1].get("_skipped_refund", 0) if winners else 0
+    incomplete = list(winners[-1].get("_incomplete", []) if winners else [])
+    keys = set(exclude_keys or ())
+    composite = {k for k in keys if KEY_SEP in k}
+    legacy = {k for k in keys if KEY_SEP not in k}
+
+    entries: list[dict] = []
+    others: list[str] = []
+    unreadable: list[str] = []
+    dup = 0
+    for w in winners:
+        w.pop("_skipped_refund", None)
+        w.pop("_incomplete", None)
+        prize = w.get("product") or ""
+        name = w.get("name") or "이름없음"
+        if "고구마" not in re.sub(r"\s+", "", prize) or is_hobak_goguma_text(prize):
+            others.append(f"{name}({prize}) — 꿀고구마 경품이 아니라 이 발주서에서 뺐습니다. 해당 상품 페이지에서 발주하세요")
+            continue
+        product = canonical_goguma_option(prize)
+        if not _HAEDAL_GOGUMA_NAME.fullmatch(product):
+            unreadable.append(f"{name}({prize}) — 중량·등급을 못 읽어 경품명 그대로 발주서에 넣음, 품목명 확인")
+        oid = normalize_order_id(w.get("order_id"))
+        key = make_order_key(oid, product) if oid else ""
+        if key and (key in composite or oid in legacy):
+            dup += 1
+            if skipped_names is not None:
+                skipped_names.append(w.get("name") or oid)
+            continue
+        entries.append({**w, "product": product, "option": product, "zipcode": ""})
+
+    info = {
+        "refund_skipped": skipped_refund,
+        "incomplete": incomplete,
+        "others": others,
+        "unreadable": unreadable,
+        "dup": dup,
+    }
+    return entries, info
+
+
 def process(
     delivery_file_bytes: bytes,
     template_file_bytes: bytes = None,

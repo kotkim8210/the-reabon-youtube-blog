@@ -60,6 +60,8 @@ function formatProcessStats(stats: Record<string, unknown>): string[] {
     coupang: '쿠팡',
     toss: '토스',
     temu: '테무',
+    event: '이벤트 당첨자',
+    refund_skipped: '환불·취소로 제외',
     duplicate_skipped: '이전 발주분 제외',
     duplicate_skipped_names: '제외된 주문(받는분)',
     reissued: '🔁 미출고 재발주',
@@ -70,9 +72,13 @@ function formatProcessStats(stats: Record<string, unknown>): string[] {
 
   return Object.entries(stats).flatMap(([key, value]) => {
     if (key === 'options' || value == null) return [];
+    // 확인 필요 목록(토스 수집 실패·당첨자 CSV에서 못 넣은 사람 등)은 배열로 온다 — 놓치지 않게 한 줄로 보여준다
+    if (key === 'needs_check' && Array.isArray(value)) {
+      return value.length ? [`⚠️ 확인 필요: ${value.join(' / ')}`] : [];
+    }
     if (Array.isArray(value) || typeof value === 'object') return [];
     if (key === 'toss' && Number(value) === 0) return [];
-    const suffix = key === 'total' || key === 'coupang' || key === 'toss' ? '건' : '';
+    const suffix = ['total', 'coupang', 'toss', 'event', 'refund_skipped'].includes(key) ? '건' : '';
     return [`${labels[key] || key}: ${String(value)}${suffix}`];
   });
 }
@@ -176,8 +182,9 @@ function OrderCollectionTab() {
   const [tossQueryLoading, setTossQueryLoading] = useState(false);
   const [tossTotal, setTossTotal] = useState(0);
 
-  // 테무·올웨이즈 주문서(선택) — 있으면 발주서에 합침
-  const [temuFile, setTemuFile] = useState<File | null>(null);
+  // 올웨이즈 주문서·라이브 이벤트 당첨자 CSV(선택) — 있으면 발주서에 합침.
+  // 테무 칸은 2026-11-16 당첨자 칸으로 교체(호박고구마처럼 — 사용자 요청)
+  const [winnersFile, setWinnersFile] = useState<File | null>(null);
   const [alwayzFile, setAlwayzFile] = useState<File | null>(null);
   const [excludeIssued, setExcludeIssued] = useState(true);  // 이전 발주분 자동 제외 (중복발주 방지)
 
@@ -241,7 +248,7 @@ function OrderCollectionTab() {
     setTossResult(null);
     setMergedAll(true);
     try {
-      const res = await processGogumaAuto(fromDate, toDate, true, { temuFile, alwayzFile, excludeIssued });
+      const res = await processGogumaAuto(fromDate, toDate, true, { winnersFile, alwayzFile, excludeIssued });
       setCoupangResult(res);
     } catch (err) {
       setCoupangError(err instanceof Error ? err.message : '전체 수집 중 오류');
@@ -256,7 +263,7 @@ function OrderCollectionTab() {
     setCoupangResult(null);
     setMergedAll(false);
     try {
-      const res = await processGogumaAuto(fromDate, toDate, false, { temuFile, alwayzFile, excludeIssued });
+      const res = await processGogumaAuto(fromDate, toDate, false, { winnersFile, alwayzFile, excludeIssued });
       setCoupangResult(res);
     } catch (err) {
       setCoupangError(err instanceof Error ? err.message : '쿠팡 처리 중 오류');
@@ -353,7 +360,7 @@ function OrderCollectionTab() {
           </p>
         </div>
 
-        {/* 올웨이즈·테무 주문서(선택) — 있으면 발주서에 합침. 올웨이즈가 매일 쓰는 칸이라 왼쪽(2026-10-21 사용자 요청) */}
+        {/* 올웨이즈 주문서·이벤트 당첨자 CSV(선택) — 있으면 발주서에 합침. 올웨이즈가 매일 쓰는 칸이라 왼쪽(2026-10-21 사용자 요청) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
           <div>
             <FileUpload
@@ -370,16 +377,16 @@ function OrderCollectionTab() {
           </div>
           <div>
             <FileUpload
-              label="테무 주문서 (선택 — 있으면 발주서에 합침)"
-              accept=".xlsx,.xls,.csv"
-              acceptLabel="테무 order_export (.xlsx, .csv)"
-              file={temuFile}
-              onFileSelect={setTemuFile}
+              label="라이브 이벤트 당첨자 CSV (선택 — 올리면 같은 발주서에 합쳐짐)"
+              accept=".csv"
+              acceptLabel="winners_raw (.csv 파일)"
+              file={winnersFile}
+              onFileSelect={setWinnersFile}
             />
-            {temuFile && (
-              <button onClick={() => setTemuFile(null)}
+            {winnersFile && (
+              <button onClick={() => setWinnersFile(null)}
                 className="mt-1 text-xs text-gray-400 hover:text-gray-600 underline">
-                테무 파일 제거
+                당첨자 파일 제거
               </button>
             )}
           </div>

@@ -537,7 +537,13 @@ export async function processGogumaAuto(
   fromDate: string,
   toDate: string,
   includeToss = false,
-  opts?: { temuFile?: File | null; alwayzFile?: File | null; sendEmail?: boolean; excludeIssued?: boolean },
+  opts?: {
+    temuFile?: File | null;
+    alwayzFile?: File | null;
+    winnersFile?: File | null;  // 라이브 이벤트 당첨자 CSV(winners_raw) — 꿀고구마 경품을 같은 해달 발주서에 합침
+    sendEmail?: boolean;
+    excludeIssued?: boolean;
+  },
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append('from_date', fromDate);
@@ -550,6 +556,9 @@ export async function processGogumaAuto(
   }
   if (opts?.alwayzFile) {
     formData.append('alwayz_file', opts.alwayzFile);
+  }
+  if (opts?.winnersFile) {
+    formData.append('winners_file', opts.winnersFile);
   }
   const res = await fetch(`${BASE_URL}/process/goguma-auto`, {
     method: 'POST',

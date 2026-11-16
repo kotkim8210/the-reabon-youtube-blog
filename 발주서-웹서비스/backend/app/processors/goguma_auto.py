@@ -156,12 +156,14 @@ async def process_from_api(
     skipped_names: list[str] | None = None,
     reissue_keys: set[str] | None = None,
     reissued: list[tuple[str, str]] | None = None,
+    allow_empty: bool = False,
 ) -> tuple[bytes, str, dict]:
     """Collect 고구마 orders from Coupang API and generate 해달 발주서.
 
     Args:
         from_date: Start date (YYYY-MM-DD).
         to_date: End date (YYYY-MM-DD).
+        allow_empty: 쿠팡·토스 주문이 0건이어도 빈 발주서를 돌려준다 — 이벤트 당첨자만 발주하는 날(호출부가 합침).
 
     Returns:
         Tuple of (output_bytes, filename, stats_dict).
@@ -198,7 +200,7 @@ async def process_from_api(
         )
         duplicate_skipped = dup_c + dup_t
 
-    if not orders and not toss_entries:
+    if not orders and not toss_entries and not allow_empty:
         if duplicate_skipped:
             raise ValueError(f"신규 고구마 주문이 없습니다 (이전 발주분 {duplicate_skipped}건 자동 제외).")
         raise ValueError("해당 기간에 고구마 주문이 없습니다.")
