@@ -17,6 +17,6 @@ fi
 # 작업 트리가 아니라 '커밋될 내용'(인덱스)을 검사한다 — 다른 세션의 미커밋 수정이 섞여 있어도 정확하다.
 xargs -0 git checkout-index --prefix="$tmp/idx/" -- < "$tmp/files"
 if ! "$PY" -m pyflakes "$tmp/idx"; then
-  echo "pre-commit: pyflakes 경고를 고친 뒤 다시 커밋하세요(위 경로의 $tmp/idx/ 는 커밋될 내용 사본)." >&2
+  echo "pre-commit: pyflakes 경고를 고친 뒤 다시 커밋하세요(경로의 .../idx/ 뒤가 저장소 안 파일)." >&2
   exit 1
 fi
