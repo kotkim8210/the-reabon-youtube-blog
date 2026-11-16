@@ -319,7 +319,7 @@ def _parse_haedal_entries(haedal_bytes: bytes) -> list[dict]:
         name = _compact(ws.cell(row=row_idx, column=cols.name).value)
         if not name:
             continue
-        tracking = find_tracking_in_row(ws, row_idx, cols.tracking)
+        tracking = find_tracking_in_row(ws, row_idx, cols.tracking, cols.tracking_alt)
         if not tracking:
             continue
         product = ws.cell(row=row_idx, column=cols.product).value

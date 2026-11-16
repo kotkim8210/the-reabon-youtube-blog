@@ -86,7 +86,7 @@ def process(
         if not name:
             continue
 
-        tracking = find_tracking_in_row(hd_ws, row_idx, cols.tracking)
+        tracking = find_tracking_in_row(hd_ws, row_idx, cols.tracking, cols.tracking_alt)
         if tracking:
             skip_cols = tuple(
                 c for c in (cols.name, cols.phone, cols.address, cols.product, cols.tracking) if c

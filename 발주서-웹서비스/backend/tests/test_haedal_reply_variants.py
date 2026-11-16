@@ -276,3 +276,51 @@ def test_shape_detection_refuses_ambiguous_columns():
     ws = wb.active
     cols = detect_haedal_columns(ws)
     assert cols.tracking == 17
+
+
+# ── 2026-11-16: 해달이 송장을 출고번호(Q) 대신 특기사항(R)에 적어 회신 ──
+# 호박고구마 23줄 중 22줄, 꿀고구마 36줄 중 35줄이 R에만 송장이 있고, 2박스 주문 1줄만 Q·R 둘 다 있었다.
+# Q에 값이 한 줄이라도 있어 열 판정이 Q로 남아 나머지가 전부 '해달 회신에 없음'으로 빠졌다.
+def test_tracking_in_special_note_column_when_q_is_empty():
+    wb = _hanjin_reply([
+        {"name": "김금희", "col_r": "463778534973"},
+        {"name": "maryam", "col_q": "463778535172", "col_r": "463778535161"},  # 2박스 — Q 우선(종전과 동일)
+        {"name": "양준희", "col_r": "463778534984"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 17 and cols.tracking_alt == 18
+    assert [find_tracking_in_row(ws, r, cols.tracking, cols.tracking_alt) for r in (2, 3, 4)] == [
+        "463778534973", "463778535172", "463778534984",
+    ]
+    entries = parse_haedal_file(_bytes(wb))   # 꿀고구마 쿠팡 송장등록 경로도 같은 함수를 쓴다
+    assert [(e["name"], e["tracking"]) for e in entries] == [
+        ("김금희", "463778534973"), ("maryam", "463778535172"), ("양준희", "463778534984"),
+    ]
+
+
+def test_special_note_not_used_when_q_has_status_or_note_is_not_tracking():
+    """'미출고'가 적힌 행은 미발송 — 특기사항 숫자를 송장으로 쓰지 않는다. 특기사항이 송장 형태가 아니면 무시."""
+    wb = _hanjin_reply([
+        {"name": "발송됨", "col_q": "463778534001"},
+        {"name": "미발송", "col_q": "미출고", "col_r": "463778534012"},
+        {"name": "메모만", "col_r": "부재시 경비실 0504-1234-5678"},
+        {"name": "안심번호", "col_r": "0504-1234-5678"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert [find_tracking_in_row(ws, r, cols.tracking, cols.tracking_alt) for r in (2, 3, 4, 5)] == [
+        "463778534001", "", "", "",
+    ]
+
+
+def test_special_note_not_used_when_columns_are_ambiguous():
+    """Q가 통째로 비고 12자리 숫자 열이 여럿(O·R)이면 지금처럼 추측하지 않는다."""
+    wb = _hanjin_reply_tracking_in_o([
+        {"name": "홍길동", "col_o": "463319275871", "col_r": "512345678901"},
+        {"name": "김철수", "col_o": "463319275882", "col_r": "512345678912"},
+    ])
+    ws = wb.active
+    cols = detect_haedal_columns(ws)
+    assert cols.tracking == 17 and cols.tracking_alt is None
+    assert find_tracking_in_row(ws, 2, cols.tracking, cols.tracking_alt) == ""

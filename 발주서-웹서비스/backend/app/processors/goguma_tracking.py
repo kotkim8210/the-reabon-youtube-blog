@@ -66,7 +66,7 @@ def process(
         if not name:
             continue
 
-        tracking = find_tracking_in_row(hd_ws, row_idx, cols.tracking)
+        tracking = find_tracking_in_row(hd_ws, row_idx, cols.tracking, cols.tracking_alt)
 
         if tracking:
             haedal_entries.append({

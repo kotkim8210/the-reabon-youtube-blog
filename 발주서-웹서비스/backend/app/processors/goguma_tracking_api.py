@@ -82,7 +82,7 @@ def parse_haedal_file(haedal_bytes: bytes) -> list[dict]:
         if not name:
             continue
 
-        tracking = find_tracking_in_row(ws, row_idx, cols.tracking)
+        tracking = find_tracking_in_row(ws, row_idx, cols.tracking, cols.tracking_alt)
         if tracking:
             skip_cols = tuple(
                 c for c in (cols.name, cols.phone, cols.address, cols.product, cols.tracking) if c

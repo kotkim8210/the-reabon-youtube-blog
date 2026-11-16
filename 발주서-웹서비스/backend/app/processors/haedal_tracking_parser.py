@@ -19,6 +19,8 @@ class HaedalColumns:
     product: int = 14
     tracking: int | None = None
     courier: int | None = None
+    # '특기사항' 열 — 송장 칸이 빈 행에서만 보조로 본다(find_tracking_in_row 참고)
+    tracking_alt: int | None = None
 
 
 def _key(value: object) -> str:
@@ -305,6 +307,7 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
         # 3) 송장 열이 없거나(헤더 없음·2에서 폐기) 통째로 비어 있으면 값 형태로 열을 찾는다.
         #    '미출고' 등 값이 하나라도 있는 열은 그대로 믿는다 — 미발송 행에 옆 칸 숫자를
         #    송장으로 잘못 등록하면 안 되기 때문.
+        allow_alt = True
         if tracking_col is None or _column_is_blank(ws, tracking_col, start_row):
             content_col = _find_tracking_column_by_content(
                 ws,
@@ -324,6 +327,24 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
             )
             if content_col:
                 tracking_col = content_col
+            else:
+                allow_alt = False  # 12자리 숫자 열이 여럿이라 모호 — 특기사항이라도 추측하지 않는다
+        # 4) '특기사항' 열은 보조 송장 칸으로 기억한다. 해달이 송장을 출고번호(Q)가 아니라
+        #    특기사항(R)에 적어 회신한 날(2026-11-16 호박고구마 23줄 중 22줄, 꿀고구마 36줄 중 35줄)
+        #    Q에 값이 한 줄이라도 있어 열 판정은 Q로 남고, 나머지 행이 전부 '회신에 없음'으로 빠졌다.
+        used_cols = {
+            best.get("name", 1), best.get("phone", 2), best.get("address", 6),
+            best.get("product", 14), courier_col, tracking_col,
+        }
+        alt_col = next(
+            (
+                col_idx
+                for col_idx in range(1, getattr(ws, "max_column", 1) + 1)
+                if col_idx not in used_cols
+                and "특기사항" in _key(ws.cell(row=best_row, column=col_idx).value)
+            ),
+            None,
+        ) if allow_alt and tracking_col else None
         return HaedalColumns(
             start_row=start_row,
             name=best.get("name", 1),
@@ -332,6 +353,7 @@ def detect_haedal_columns(ws, max_header_rows: int = 10) -> HaedalColumns:
             product=best.get("product", 14),
             tracking=tracking_col,
             courier=courier_col,
+            tracking_alt=alt_col,
         )
 
     a1 = _key(ws.cell(row=1, column=1).value)
@@ -375,11 +397,19 @@ def find_courier_in_row(
     return ""
 
 
-def find_tracking_in_row(ws, row_idx: int, tracking_col: int | None = None) -> str:
+def find_tracking_in_row(
+    ws,
+    row_idx: int,
+    tracking_col: int | None = None,
+    alt_col: int | None = None,
+) -> str:
     """Return tracking number for a row.
 
-    송장 열(출고번호/송장번호 등)이 감지되면 **그 열만 신뢰**한다.
-    비어 있으면 빈값을 반환해 그 행은 건너뛴다 — 절대 행 스캔으로 추측하지 않는다.
+    송장 열(출고번호/송장번호 등)이 감지되면 **그 열을 먼저 신뢰**한다.
+    그 칸이 **완전히 비어 있을 때만** 보조 열(alt_col='특기사항')에 12자리 송장 형태
+    값 하나만 있으면 그것을 쓴다(2026-11-16 해달이 송장을 특기사항에 적어 회신).
+    '미출고' 같은 상태값이 적힌 행은 아직 미발송이므로 보조 열을 보지 않고 빈값 → 건너뜀.
+    그 밖엔 절대 행 스캔으로 추측하지 않는다.
     (예전엔 빈 행에서 안심번호(0504-XXXX-XXXX, 12자리)를 운송장으로 오인해
      쿠팡에 잘못 등록 → 출고지연이 발생했음.)
 
@@ -388,7 +418,13 @@ def find_tracking_in_row(ws, row_idx: int, tracking_col: int | None = None) -> s
       2. 행 전체에서 12자리 숫자(0으로 시작=전화/안심번호 제외) 중 '4' 우선
     """
     if tracking_col:
-        return _valid_tracking(ws.cell(row=row_idx, column=tracking_col).value)
+        raw = ws.cell(row=row_idx, column=tracking_col).value
+        tracking = _valid_tracking(raw)
+        if tracking:
+            return tracking
+        if alt_col and alt_col != tracking_col and (raw is None or not str(raw).strip()):
+            return _strict_tracking_cell(ws.cell(row=row_idx, column=alt_col).value)
+        return ""
 
     for col_idx in range(16, 23):  # P(16) ~ V(22), old 해달 reply fallback
         tracking = _valid_tracking(ws.cell(row=row_idx, column=col_idx).value)
