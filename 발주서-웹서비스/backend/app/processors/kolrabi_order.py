@@ -514,6 +514,76 @@ def convert_gamhong_option(product_name: object, option_text: object) -> str | N
     return _GAMHONG_JEJU_OPTIONS.get((grade, kg))
 
 
+# 부사사과 — 2026-11 제주다팜 신규 발주(쿠팡 DeliveryList만). 쿠팡 '경북 부사사과 정품 실중량' 옵션 '1박스 2kg (중과)'
+# → 제주다팜 판매옵션 '부사 정품 중과 실중량 2kg(8-9과)'. adminplus pcode=10001479 '부사 정품 실중량' 실측(2026-11-16):
+# 소과·중소과·중과·대과 × 2·2.5·3·4·5kg = 20종. 같은 거래처의 '부사 가정용 포장재포함'(pcode 10001458)은 다른 상품이라 쓰지 않는다.
+_BUSA_JEJU_OPTIONS = {
+    ("소과", "2"): "부사 정품 소과 실중량 2kg(11-13과)",
+    ("중소과", "2"): "부사 정품 중소과 실중량 2kg(10-11과)",
+    ("중과", "2"): "부사 정품 중과 실중량 2kg(8-9과)",
+    ("대과", "2"): "부사 정품 대과 실중량 2kg(5-7과)",
+    ("소과", "2.5"): "부사 정품 소과 실중량 2.5kg(13-16과)",
+    ("중소과", "2.5"): "부사 정품 중소과 실중량 2.5kg(11-12과)",
+    ("중과", "2.5"): "부사 정품 중과 실중량 2.5kg(9-10과)",
+    ("대과", "2.5"): "부사 정품 대과 실중량 2.5kg(6-8과)",
+    ("소과", "3"): "부사 정품 소과 실중량 3kg(15-17과)",
+    ("중소과", "3"): "부사 정품 중소과 실중량 3kg(13-14과)",
+    ("중과", "3"): "부사 정품 중과 실중량 3kg(11-12과)",
+    ("대과", "3"): "부사 정품 대과 실중량 3kg(7-9과)",
+    ("소과", "4"): "부사 정품 소과 실중량 4kg(21-25과)",
+    ("중소과", "4"): "부사 정품 중소과 실중량 4kg(18-19과)",
+    ("중과", "4"): "부사 정품 중과 실중량 4kg(15-16과)",
+    ("대과", "4"): "부사 정품 대과 실중량 4kg(10-14과)",
+    ("소과", "5"): "부사 정품 소과 실중량 5kg(24-30과)",
+    ("중소과", "5"): "부사 정품 중소과 실중량 5kg(21-24과)",
+    ("중과", "5"): "부사 정품 중과 실중량 5kg(18-19과)",
+    ("대과", "5"): "부사 정품 대과 실중량 5kg(12-16과)",
+}
+# '중소과'가 '소과'를 품으므로 긴 것 먼저. '중대과'는 제주다팜에 없는 등급 → 대과로 잘못 읽지 않게 미매칭 처리.
+_BUSA_FULL_GRADES = ("중소과", "소과", "중과", "대과")
+_BUSA_SHORT_GRADES = (("대", "대과"), ("중", "중과"), ("소", "소과"))
+
+
+def is_jeju_busa_order(product_name: object, option_text: object) -> bool:
+    """부사사과 제주다팜 발주 여부."""
+    return "부사" in re.sub(r"\s+", "", _combined_text(product_name, option_text))
+
+
+def _busa_grade(compact: str) -> str:
+    if "중대과" in compact:
+        return ""
+    for grade in _BUSA_FULL_GRADES:
+        if grade in compact:
+            return grade
+    # 한 글자 등급은 앞뒤가 한글이 아닐 때만('(중)') — '실중량' 같은 낱말 속 글자는 무시
+    for token, grade in _BUSA_SHORT_GRADES:
+        if re.search(rf"(?<![가-힣]){token}(?![가-힣])", compact):
+            return grade
+    return ""
+
+
+def busa_grade_and_kg(product_name: object, option_text: object) -> tuple[str, str]:
+    """(제주다팜 등급, kg) — 옵션(L) 먼저, 없으면 상품명까지. 못 찾으면 ''."""
+    option = re.sub(r"\s+", "", str(option_text or ""))
+    combined = re.sub(r"\s+", "", _combined_text(product_name, option_text))
+    grade = _busa_grade(option) or _busa_grade(combined)
+    m = re.search(r"(\d+(?:\.\d+)?)kg", option, re.IGNORECASE) or re.search(
+        r"(\d+(?:\.\d+)?)kg", combined, re.IGNORECASE
+    )
+    kg = _fmt_kg_text(m.group(1)) if m else ""
+    return grade, kg
+
+
+def convert_busa_option(product_name: object, option_text: object) -> str | None:
+    """부사사과 DeliveryList → 제주다팜 발주명(판매옵션 전체 문자열). 미매칭이면 None."""
+    if not is_jeju_busa_order(product_name, option_text):
+        return None
+    grade, kg = busa_grade_and_kg(product_name, option_text)
+    if not grade or not kg:
+        return None
+    return _BUSA_JEJU_OPTIONS.get((grade, kg))
+
+
 # 프리미엄 햇 배 선물세트 — 2026-09 제주다팜 신규 발주. 쿠팡 옵션의 (보자기 유무·등급·kg)를
 # 제주다팜 구성상품명(발주명)으로 변환한다. adminplus 구성상품 8종 실측(2026-09-19):
 #   대과/특대과 × 5·7.5kg × 보자기 동봉/미동봉. 보자기 유무에 따라 과수 표기까지 달라 각각 실측값을 둔다.
@@ -1198,6 +1268,22 @@ def process_gamhong(
     )
 
 
+def process_busa(
+    delivery_file_bytes: bytes,
+    toss_entries: list[dict] | None = None,
+) -> tuple[bytes, str, dict] | None:
+    """부사사과 제주다팜 발주 (2026-11 신규, 쿠팡 DeliveryList). 발주명=제주다팜 판매옵션."""
+    now = datetime.now(KST)
+    return _build_jejudapam_order(
+        delivery_file_bytes,
+        convert_busa_option,
+        "부사사과(제주다팜)",
+        f"제주다팜_아이티소프트_부사사과발주({now.strftime('%Y%m%d')}).xlsx",
+        toss_entries,
+        matcher=is_jeju_busa_order,
+    )
+
+
 def process_pear(
     delivery_file_bytes: bytes,
     toss_entries: list[dict] | None = None,
@@ -1288,6 +1374,11 @@ def process_outputs(
     gamhong_result = process_gamhong(delivery_file_bytes, toss_entries=toss_gamhong_entries)
     if gamhong_result and _has_content(gamhong_result[2]):
         results.append(gamhong_result)
+
+    # 부사사과(2026-11) — 쿠팡 DeliveryList 주문만(토스 미판매)
+    busa_result = process_busa(delivery_file_bytes)
+    if busa_result and _has_content(busa_result[2]):
+        results.append(busa_result)
 
     pear_result = process_pear(delivery_file_bytes)
     if pear_result and _has_content(pear_result[2]):
