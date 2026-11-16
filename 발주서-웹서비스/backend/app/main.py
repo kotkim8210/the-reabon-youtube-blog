@@ -66,6 +66,10 @@ from app.scheduler import start_scheduler, stop_scheduler, refresh_products, ref
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# 한국 시간. 이벤트 당첨자 묶음·사방넷·내부 고구마 발주가 이 이름을 쓰는데 정의가 한 함수 안에만 있어,
+# 당첨자 경품이 거래처 2곳 이상으로 갈리면 "name 'KST' is not defined"로 발주서가 하나도 안 나왔다(2026-11-16 리뷰).
+KST = timezone(timedelta(hours=9))
+
 
 _ADDRESS_HINT_RE = re.compile(
     r"(특별시|광역시|특별자치|"
@@ -208,6 +212,22 @@ def make_zip_response(
         media_type="application/zip",
         headers=headers,
     )
+
+
+def _merge_needs_check(results: list[tuple[bytes, str, dict]]) -> list[str]:
+    """여러 발주서를 zip으로 낼 때 파일별 needs_check('거래처 판매옵션에 없음' 등)를 '품목: 사유'로 모은다.
+
+    zip 응답 stats에 다시 싣지 않으면 경고가 화면에서 사라져, 새 옵션 주문이 아무 표시 없이 발주에서 빠진다
+    (2026-11-16 리뷰 — 콜라비 + 거래처 옵션에 없는 주문이 zip으로 나오면 경고 0).
+    """
+    notes: list[str] = []
+    for _bytes, _name, item_stats in results:
+        item_stats = item_stats or {}
+        raw = item_stats.get("needs_check")
+        items = raw if isinstance(raw, list) else ([raw] if raw else [])
+        label = str(item_stats.get("product") or "").strip()
+        notes += [f"{label}: {note}" if label else str(note) for note in items]
+    return notes
 
 
 PROXY_TIMEOUT = httpx.Timeout(180.0, connect=20.0)
@@ -670,6 +690,9 @@ async def process_kolrabi_order(
                 "files": len(results),
                 "total": sum(int((item_stats or {}).get("total", 0)) for _, _, item_stats in results),
             }
+            zip_notes = _merge_needs_check(results)   # 파일별 '거래처 판매옵션에 없음' 경고를 zip 응답에도 싣는다
+            if zip_notes:
+                stats["needs_check"] = zip_notes
             stats = _annotate_excluded(stats, dup_skipped, dup_names, dup_keys, issued_dates, reissued=reissued)
             if toss_error:
                 stats["toss_error"] = toss_error
@@ -850,40 +873,50 @@ async def process_myeongi_order(
 @app.post("/api/process/event-winner-order")
 async def process_event_winner_order(
     winners_file: UploadFile = File(...),
+    exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
-    """라이브 이벤트 당첨자 CSV → 발주서 (쥬얼리프룻 + 백도 2·4kg는 제주다팜 분리)."""
+    """라이브 이벤트 당첨자 CSV → 발주처별 발주서(제주다팜·쥬얼리프룻·제이비티, 2곳 이상이면 zip).
+
+    꿀·호박고구마 경품은 고구마 화면에서 해달로 발주하므로 여기선 뺀다(event_order.process).
+    같은 명단을 다시 올려도 이전에 발주한 당첨자는 영구 제외한다(event_order.EVENT_SECTION) — 종전엔 화면의
+    '이전 발주분 자동 제외' 체크박스를 백엔드가 받지 않아 재업로드하면 전원 다시 발주됐다(2026-11-16 리뷰).
+    """
+    section = event_order.EVENT_SECTION
     try:
         csv_bytes = await winners_file.read()
-        results = event_order.process(csv_bytes)
+        issued_excluded = await _issued_exclusions(section, exclude_issued, reissue_stale=False)
+        issued_dates = await _issued_exclusion_dates(section, exclude_issued)
+        dup_names: list[str] = []
+        dup_keys: list[str] = []
+        event_keys: list[str] = []
+        results = event_order.process(
+            csv_bytes, exclude_keys=issued_excluded, skipped_names=dup_names,
+            skipped_keys=dup_keys, issued_keys=event_keys,
+        )
         if len(results) == 1:
             output_bytes, filename, stats = results[0]
-            logger.info(f"이벤트 당첨자 발주 처리 완료: {stats}")
+        else:
+            filename = f"이벤트당첨_발주묶음({datetime.now(KST).strftime('%Y%m%d')}).zip"
+            first = results[0][2] or {}
+            stats = {
+                "files": len(results),
+                "winners": sum(int((s or {}).get("winners", 0)) for _, _, s in results),
+                "suppliers": ", ".join((s or {}).get("supplier", "") for _, _, s in results),
+            }
+            # 환불 제외·확인필요는 event_order가 첫 파일에만 싣는다 → zip 응답에도 옮겨 화면에 보이게
+            for key in ("skipped_refund", "needs_check"):
+                if first.get(key):
+                    stats[key] = first[key]
+        if isinstance(stats.get("needs_check"), str):
+            stats = {**stats, "needs_check": [stats["needs_check"]]}   # _annotate_excluded가 목록에 덧붙인다
+        await _record_issued(section, filename, extra_ids=event_keys)
+        stats = _annotate_excluded(stats, len(dup_names), dup_names, dup_keys, issued_dates)
+        logger.info(f"이벤트 당첨자 발주 처리 완료: {stats}")
+        if len(results) == 1:
             return make_excel_response(output_bytes, filename, stats)
-
-        # 쥬얼리 + 제주다팜 두 발주서 → zip
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for file_bytes, fname, _ in results:
-                zf.writestr(fname, file_bytes)
-        zip_buffer.seek(0)
-        kst_now = datetime.now(KST)
-        zip_name = f"이벤트당첨_발주묶음({kst_now.strftime('%Y%m%d')}).zip"
-        stats = {
-            "files": len(results),
-            "winners": sum(int((s or {}).get("winners", 0)) for _, _, s in results),
-            "suppliers": ", ".join((s or {}).get("supplier", "") for _, _, s in results),
-        }
-        logger.info(f"이벤트 당첨자 발주 처리 완료(2개 발주처): {stats}")
-        encoded_zip = quote(zip_name, safe="")
-        return StreamingResponse(
-            BytesIO(zip_buffer.read()),
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_zip}",
-                "X-Stats": json.dumps(stats, ensure_ascii=False),
-            },
-        )
+        # 한글 X-Stats는 ensure_ascii=True(make_zip_response)라야 헤더 인코딩 오류가 안 난다
+        return make_zip_response([(b, name) for b, name, _ in results], filename, stats)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -1964,6 +1997,7 @@ async def internal_goguma_cs_reply(
 class TossAutoRequest(BaseModel):
     from_date: str
     to_date: str
+    exclude_issued: bool = True   # 고구마 화면 '이전 발주분 자동 제외' 체크박스 — '토스만' 버튼도 따른다(2026-11-16)
 
 
 @app.post("/api/process/toss-order")
@@ -1981,11 +2015,25 @@ async def process_toss_order(
             await _record_proxy_sales(user["user_id"], proxy_response)
             return _proxy_excel_response(proxy_response)
 
+        # '전체 수집'(goguma-auto)과 같은 goguma 이력으로 이전 발주분을 빼고, 만든 발주서는 기록한다.
+        # 종전엔 조회도 기록도 안 해 '토스만'과 '전체 수집'을 섞어 쓰면 토스 꿀고구마가 해달에 이중 발주됐다(2026-11-16 리뷰).
+        flag = "true" if req.exclude_issued else "false"
+        issued_excluded = await _issued_exclusions("goguma", flag)
+        issued_dates = await _issued_exclusion_dates("goguma", flag)
+        reissue_keys = await _issued_stale_keys("goguma", flag, issued_dates)
+        reissued: list[tuple[str, str]] = []
+        dup_names: list[str] = []
         output_bytes, filename, stats = await toss_auto.process_toss_order(
-            req.from_date, req.to_date
+            _widen_start(req.from_date, issued_dates, reissue_keys), req.to_date,
+            exclude_order_ids=issued_excluded or None, skipped_names=dup_names,
+            reissue_keys=reissue_keys, reissued=reissued,
         )
         await record_sales_from_process_stats(
             user["user_id"], stats, ymd=req.from_date if req.from_date == req.to_date else None
+        )
+        await _record_issued("goguma", filename, stats)
+        stats = _annotate_excluded(
+            stats, int((stats or {}).get("duplicate_skipped") or 0), dup_names, [], issued_dates, reissued=reissued
         )
         logger.info(f"토스 발주 처리 완료: {stats}")
         return make_excel_response(output_bytes, filename, stats)

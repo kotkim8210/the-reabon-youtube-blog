@@ -943,12 +943,13 @@ export async function processSabangFruitTracking(
 
 export async function processTossOrder(
   fromDate: string,
-  toDate: string
+  toDate: string,
+  excludeIssued = true,  // 이전 발주분 자동 제외(중복발주 방지) — '전체 수집'과 같은 이력 사용
 ): Promise<ProcessResult> {
   const res = await fetch(`${BASE_URL}/process/toss-order`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from_date: fromDate, to_date: toDate }),
+    body: JSON.stringify({ from_date: fromDate, to_date: toDate, exclude_issued: excludeIssued }),
   });
 
   if (!res.ok) {

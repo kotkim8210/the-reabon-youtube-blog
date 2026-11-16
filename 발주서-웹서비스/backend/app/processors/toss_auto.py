@@ -108,12 +108,21 @@ def is_goguma_order(item: dict) -> bool:
 # 1) 토스 주문 수집 → 발주서 생성
 # ---------------------------------------------------------------------------
 
-async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, dict]:
+async def process_toss_order(
+    from_date: str,
+    to_date: str,
+    exclude_order_ids: set[str] | None = None,
+    skipped_names: list[str] | None = None,
+    reissue_keys: set[str] | None = None,
+    reissued: list[tuple[str, str]] | None = None,
+) -> tuple[bytes, str, dict]:
     """Collect goguma orders from Toss API and generate 해달 발주서.
 
     Args:
         from_date: Start date (YYYY-MM-DD).
         to_date: End date (YYYY-MM-DD).
+        exclude_order_ids: 이미 발주한 '주문번호|품목' 키(goguma 이력) — '전체 수집'과 같은 키라 서로 중복을 막는다.
+        skipped_names·reissue_keys·reissued: goguma_auto.process_from_api와 같은 뜻(제외 이름·미출고 재발주).
 
     Returns:
         Tuple of (output_bytes, filename, stats_dict).
@@ -163,7 +172,24 @@ async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, 
             ),
         })
 
+    # 이전 영업일 발주분 자동 제외 — '토스만'으로 만든 뒤 '전체 수집'(또는 반대)을 눌러도 해달에 이중 발주되지 않게
+    # (2026-11-16 리뷰: 이 경로는 이력을 조회도 기록도 안 했다).
+    duplicate_skipped = 0
+    if exclude_order_ids or reissue_keys:
+        from app.processors.issued_orders import filter_entries_by_issued
+
+        entries, duplicate_skipped = filter_entries_by_issued(
+            entries, exclude_order_ids or set(), skipped_names=skipped_names,
+            reissue_keys=reissue_keys, reissued=reissued,
+        )
+
     if not entries:
+        if duplicate_skipped:
+            names = ", ".join(n for n in (skipped_names or []) if n)
+            raise ValueError(
+                f"신규 토스 고구마 주문이 없습니다 (이전 발주분 {duplicate_skipped}건 자동 제외"
+                + (f": {names}" if names else "") + ")."
+            )
         raise ValueError("해당 기간에 토스 고구마 주문이 없습니다.")
 
     # Load template
@@ -238,6 +264,8 @@ async def process_toss_order(from_date: str, to_date: str) -> tuple[bytes, str, 
         "product": "고구마",
         "options": list(option_totals.values()),
     }
+    if duplicate_skipped:
+        stats["duplicate_skipped"] = duplicate_skipped
 
     return output.read(), filename, stats
 

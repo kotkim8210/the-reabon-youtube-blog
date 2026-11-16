@@ -94,6 +94,8 @@ def _product_families(*values: object) -> set[str]:
         families.add("hwanggeum")
     if "태추" in text:
         families.add("taechu")
+    if "부사" in text:  # 부사사과(2026-11-16) — 이벤트 부사 송장이 같은 이름의 다른 상품 줄로 가지 않게
+        families.add("busa")
     if "청사과" in text or "아오리" in text:
         families.add("apple")
     return families
@@ -242,6 +244,14 @@ def _semantic_option_keys(*values: object) -> set[str]:
         grade, kg = taechu_grade_and_kg(text, "")
         if kg:
             keys.add(f"taechu:{grade}:{kg}kg")
+    if "부사" in text:
+        # 부사사과(2026-11-16): orderlist(발주명 '부사 정품 {등급} 실중량 {kg}kg(과수)')와 DeliveryList(쿠팡 '1박스 2kg (중과)')를
+        # 제주다팜 등급+kg 의미키로 묶는다(발주 변환과 같은 함수). 없으면 같은 사람이 부사를 2개 이상 사거나
+        # 다른 상품과 같이 산 줄의 부사 송장이 '동명이인 구분 불가'로 비었다.
+        from app.processors.kolrabi_order import busa_grade_and_kg
+        grade, kg = busa_grade_and_kg(text, "")
+        if kg:
+            keys.add(f"busa:{grade}:{kg}kg")
     if "청사과" in text or "아오리" in text:
         # 청사과: orderlist(발주명 '청사과 {등급}(가정용) … {kg}kg(…)')와 DeliveryList(쿠팡 옵션)의
         # 표기가 달라 등급(중소과/소과/대과)+kg 의미키로 묶는다. '중소과'가 '소과' 포함 → 긴 것 먼저.

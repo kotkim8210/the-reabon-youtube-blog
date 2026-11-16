@@ -15,6 +15,15 @@ from io import StringIO
 
 KST = timezone(timedelta(hours=9))
 
+# 과일 이벤트 카드(콜라비·명이·토마토 화면 공용) 발주 이력 섹션 — 일반 주문 이력과 분리, 재발주 없이 영구 제외.
+# 키 = 주문아이디|발주 품목명. 꿀·호박고구마 경품은 고구마 화면이 goguma_event·hobak_goguma_event 섹션에 따로 기록한다.
+EVENT_SECTION = "fruit_event"
+
+
+def is_goguma_prize(text: object) -> bool:
+    """꿀·호박·밤고구마 경품인지 — 전부 해달 발주(고구마·호박고구마 화면)라 과일 이벤트 발주서엔 넣지 않는다."""
+    return "고구마" in re.sub(r"\s+", "", str(text or ""))
+
 
 def _norm(value: object) -> str:
     if value is None:
@@ -329,13 +338,26 @@ def _build_jbt_event_workbook(entries: list[dict], today: str) -> tuple[bytes, s
     return output_bytes, f"이벤트당첨_제이비티_청사과_발주({today}).xlsx", stats
 
 
-def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
+def process(
+    csv_bytes: bytes,
+    exclude_keys=None,
+    skipped_names: list[str] | None = None,
+    skipped_keys: list[str] | None = None,
+    issued_keys: list[str] | None = None,
+) -> list[tuple[bytes, str, dict]]:
     """당첨자 CSV → 발주처별 발주서.
 
-    경품의 실제 발주처를 따라간다(2026-08-31): 청사과(아오리)는 **제이비티 양식**,
-    그 밖의 경품은 제주다팜 양식. 두 발주처가 섞이면 파일이 2개 나온다.
+    경품의 실제 발주처를 따라간다(2026-08-31): 청사과(아오리)는 **제이비티 양식**, 햇밤은 쥬얼리프룻,
+    그 밖의 경품은 제주다팜 양식. 발주처가 섞이면 파일이 여러 개 나온다.
     이름·주소가 비어 발주할 수 없는 당첨자는 stats['needs_check']로 화면에 표시한다.
+
+    꿀·호박고구마 경품은 해달 발주(고구마·호박고구마 화면 당첨자 칸)라 빼고 needs_check로 알린다
+    — 종전엔 경품명 그대로 제주다팜 발주서에 들어가 해달과 이중 발주될 수 있었다(2026-11-16 리뷰).
+    exclude_keys: 이전에 발주한 당첨 키(주문아이디|발주 품목명, EVENT_SECTION) — 같은 명단 재업로드 시 영구 제외.
+    skipped_names·skipped_keys: 그렇게 뺀 당첨자 이름·키를 담아 준다(화면 표시용).
+    issued_keys: 이번 발주서에 실제로 넣은 당첨 키를 담아 준다(호출부가 EVENT_SECTION에 기록).
     """
+    from app.processors.issued_orders import KEY_SEP, make_order_key, normalize_order_id
     from app.processors.kolrabi_order import _build_jejudapam_order
 
     entries = parse_winners(csv_bytes)
@@ -345,7 +367,46 @@ def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
         e.pop("_skipped_refund", None)
         e.pop("_incomplete", None)
 
+    goguma_names = [
+        f"{e.get('name') or '이름없음'}({e.get('product')})" for e in entries if is_goguma_prize(e.get("product"))
+    ]
+    entries = [e for e in entries if not is_goguma_prize(e.get("product"))]
+    goguma_note = (
+        f"고구마 경품 {len(goguma_names)}건은 이 발주서에서 뺐습니다 — 꿀고구마는 고구마 화면, "
+        f"호박고구마는 호박고구마 화면의 당첨자 칸에서 발주하세요: {', '.join(goguma_names)}"
+    ) if goguma_names else ""
+
+    keys = set(exclude_keys or ())
+    composite = {k for k in keys if KEY_SEP in k}
+    legacy = {k for k in keys if KEY_SEP not in k}
+    kept: list[dict] = []
+    new_keys: list[str] = []
+    dup_names: list[str] = []
+    for e in entries:
+        oid = normalize_order_id(e.get("order_id"))
+        key = make_order_key(oid, e.get("product")) if oid else ""
+        if key and (key in composite or oid in legacy):
+            dup_names.append(e.get("name") or oid)
+            if skipped_keys is not None:
+                skipped_keys.append(key if key in composite else oid)
+            continue
+        kept.append(e)
+        if key:
+            new_keys.append(key)
+    entries = kept
+    if skipped_names is not None:
+        skipped_names.extend(dup_names)
+
     if not entries:
+        reasons = []
+        if dup_names:
+            reasons.append(f"이전에 이미 발주한 당첨자 {len(dup_names)}건 제외: {', '.join(dup_names)}")
+        if goguma_note:
+            reasons.append(goguma_note)
+        if incomplete:
+            reasons.append(f"개인정보 미기재 {len(incomplete)}건: " + " / ".join(incomplete))
+        if reasons:
+            raise ValueError("발주할 이벤트 당첨자가 없습니다. (" + " / ".join(reasons) + ")")
         raise ValueError("발주할 이벤트 당첨자가 없습니다. (환불/취소 건만 있거나 빈 파일)")
 
     today = datetime.now(KST).strftime("%Y%m%d")
@@ -401,11 +462,17 @@ def process(csv_bytes: bytes) -> list[tuple[bytes, str, dict]]:
     if not results:
         raise ValueError("발주할 이벤트 당첨자가 없습니다.")
 
+    if issued_keys is not None:
+        issued_keys.extend(new_keys)
+
     # 환불 제외·확인필요는 첫 파일 통계에 싣는다(화면에 한 번만 보이게)
     first_stats = results[0][2]
     first_stats["skipped_refund"] = skipped_refund
+    notes = []
     if incomplete:
-        first_stats["needs_check"] = (
-            f"{len(incomplete)}건 발주 제외(개인정보 미기재): " + " / ".join(incomplete)
-        )
+        notes.append(f"{len(incomplete)}건 발주 제외(개인정보 미기재): " + " / ".join(incomplete))
+    if goguma_note:
+        notes.append(goguma_note)
+    if notes:
+        first_stats["needs_check"] = " / ".join(notes)
     return results

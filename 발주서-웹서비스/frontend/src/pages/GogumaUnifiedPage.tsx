@@ -278,7 +278,7 @@ function OrderCollectionTab() {
     setTossResult(null);
     setMergedAll(false);
     try {
-      const res = await processTossOrder(fromDate, toDate);
+      const res = await processTossOrder(fromDate, toDate, excludeIssued);
       setTossResult(res);
     } catch (err) {
       setTossError(err instanceof Error ? err.message : '토스 처리 중 오류');

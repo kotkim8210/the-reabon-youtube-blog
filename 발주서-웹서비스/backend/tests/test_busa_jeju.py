@@ -80,3 +80,104 @@ def test_event_winner_busa_prize_uses_jejudapam_option(prize, expected):
     assert event_order.event_product_name(prize) == expected
     assert event_order.event_supplier(prize) == "jejudapam"
     assert event_order._labels_for([expected]) == ["부사사과"]
+
+
+# ── 부사 운송장 입력(tracking_input) — 2026-11-16 리뷰 1순위: 품목군·의미키 배선 ─────────────
+SHINANO = "시나노 골드 사과 노란사과 황금사과 경북 가정용 상등급"
+
+
+def _tracking_delivery(rows: list[dict]) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    for i, r in enumerate(rows):
+        row = i + 2
+        ws.cell(row, 3, r.get("order_no", f"OID{i}"))
+        ws.cell(row, 11, r["product"])
+        ws.cell(row, 12, r["option"])
+        ws.cell(row, 23, 1)
+        ws.cell(row, 27, r["name"])
+        ws.cell(row, 28, r.get("phone", "010-0000-0000"))
+        ws.cell(row, 29, "12345")
+        ws.cell(row, 30, r.get("address", "서울시 어딘가"))
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _reply(rows: list[tuple[str, str, str, str, str]]) -> bytes:
+    """제주다팜 회신(orderlist): (발주명, 받는분, 전화, 주소, 송장)."""
+    wb = Workbook()
+    ws = wb.active
+    for i, (product, name, phone, address, tracking) in enumerate(rows):
+        r = i + 2
+        ws.cell(r, 5, product)
+        ws.cell(r, 11, name)
+        ws.cell(r, 13, phone)
+        ws.cell(r, 15, address)
+        ws.cell(r, 17, "롯데택배")
+        ws.cell(r, 18, tracking)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _filled(xlsx: bytes, rows: int) -> list:
+    ws = load_workbook(BytesIO(xlsx)).active
+    return [ws.cell(r, 5).value for r in range(2, rows + 2)]
+
+
+def test_busa_semantic_keys_and_family():
+    from app.processors.tracking_input import _product_families, _semantic_option_keys
+
+    assert "busa:중과:2kg" in _semantic_option_keys("부사 정품 중과 실중량 2kg(8-9과)", "")
+    assert "busa:중과:2kg" in _semantic_option_keys(PRODUCT, "1박스 2kg (중과)")
+    assert "busa:소과:2.5kg" in _semantic_option_keys("부사 정품 소과 실중량 2.5kg(13-16과)", "")
+    assert "busa" in _product_families(PRODUCT, "1박스 2kg (중과)")
+    assert "busa" not in _product_families(SHINANO, "1박스 중과 3kg(9~12과)")
+
+
+def test_busa_same_person_two_boxes_both_filled():
+    from app.processors import tracking_input
+
+    delivery = _tracking_delivery([
+        {"product": PRODUCT, "option": "1박스 2kg (중과)", "name": "김부사"},
+        {"product": PRODUCT, "option": "1박스 3kg (대과)", "name": "김부사"},
+    ])
+    reply = _reply([   # 회신 순서는 DeliveryList와 반대
+        ("부사 정품 대과 실중량 3kg(7-9과)", "김부사", "010-0000-0000", "서울시 어딘가", "B3"),
+        ("부사 정품 중과 실중량 2kg(8-9과)", "김부사", "010-0000-0000", "서울시 어딘가", "B2"),
+    ])
+    out, _fn, stats = tracking_input.process(reply, delivery)
+    assert _filled(out, 2) == ["B2", "B3"]
+    assert stats["filled"] == 2
+
+
+def test_busa_with_other_product_same_person_both_filled():
+    from app.processors import tracking_input
+
+    delivery = _tracking_delivery([
+        {"product": PRODUCT, "option": "1박스 2kg (중과)", "name": "김부사", "phone": "0504-1111-0001"},
+        {"product": SHINANO, "option": "1박스 중과 3kg(9~12과)", "name": "김부사", "phone": "0504-1111-0002"},
+    ])
+    reply = _reply([
+        ("시나노골드(가정용) 중과 3kg(9-12과)", "김부사", "0504-1111-0002", "서울시 어딘가", "S3"),
+        ("부사 정품 중과 실중량 2kg(8-9과)", "김부사", "0504-1111-0001", "서울시 어딘가", "B2"),
+    ])
+    out, _fn, stats = tracking_input.process(reply, delivery)
+    assert _filled(out, 2) == ["B2", "S3"]
+    assert stats["filled"] == 2
+
+
+def test_event_busa_tracking_does_not_land_on_same_name_other_product():
+    """회신에 섞인 이벤트 부사 당첨자 송장이 이름만 같은 다른 사람의 햇밤 줄에 들어가면 안 된다."""
+    from app.processors import tracking_input
+
+    delivery = _tracking_delivery([
+        {"product": "햇밤 대 1kg 경북", "option": "1박스 1kg", "name": "김영희", "phone": "0504-2222-0001", "address": "부산시 어딘가"},
+    ])
+    reply = _reply([
+        ("부사 정품 소과 실중량 2kg(11-13과)", "김영희", "010-4444-5555", "서울시 다른곳", "EV1"),
+    ])
+    out, _fn, stats = tracking_input.process(reply, delivery)
+    assert _filled(out, 1) == [None]
+    assert stats["filled"] == 0
