@@ -10,7 +10,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from app import supplier_price_monitor as spm
-from app.order_routing import JEJUDAPAM, JEWELRYFRUIT, resolve_order_supplier
+from app.order_routing import JEJUDAPAM, resolve_order_supplier
 
 
 # ── 발주 라우팅 판정 (발주 프로세서 재사용) ──

@@ -140,35 +140,20 @@ def _jejudapam_event_product(prize: str) -> str | None:
     발주서에 거래처가 아는 판매옵션명이 찍혀야 해서, 제주다팜 변환기를 차례로 시도한다.
     (미니밤호박·청사과(아오리)·홍감자·콜라비 …)
     """
-    from app.processors.kolrabi_order import (
-        convert_bamhobak_option,
-        convert_busa_option,
-        convert_gamhong_option,
-        convert_hongro_option,
-        convert_hwanggeum_option,
-        convert_potato_option,
-        convert_shinano_option,
-        convert_taechu_option,
-    )
+    from app.product_registry import EVENT_PRODUCTS
 
     # 청사과(아오리)는 제이비티 이관 → _jbt_event_product가 먼저 처리한다.
+    # 레지스트리 event_rank 순서로 시도. 등급별 판매옵션만 있는 품목(감홍·태추·황금향·시나노골드·부사)은
+    # 라이브 경품명이 '감홍사과1.5kg'처럼 등급 없이 오는 경우가 많다 → 등급이 적혀 있으면 그대로,
+    # 없으면 기본값 '중과'로 발주(2026-10-26 감홍 당첨자 — 종전엔 경품명 원문이 나가 거래처가 옵션을 몰랐다).
     text = str(prize or "")
-    for converter in (convert_bamhobak_option, convert_hongro_option, convert_potato_option):
+    for product in EVENT_PRODUCTS:
+        converter = product.converter()
         converted = converter(text, "")
+        if not converted and product.event_default_grade:
+            converted = converter(text, EVENT_DEFAULT_GRADE)
         if converted:
             return converted
-    # 등급별 판매옵션만 있는 품목(감홍·태추·황금향·시나노골드, 2026-10): 라이브 경품명은 '감홍사과1.5kg'처럼
-    # 등급 없이 오는 경우가 많다 → 등급이 적혀 있으면 그대로, 없으면 백도 경품과 같은 기본값 '중과'로 발주
-    # (2026-10-26 감홍사과 당첨자 — 종전엔 경품명 원문이 그대로 나가 거래처가 옵션을 알 수 없었다).
-    for converter in (convert_gamhong_option, convert_taechu_option, convert_hwanggeum_option, convert_shinano_option):
-        converted = converter(text, "") or converter(text, EVENT_DEFAULT_GRADE)
-        if converted:
-            return converted
-    # 부사사과(2026-11-16): 경품명 '부사 사과2kg(소과)'가 원문 그대로 나가 거래처 사이트에서 수동 연결해야 했다
-    # → '부사 정품 소과 실중량 2kg(11-13과)'. 등급이 없으면 다른 경품처럼 중과.
-    converted = convert_busa_option(text, "") or convert_busa_option(text, EVENT_DEFAULT_GRADE)
-    if converted:
-        return converted
     return None
 
 

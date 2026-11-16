@@ -6,12 +6,10 @@ from collections import defaultdict
 
 from openpyxl import load_workbook
 
-from app.config import TEMPLATE_DIR
+from app import product_registry
 from app.processors.tomato_order import (
     JBT_WATERMELON_KGS,
     JBT_WATERMELON_LABEL,
-    delivery_watermelon_kg,
-    is_toss_watermelon_order,
     transform_product,
 )
 from app.processors.tracking_match import (
@@ -39,6 +37,13 @@ KST = timezone(timedelta(hours=9))
 # (구)TOSS_DELIVERY_COMPANY="한진택배" 상수는 제거 — 쥬얼리·제주다팜 품목은 롯데 발송이라
 # 토스 등록 기본값은 normalize_toss_courier(courier, default="롯데택배")로 지정한다.
 TRACKABLE_TOSS_STATUSES = {"PAID", "PREPARING_PRODUCT", "DELIVERING"}
+
+# 토스 운송장 등록 대상 낱말. 쥬얼리(수박·참외·복숭아·감자·햇밤·옥수수)·제이비티(청사과 ⊂ '사과') +
+# 제주다팜 품목은 상품 레지스트리(toss_tracking_keywords)에서 — '사과'는 홍로·가을햇사과(제주다팜)와
+# 청사과(제이비티)를 모두 덮는다(2026-09-11 홍로 2건이 여기서 걸러져 송장이 안 들어가던 사고).
+_TOSS_TRACKING_KEYWORDS = tuple(dict.fromkeys(
+    ("수박", "참외", "복숭아", "감자", "옥수수", "사과", "햇밤") + product_registry.toss_tracking_keywords()
+))
 
 
 def phone_digits(value: object) -> str:
@@ -526,7 +531,7 @@ async def process_toss_watermelon_tracking(tomato_reply_bytes: bytes) -> dict:
         # '사과'는 홍로사과·가을햇사과(제주다팜)와 청사과(제이비티)를 모두 덮는다 —
         # 2026-09-11 홍로 주문 2건이 여기서 걸러져 송장이 안 들어가던 사고.
         # '햇밤'(쥬얼리, 2026-10)은 '밤호박'과 겹치지 않아 따로 넣는다.
-        if not any(k in text for k in ("수박", "참외", "복숭아", "감자", "밤호박", "콜라비", "옥수수", "사과", "햇밤", "시나노", "황금향", "태추", "감홍")):
+        if not any(k in text for k in _TOSS_TRACKING_KEYWORDS):
             continue
 
         option = str(item.get("optionName") or "")

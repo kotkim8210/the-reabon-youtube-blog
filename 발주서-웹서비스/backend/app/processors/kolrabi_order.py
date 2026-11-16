@@ -1308,80 +1308,37 @@ def _has_content(stats: dict | None) -> bool:
 
 def process_outputs(
     delivery_file_bytes: bytes,
-    toss_colrabi_entries: list[dict] | None = None,
-    toss_bamhobak_entries: list[dict] | None = None,
-    toss_potato_entries: list[dict] | None = None,
-    toss_baekdo_entries: list[dict] | None = None,
-    toss_hongro_entries: list[dict] | None = None,
-    toss_shinano_entries: list[dict] | None = None,
-    toss_hwanggeum_entries: list[dict] | None = None,
-    toss_taechu_entries: list[dict] | None = None,
-    toss_gamhong_entries: list[dict] | None = None,
+    toss_entries: dict[str, list[dict]] | None = None,
+    **toss_kwargs: list[dict] | None,
 ) -> list[tuple[bytes, str, dict]]:
-    """제주다팜 발주서 목록 반환 — 콜라비 + 미니밤호박 + 홍감자.
+    """제주다팜 발주서 목록 반환 — app.product_registry.JEJU_PRODUCTS 순서대로.
 
-    toss_bamhobak_entries: 토스 미니밤호박 1kg 주문(선택) → 미니밤호박 발주서에 합침.
-    toss_potato_entries: 토스 홍감자 주문(선택) → 홍감자 발주서에 합침.
+    toss_entries: {상품 key: 토스 주문 목록} → 그 상품 발주서에 합친다.
+    (옛 호출 형태 toss_<key>_entries=[...] 키워드도 받는다)
 
-    ※ 성주참외 알뜰과(쥬얼리팜)는 2026-06부터 쥬얼리팜(myeongi) 발주로 이관 —
-      DeliveryList의 알뜰과는 명이나물(쥬얼리프룻) 메뉴에서 함께 출력된다.
-    ※ 초당옥수수·애플초당옥수수는 쥬얼리프룻(myeongi) 발주 — 여기서 출력하지 않는다.
-    ※ 홍감자는 2026-07 쥬얼리프룻 품절로 제주다팜 발주 이관.
+    ※ 성주참외 알뜰과·초당옥수수·애플초당옥수수는 쥬얼리프룻(myeongi) 발주 — 여기서 출력하지 않는다.
+    ※ 청사과(아오리)는 2026-08-27 제이비티 이관 — 레지스트리에 없음.
     """
+    from app.product_registry import JEJU_PRODUCTS, PRODUCTS_BY_KEY
+
+    entries_by_key = dict(toss_entries or {})
+    for name, value in toss_kwargs.items():
+        key = name[len("toss_"):-len("_entries")] if name.startswith("toss_") and name.endswith("_entries") else ""
+        if key not in PRODUCTS_BY_KEY:
+            raise TypeError(f"process_outputs() got an unexpected keyword argument '{name}'")
+        entries_by_key[key] = value
+
     results: list[tuple[bytes, str, dict]] = []
-
-    kolrabi_result = process(delivery_file_bytes, toss_entries=toss_colrabi_entries)
-    kolrabi_stats = kolrabi_result[2] if len(kolrabi_result) > 2 else {}
-    if int((kolrabi_stats or {}).get("total") or 0) > 0:
-        results.append(kolrabi_result)
-
-    # 초당옥수수는 2026-06부터 쥬얼리프룻(myeongi) 발주로 이관 — 여기서 출력하지 않는다.
-
-    bamhobak_result = process_bamhobak(delivery_file_bytes, toss_entries=toss_bamhobak_entries)
-    if bamhobak_result and _has_content(bamhobak_result[2]):
-        results.append(bamhobak_result)
-
-    potato_result = process_potato(delivery_file_bytes, toss_entries=toss_potato_entries)
-    if potato_result and _has_content(potato_result[2]):
-        results.append(potato_result)
-
-    # 백도 제주다팜 발주는 2026-08-10을 마지막으로 시즌아웃 → 이후엔 발주서 미출력
-    # (송장입력·이벤트·마진방어(pause)와 무관하게 발주 출력만 차단).
-    if _baekdo_jeju_season_open():
-        baekdo_result = process_baekdo(delivery_file_bytes, toss_entries=toss_baekdo_entries)
-        if baekdo_result and _has_content(baekdo_result[2]):
-            results.append(baekdo_result)
-
-    # 청사과(아오리)는 2026-08-27 제이비티로 발주 이관 — 제주다팜 발주서에서 제외.
-    # (process_apple/convert_apple_option 함수는 이력·이벤트 참조용으로 남겨둔다)
-
-    hongro_result = process_hongro(delivery_file_bytes, toss_entries=toss_hongro_entries)
-    if hongro_result and _has_content(hongro_result[2]):
-        results.append(hongro_result)
-
-    shinano_result = process_shinano(delivery_file_bytes, toss_entries=toss_shinano_entries)
-    if shinano_result and _has_content(shinano_result[2]):
-        results.append(shinano_result)
-
-    hwanggeum_result = process_hwanggeum(delivery_file_bytes, toss_entries=toss_hwanggeum_entries)
-    if hwanggeum_result and _has_content(hwanggeum_result[2]):
-        results.append(hwanggeum_result)
-
-    taechu_result = process_taechu(delivery_file_bytes, toss_entries=toss_taechu_entries)
-    if taechu_result and _has_content(taechu_result[2]):
-        results.append(taechu_result)
-
-    gamhong_result = process_gamhong(delivery_file_bytes, toss_entries=toss_gamhong_entries)
-    if gamhong_result and _has_content(gamhong_result[2]):
-        results.append(gamhong_result)
-
-    # 부사사과(2026-11) — 쿠팡 DeliveryList 주문만(토스 미판매)
-    busa_result = process_busa(delivery_file_bytes)
-    if busa_result and _has_content(busa_result[2]):
-        results.append(busa_result)
-
-    pear_result = process_pear(delivery_file_bytes)
-    if pear_result and _has_content(pear_result[2]):
-        results.append(pear_result)
-
+    for product in JEJU_PRODUCTS:
+        if not product.enabled():
+            continue
+        result = product.build(delivery_file_bytes, entries_by_key.get(product.key))
+        if not result:
+            continue
+        stats = result[2] if len(result) > 2 else {}
+        if product.require_total:
+            if int((stats or {}).get("total") or 0) > 0:
+                results.append(result)
+        elif _has_content(stats):
+            results.append(result)
     return results

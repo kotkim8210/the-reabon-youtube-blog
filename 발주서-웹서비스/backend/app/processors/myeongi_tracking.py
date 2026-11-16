@@ -27,7 +27,6 @@ from app.processors.tracking_match import (
     coupang_courier_name,
     filled_tracking_rows,
     name_counts,
-    normalize_courier_name,
     option_key_set,
     options_match,
     requires_option_guard,

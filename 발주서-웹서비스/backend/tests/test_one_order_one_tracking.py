@@ -9,7 +9,6 @@
 import asyncio
 from io import BytesIO
 
-import pytest
 from openpyxl import Workbook, load_workbook
 
 from app.processors import goguma_tracking, goguma_tracking_api as gta, hobak_goguma, myeongi_tracking, tracking_input

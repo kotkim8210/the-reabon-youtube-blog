@@ -5,7 +5,6 @@ from collections import defaultdict
 
 from openpyxl import load_workbook
 
-from app.config import TEMPLATE_DIR
 from app.processors.goguma_order import transform_option
 from app.processors.haedal_tracking_parser import detect_haedal_columns, find_tracking_in_row
 from app.processors.tracking_match import (

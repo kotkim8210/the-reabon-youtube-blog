@@ -11,7 +11,8 @@
 
 from __future__ import annotations
 
-from app.processors import kolrabi_order, myeongi_order
+from app import product_registry
+from app.processors import myeongi_order
 
 JEJUDAPAM = "제주다팜"
 JEWELRYFRUIT = "쥬얼리프룻"
@@ -19,25 +20,9 @@ JEWELRYFRUIT = "쥬얼리프룻"
 
 def resolve_order_supplier(product_name: object, option_text: object) -> str | None:
     """쿠팡 상품명·옵션으로 발주처를 판정한다. 판정 불가(대상 아님)면 None."""
-    # 제주다팜(콜라비 메뉴) — 변환 결과가 있어야 실제 발주 대상
-    if kolrabi_order.convert_bamhobak_option(product_name, option_text):
-        return JEJUDAPAM
-    if kolrabi_order.convert_jeju_baekdo_option(product_name, option_text):
-        return JEJUDAPAM
-    if kolrabi_order.is_jeju_potato_order(product_name, option_text) and kolrabi_order.convert_potato_option(
-        product_name, option_text
-    ):
-        return JEJUDAPAM
+    # 제주다팜(콜라비 메뉴) — 변환 결과가 있어야 실제 발주 대상. 대상 품목은 상품 레지스트리(routing)에서.
     # 청사과(아오리)는 2026-08-27 제주다팜 → 제이비티 이관
-    if kolrabi_order.convert_hongro_option(product_name, option_text):
-        return JEJUDAPAM
-    if kolrabi_order.convert_shinano_option(product_name, option_text):
-        return JEJUDAPAM
-    if kolrabi_order.convert_hwanggeum_option(product_name, option_text):
-        return JEJUDAPAM
-    if kolrabi_order.convert_taechu_option(product_name, option_text):
-        return JEJUDAPAM
-    if kolrabi_order.convert_gamhong_option(product_name, option_text):
+    if product_registry.routes_to_jejudapam(product_name, option_text):
         return JEJUDAPAM
 
     # 쥬얼리프룻(명이 메뉴)

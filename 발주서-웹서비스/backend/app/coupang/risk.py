@@ -23,7 +23,6 @@ async def calculate_risk_score(product: dict) -> dict:
     """
     product_id = product["seller_product_id"]
     stock = product.get("stock", 0)
-    sale_price = product.get("sale_price", 0)
 
     # Get average daily sales
     avg_daily_sales = await db.get_daily_sales_avg(product_id, days=7)

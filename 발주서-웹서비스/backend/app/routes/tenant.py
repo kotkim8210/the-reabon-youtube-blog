@@ -4,14 +4,14 @@ import zipfile
 from io import BytesIO
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
 from app.auth import verify_token
 from app.db import (
-    save_user_template, get_user_templates, get_user_template_data, delete_user_template,
+    save_user_template, get_user_templates, delete_user_template,
     create_user_product, get_user_products, update_user_product, delete_user_product,
 )
 from app.quota import check_product_limit, check_order_quota, record_order_usage

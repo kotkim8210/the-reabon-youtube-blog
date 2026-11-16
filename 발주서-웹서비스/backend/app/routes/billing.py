@@ -12,12 +12,11 @@ from pydantic import BaseModel
 from app.auth import verify_token
 from app.config import (
     DISABLE_BILLING, TOSS_PAY_SECRET_KEY, TOSS_PAY_CLIENT_KEY,
-    TOSS_PAY_API_BASE, APP_BASE_URL, PRO_PLAN_PRICE,
+    TOSS_PAY_API_BASE, PRO_PLAN_PRICE,
 )
 from app.db import (
     list_plans, get_plan, get_subscription, upsert_subscription,
     set_subscription_cancel, get_monthly_usage, add_billing_event,
-    get_user_by_id,
 )
 
 logger = logging.getLogger(__name__)

@@ -333,56 +333,25 @@ async def collect_toss_jewelry_orders(from_date: str, to_date: str) -> list[dict
 
 
 async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
-    """토스 API에서 제주다팜 발주 대상(콜라비 + 미니밤호박 전 옵션 + 홍감자) 주문을 수집.
+    """토스 API에서 제주다팜 발주 대상 주문을 수집.
 
-    반환: {"colrabi": [...], "bamhobak": [...], "potato": [...], "baekdo": [...], "hongro": [...]} — 각 entry에
-    'product'(제주다팜 발주 품목명) 포함.
-    콜라비는 3/5/10kg('콜라비 정품 {kg}kg'), 미니밤호박은 전 옵션(2026-08-17 쥬얼리→제주다팜 통합),
-    홍감자는 2026-07 쥬얼리 품절로 제주다팜 이관(중1→중2, 대3→특3, 대5→특5).
+    반환: {상품 key: [...]} — app.product_registry.TOSS_PRODUCTS 전부(주문 없으면 빈 목록).
+    각 entry에 'product'(제주다팜 발주 품목명) 포함. 판정은 레지스트리 순서대로 첫 상품이 가져간다.
     배송중·송장입력 건은 자동 제외.
     """
     from app.toss.client import toss_client
-    from app.processors.kolrabi_order import (
-        convert_bamhobak_option,
-        convert_hongro_option,
-        convert_jeju_baekdo_option,
-        convert_potato_option,
-        convert_quantity,
-        convert_hwanggeum_option,
-        convert_shinano_option,
-        convert_gamhong_option,
-        convert_taechu_option,
-        is_jeju_gamhong_order,
-        is_jeju_hongro_order,
-        is_jeju_hwanggeum_order,
-        is_jeju_shinano_order,
-        is_jeju_taechu_order,
-    )
+    from app.product_registry import TOSS_PRODUCTS
 
     orders = await toss_client.get_orders(start_date=from_date, end_date=to_date, status=None)
 
-    colrabi: list[dict] = []
-    bamhobak: list[dict] = []
-    potato: list[dict] = []
-    baekdo: list[dict] = []
-    hongro: list[dict] = []
-    shinano: list[dict] = []
-    hwanggeum: list[dict] = []
-    taechu: list[dict] = []
-    gamhong: list[dict] = []
+    collected: dict[str, list[dict]] = {product.key: [] for product in TOSS_PRODUCTS}
     for item in orders:
         # 품목 판정·변환은 상품명+옵션만 본다(아래 분기의 '전체 주문 텍스트'도 이 텍스트).
         # 종전엔 이름·주소·배송메모까지 합쳐 이름에 '백도'가 든 손님 주문이 백도 분기로 빠져 누락되고,
         # 메모에 '콜라비'가 든 주문이 콜라비로 둔갑했다(2026-11-16 리뷰).
         text = _toss_product_text(item)
         compact = text.replace(" ", "")
-        if ("콜라비" not in compact and "밤호박" not in compact
-                and "홍감자" not in compact and "백도" not in compact
-                and not is_jeju_hongro_order(compact, "")
-                and not is_jeju_shinano_order(compact, "")
-                and not is_jeju_hwanggeum_order(compact, "")
-                and not is_jeju_taechu_order(compact, "")
-                and not is_jeju_gamhong_order(compact, "")):
+        if not any(product.toss.match(compact, "", compact) for product in TOSS_PRODUCTS):
             continue
         order_status = normalize(item.get("orderProductStatus") or item.get("status") or item.get("orderStatus") or "")
         if order_status and any(pattern in order_status.upper() for pattern in TOSS_WATERMELON_EXCLUDED_STATUS_PATTERNS):
@@ -416,58 +385,15 @@ async def collect_toss_jejudapam_orders(from_date: str, to_date: str) -> dict:
                 ),
             }
 
-        if "콜라비" in compact:
-            product = convert_quantity(f"{option} {product_name}")  # '콜라비 정품 {kg}kg' (3/5/10kg)
-            if product:
-                colrabi.append(_entry(product, "toss-colrabi"))
-        elif "밤호박" in compact:
-            product = convert_bamhobak_option(product_name, option)  # 1kg만
-            if product:
-                bamhobak.append(_entry(product, "toss-bamhobak"))
-        elif "홍감자" in compact:
-            product = convert_potato_option(product_name, option)  # 중1→중2, 대3→특3, 대5→특5
-            if product:
-                potato.append(_entry(product, "toss-potato"))
-        elif "백도" in compact:
-            product = convert_jeju_baekdo_option(product_name, option)  # 2·4kg만(1kg은 쥬얼리)
-            if product:
-                baekdo.append(_entry(product, "toss-baekdo"))
-        elif is_jeju_hongro_order(product_name, option):
-            # 홍로사과(가을햇사과) — 청사과(제이비티)와는 배타 판정
-            product = convert_hongro_option(product_name, option)
-            if product:
-                hongro.append(_entry(product, "toss-hongro"))
-        elif is_jeju_shinano_order(product_name, option) or is_jeju_shinano_order(compact, ""):
-            # 시나노골드 사과(2026-10) — 토스 상품명에 '시나노'가 빠져도 전체 주문 텍스트로 판정
-            product = convert_shinano_option(product_name, option) or convert_shinano_option(
-                f"시나노 {product_name}", option
-            )
-            if product:
-                shinano.append(_entry(product, "toss-shinano"))
-        elif is_jeju_hwanggeum_order(product_name, option) or is_jeju_hwanggeum_order(compact, ""):
-            # 황금향(2026-10, 한진택배 발송) — 토스 상품명에 '황금향'이 빠져도 전체 주문 텍스트로 판정
-            product = convert_hwanggeum_option(product_name, option) or convert_hwanggeum_option(
-                f"황금향 {product_name}", option
-            )
-            if product:
-                hwanggeum.append(_entry(product, "toss-hwanggeum"))
-        elif is_jeju_taechu_order(product_name, option) or is_jeju_taechu_order(compact, ""):
-            # 태추단감(2026-10) — 토스 상품명에 '태추'가 빠져도 전체 주문 텍스트로 판정
-            product = convert_taechu_option(product_name, option) or convert_taechu_option(
-                f"태추 {product_name}", option
-            )
-            if product:
-                taechu.append(_entry(product, "toss-taechu"))
-        elif is_jeju_gamhong_order(product_name, option) or is_jeju_gamhong_order(compact, ""):
-            # 감홍사과(2026-10) — 홍로 판정은 감홍을 제외하므로 위 홍로 분기에 잡히지 않는다
-            product = convert_gamhong_option(product_name, option) or convert_gamhong_option(
-                f"감홍 {product_name}", option
-            )
-            if product:
-                gamhong.append(_entry(product, "toss-gamhong"))
+        for jeju_product in TOSS_PRODUCTS:  # 앞 상품이 먼저 잡는다(종전 elif 순서)
+            spec = jeju_product.toss
+            if spec.match(product_name, option, compact):
+                product = spec.convert(product_name, option)
+                if product:
+                    collected[jeju_product.key].append(_entry(product, spec.tag))
+                break
 
-    return {"colrabi": colrabi, "bamhobak": bamhobak, "potato": potato, "baekdo": baekdo, "hongro": hongro,
-            "shinano": shinano, "hwanggeum": hwanggeum, "taechu": taechu, "gamhong": gamhong}
+    return collected
 
 
 async def process_toss_watermelon_order(

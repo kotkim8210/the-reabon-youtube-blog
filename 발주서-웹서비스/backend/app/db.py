@@ -5,7 +5,6 @@ import logging
 import re
 import aiosqlite
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from app.config import DATABASE_PATH
 
@@ -818,7 +817,7 @@ async def upsert_oauth_user(
         user = dict(user)
         # Refresh display info if changed
         await db.execute(
-            f"UPDATE users SET display_name=?, avatar_url=?, updated_at=? WHERE id=?",
+            "UPDATE users SET display_name=?, avatar_url=?, updated_at=? WHERE id=?",
             (display_name, avatar_url, now, user["id"]),
         )
         await db.commit()

@@ -9,7 +9,6 @@ from app.processors.chamdureup_order import convert_option
 from app.processors.tracking_match import (
     coupang_courier_name,
     name_counts,
-    normalize_courier_name,
     option_key_set,
     options_match,
     requires_option_guard,

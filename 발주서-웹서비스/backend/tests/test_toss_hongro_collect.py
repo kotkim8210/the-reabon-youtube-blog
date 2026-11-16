@@ -4,7 +4,6 @@
 """
 import asyncio
 
-import pytest
 
 from app.processors import tomato_order
 

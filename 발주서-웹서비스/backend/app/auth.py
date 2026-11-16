@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.hash import bcrypt
@@ -11,7 +11,7 @@ import httpx
 
 from app.config import (
     ALGORITHM, ACCESS_TOKEN_EXPIRE_HOURS, SECRET_KEY, AUTH_DISABLED,
-    DISABLE_SIGNUP, ADMIN_ONLY, DEPLOYMENT_MODE, KAKAO_CLIENT_ID, GOOGLE_CLIENT_ID,
+    DISABLE_SIGNUP, ADMIN_ONLY, KAKAO_CLIENT_ID, GOOGLE_CLIENT_ID,
 )
 from app.db import (
     get_setting, set_setting,

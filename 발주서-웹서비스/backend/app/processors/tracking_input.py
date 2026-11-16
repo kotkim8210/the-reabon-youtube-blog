@@ -3,14 +3,11 @@ from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
 from openpyxl import load_workbook
-from openpyxl.styles import Font
 
-from app.config import TEMPLATE_DIR
 from app.processors.tracking_match import (
     COUPANG_CJ_NAME,
     coupang_courier_name,
     name_counts,
-    normalize_courier_name,
     option_key_set,
     options_match,
     requires_option_guard,
@@ -67,35 +64,15 @@ def _product_families(*values: object) -> set[str]:
     """품목(상품군)만 본다 — 의미키와 달리 등급·kg를 못 읽어도 상품명 낱말로 정한다.
     같은 사람이 다른 거래처 상품(쥬얼리 햇밤 등)도 주문하면 그 줄은 이 회신의 품목이 아니라 송장을 받으면 안 된다
     (2026-11-02 강본아 햇밤 줄이 주소만 보고 황금향 송장을 가져가 나머지가 한 칸씩 밀린 사고).
-    새 제주다팜 품목을 넣으면 _semantic_option_keys와 함께 여기에도 낱말을 추가한다."""
+    제주다팜 품목은 app.product_registry(family_match)에서 정의한다."""
     text = normalize(" ".join(str(value) for value in values if value not in (None, "")))
-    families: set[str] = set()
-    if "콜라비" in text:
-        families.add("kolrabi")
+    from app.product_registry import product_families
+
+    families: set[str] = product_families(text)  # 제주다팜 품목(콜라비·밤호박·홍감자·백도·홍로·감홍·…)
     if "참외" in text and any(token in text for token in ("알뜰", "혼합", "랜덤")):
         families.add("chamoe-altteul")
     if "옥수수" in text:
         families.add("corn")
-    if "밤호박" in text:
-        families.add("bamhobak")
-    if "홍감자" in text:
-        families.add("potato")
-    if "백도" in text or "딱딱이" in text:
-        families.add("baekdo")
-    if "감홍" in text:  # '감홍사과'에 '홍사과'가 들어 있어 홍로보다 먼저·배타
-        families.add("gamhong")
-    elif "홍로" in text or "홍사과" in text or "가을햇사과" in text:
-        families.add("hongro")
-    if "배선물세트" in text:
-        families.add("pear")
-    if "시나노" in text:
-        families.add("shinano")
-    if "황금향" in text:
-        families.add("hwanggeum")
-    if "태추" in text:
-        families.add("taechu")
-    if "부사" in text:  # 부사사과(2026-11-16) — 이벤트 부사 송장이 같은 이름의 다른 상품 줄로 가지 않게
-        families.add("busa")
     if "청사과" in text or "아오리" in text:
         families.add("apple")
     return families
@@ -179,9 +156,10 @@ def _semantic_option_keys(*values: object) -> set[str]:
         return set()
 
     weights = set(re.findall(r"(\d+)kg", text, flags=re.IGNORECASE))
-    keys: set[str] = set()
-    if "콜라비" in text:
-        keys.update(f"kolrabi:{weight}kg" for weight in weights)
+    from app.product_registry import semantic_keys
+
+    # 제주다팜 품목(콜라비·밤호박·홍감자·백도·홍로·감홍·시나노·황금향·태추·부사·햇 배)은 상품 레지스트리의 의미키
+    keys: set[str] = semantic_keys(text, weights)
     if "참외" in text and any(token in text for token in ("알뜰", "혼합", "랜덤")):
         keys.update(f"chamoe-altteul:{weight}kg" for weight in weights)
     # 초당옥수수 동명이인 구분: orderlist는 상품명에, DeliveryList는 옵션에 등급/수량이 있어
@@ -190,76 +168,6 @@ def _semantic_option_keys(*values: object) -> set[str]:
         grade = next((g for g in ("특품", "중품", "상품", "정품") if g in text), "")
         counts = set(re.findall(r"(\d+)\s*개", text))
         keys.update(f"corn:{grade}:{count}개" for count in counts)
-    if "밤호박" in text:
-        keys.update(f"bamhobak:{weight}kg" for weight in weights)
-    if "홍감자" in text:
-        # 홍감자는 발주 매핑(중1→중2, 대3→특3, 대5→특5)으로 orderlist(발주명)와
-        # DeliveryList(쿠팡 원본 옵션)의 등급·kg가 달라진다 → 양쪽 모두 발주명으로
-        # 정규화한 키를 쓰면 중량 업 케이스까지 정확히 묶인다.
-        from app.processors.kolrabi_order import convert_potato_option
-        converted = convert_potato_option(text, "")
-        if converted:
-            keys.add("potato:" + converted.replace(" ", ""))
-    if "백도" in text or "딱딱이" in text:
-        # 제주다팜 백도 2·4kg: orderlist(발주명 '딱딱이 복숭아 {등급} {kg}kg')와
-        # DeliveryList(쿠팡 '백도… {등급} {kg}kg')의 등급·kg가 동일 → 등급+kg 의미키로 묶는다.
-        grade = "대과" if "대과" in text else ("중과" if "중과" in text else "")
-        keys.update(f"baekdo:{grade}:{weight}kg" for weight in weights)
-    if "감홍" in text:
-        # 감홍사과: orderlist(발주명 '감홍사과(가정용 A등급) {등급} {kg}kg(…)')와 DeliveryList(쿠팡 '1박스 1.5kg (대과)')를
-        # 제주다팜 등급+kg 의미키로 묶는다. '감홍사과'에 '홍사과'가 들어 있어 아래 홍로 키보다 먼저·배타로 판정.
-        from app.processors.kolrabi_order import gamhong_grade_and_kg
-        grade, kg = gamhong_grade_and_kg(text, "")
-        if kg:
-            keys.add(f"gamhong:{grade}:{kg}kg")
-    elif "홍로" in text or "홍사과" in text or "가을햇사과" in text:
-        # 홍로사과: orderlist(발주명 '가을햇사과(홍사과) 가정용 {등급} 포장재포함 {kg}kg(...)')와
-        # DeliveryList(쿠팡 '1박스 {등급} {kg}kg(...)')를 등급+kg 의미키로 묶는다.
-        # 등급은 '중소과'·'중대과'가 '소과'·'대과'를 포함하므로 긴 것 먼저.
-        # 쿠팡 '중과' = 제주다팜 '중대과' → 같은 의미키로 묶어야 매칭된다.
-        from app.processors.kolrabi_order import _HONGRO_GRADE_ALIASES, _HONGRO_GRADES
-        grade = next((g for g in _HONGRO_GRADES if g in text), "")
-        grade = _HONGRO_GRADE_ALIASES.get(grade, grade)
-        hongro_kgs = set(re.findall(r"(\d+(?:\.\d+)?)kg", text, flags=re.IGNORECASE))
-        keys.update(f"hongro:{grade}:{w}kg" for w in hongro_kgs)
-    if "배선물세트" in re.sub(r"\s+", "", text):
-        # 햇 배 선물세트: orderlist(발주명 '햇 배 선물세트 {등급} {kg}kg (...) [+ 보자기 동봉]')와
-        # DeliveryList(쿠팡 '프리미엄 햇 배 선물세트 보자기 포함 큼직한 {등급} {kg}kg')를
-        # (보자기 유무·등급·kg) 의미키로 묶는다. '특대과'가 '대과' 포함 → 긴 것 먼저.
-        compact = re.sub(r"\s+", "", text)
-        bojagi = "1" if "보자기" in compact else "0"
-        grade = next((g for g in ("특대과", "대과") if g in compact), "")
-        pear_kgs = set(re.findall(r"(\d+(?:\.\d+)?)kg", compact, flags=re.IGNORECASE))
-        keys.update(f"pear:{bojagi}:{grade}:{w}kg" for w in pear_kgs)
-    if "시나노" in text:
-        # 시나노골드: orderlist(발주명 '시나노골드(가정용) {등급} {kg}kg(…)')와 DeliveryList(쿠팡 '1박스 {등급} {kg}kg …')를
-        # 제주다팜 등급+kg 의미키로 묶는다(발주 변환과 같은 함수 → '중대과'·'랜덤' 별칭까지 일치).
-        from app.processors.kolrabi_order import shinano_grade_and_kg
-        grade, kg = shinano_grade_and_kg(text, "")
-        if kg:
-            keys.add(f"shinano:{grade}:{kg}kg")
-    if "황금향" in text:
-        # 황금향: orderlist(발주명 '하우스 정품 황금향 {등급}(g범위) {kg}kg')와 DeliveryList(쿠팡 '1박스 2kg (소)')를
-        # 제주다팜 등급+kg 의미키로 묶는다(발주 변환과 같은 함수 → '(소)'·'대' 별칭까지 일치).
-        from app.processors.kolrabi_order import hwanggeum_grade_and_kg
-        grade, kg = hwanggeum_grade_and_kg(text, "")
-        if kg:
-            keys.add(f"hwanggeum:{grade}:{kg}kg")
-    if "태추" in text:
-        # 태추단감: orderlist(발주명 '태추단감 {등급} {kg}kg (과수)')와 DeliveryList(쿠팡 '1박스 1kg (중과)')를
-        # 제주다팜 등급+kg 의미키로 묶는다(발주 변환과 같은 함수).
-        from app.processors.kolrabi_order import taechu_grade_and_kg
-        grade, kg = taechu_grade_and_kg(text, "")
-        if kg:
-            keys.add(f"taechu:{grade}:{kg}kg")
-    if "부사" in text:
-        # 부사사과(2026-11-16): orderlist(발주명 '부사 정품 {등급} 실중량 {kg}kg(과수)')와 DeliveryList(쿠팡 '1박스 2kg (중과)')를
-        # 제주다팜 등급+kg 의미키로 묶는다(발주 변환과 같은 함수). 없으면 같은 사람이 부사를 2개 이상 사거나
-        # 다른 상품과 같이 산 줄의 부사 송장이 '동명이인 구분 불가'로 비었다.
-        from app.processors.kolrabi_order import busa_grade_and_kg
-        grade, kg = busa_grade_and_kg(text, "")
-        if kg:
-            keys.add(f"busa:{grade}:{kg}kg")
     if "청사과" in text or "아오리" in text:
         # 청사과: orderlist(발주명 '청사과 {등급}(가정용) … {kg}kg(…)')와 DeliveryList(쿠팡 옵션)의
         # 표기가 달라 등급(중소과/소과/대과)+kg 의미키로 묶는다. '중소과'가 '소과' 포함 → 긴 것 먼저.

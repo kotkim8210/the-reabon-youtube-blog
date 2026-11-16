@@ -1,0 +1,22 @@
+#!/bin/sh
+# rj-balju 커밋 전 검사: 스테이징된 백엔드 .py에 pyflakes(미사용 import·정의 안 된 이름 등).
+# core.hooksPath=.githooks — 이 파일이 있는 브랜치(claude/balju-saas-phase0) 작업 트리에서만 동작한다.
+# 파이썬: $RJB_PYTHON → <작업트리>/.venv → python. 설치: <python> -m pip install pyflakes
+set -e
+top=$(git rev-parse --show-toplevel)
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+git -c core.quotepath=off diff --cached --name-only -z --diff-filter=ACMR -- '발주서-웹서비스/backend/*.py' > "$tmp/files"
+[ -s "$tmp/files" ] || exit 0
+PY="${RJB_PYTHON:-$top/.venv/Scripts/python.exe}"
+[ -x "$PY" ] || PY=python
+if ! "$PY" -m pyflakes --version >/dev/null 2>&1; then
+  echo "pre-commit: pyflakes가 없습니다 → \"$PY\" -m pip install pyflakes" >&2
+  exit 1
+fi
+# 작업 트리가 아니라 '커밋될 내용'(인덱스)을 검사한다 — 다른 세션의 미커밋 수정이 섞여 있어도 정확하다.
+xargs -0 git checkout-index --prefix="$tmp/idx/" -- < "$tmp/files"
+if ! "$PY" -m pyflakes "$tmp/idx"; then
+  echo "pre-commit: pyflakes 경고를 고친 뒤 다시 커밋하세요(위 경로의 $tmp/idx/ 는 커밋될 내용 사본)." >&2
+  exit 1
+fi

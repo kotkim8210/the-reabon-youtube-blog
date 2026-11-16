@@ -2,7 +2,7 @@
 
 from io import BytesIO
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 
 from app.processors import kolrabi_order, myeongi_order
 from app.processors.tracking_input import _semantic_option_keys

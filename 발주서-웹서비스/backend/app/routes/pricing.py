@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import Optional
 
 from app.auth import verify_token
 from app import db

@@ -33,7 +33,7 @@ async def connection_test(_token: dict = Depends(verify_token)):
 @router.get("/debug-orders")
 async def debug_orders(_token: dict = Depends(verify_token)):
     """Debug: show raw Toss API response structure."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     now = datetime.now(KST)
     start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     end = now.strftime("%Y-%m-%d")

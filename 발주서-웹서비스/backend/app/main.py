@@ -18,6 +18,7 @@ from app.auth import router as auth_router, verify_token, require_pro
 from pydantic import BaseModel
 
 from app import config
+from app import product_registry
 from app import email_service
 from app.coupang.client import CoupangApiError
 from app.toss.client import TossApiError
@@ -581,16 +582,8 @@ async def process_kolrabi_order(
             delivery_bytes, issued_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
             reissue_keys=reissue_keys, reissued=reissued,
         )
-        # 토스 제주다팜 주문(콜라비 + 미니밤호박 1kg + 홍감자 + 백도 2·4kg)을 토스 API로 수집해 각 발주서에 합친다.
-        toss_colrabi_entries = []
-        toss_bamhobak_entries = []
-        toss_potato_entries = []
-        toss_baekdo_entries = []
-        toss_hongro_entries = []
-        toss_shinano_entries = []
-        toss_hwanggeum_entries = []
-        toss_taechu_entries = []
-        toss_gamhong_entries = []
+        # 토스 제주다팜 주문(상품 레지스트리 TOSS_PRODUCTS)을 토스 API로 수집해 각 발주서에 합친다.
+        toss_entries: dict[str, list] = {product.key: [] for product in product_registry.TOSS_PRODUCTS}
         toss_error = ""
         collect_dates = None
         if toss_from_date and toss_to_date:
@@ -603,73 +596,24 @@ async def process_kolrabi_order(
             collect_dates = (_widen_start(collect_dates[0], issued_dates, reissue_keys), collect_dates[1])
             try:
                 toss_jeju = await tomato_order.collect_toss_jejudapam_orders(*collect_dates)
-                toss_colrabi_entries = toss_jeju.get("colrabi", [])
-                toss_bamhobak_entries = toss_jeju.get("bamhobak", [])
-                toss_potato_entries = toss_jeju.get("potato", [])
-                toss_colrabi_entries, _dup_c = issued_orders.filter_entries_by_issued(
-                    toss_colrabi_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                toss_bamhobak_entries, _dup_b = issued_orders.filter_entries_by_issued(
-                    toss_bamhobak_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                toss_potato_entries, _dup_p = issued_orders.filter_entries_by_issued(
-                    toss_potato_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                toss_baekdo_entries = toss_jeju.get("baekdo", [])
-                toss_baekdo_entries, _dup_bd = issued_orders.filter_entries_by_issued(
-                    toss_baekdo_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                toss_hongro_entries = toss_jeju.get("hongro", [])
-                toss_hongro_entries, _dup_h = issued_orders.filter_entries_by_issued(
-                    toss_hongro_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                toss_shinano_entries = toss_jeju.get("shinano", [])
-                toss_shinano_entries, _dup_s = issued_orders.filter_entries_by_issued(
-                    toss_shinano_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                toss_hwanggeum_entries = toss_jeju.get("hwanggeum", [])
-                toss_hwanggeum_entries, _dup_hg = issued_orders.filter_entries_by_issued(
-                    toss_hwanggeum_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                toss_taechu_entries = toss_jeju.get("taechu", [])
-                toss_taechu_entries, _dup_tc = issued_orders.filter_entries_by_issued(
-                    toss_taechu_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                toss_gamhong_entries = toss_jeju.get("gamhong", [])
-                toss_gamhong_entries, _dup_gh = issued_orders.filter_entries_by_issued(
-                    toss_gamhong_entries, issued_excluded, skipped_names=dup_names,
-                    reissue_keys=reissue_keys, reissued=reissued,
-                )
-                dup_skipped += _dup_c + _dup_b + _dup_p + _dup_bd + _dup_h + _dup_s + _dup_hg + _dup_tc + _dup_gh
+                toss_dup = 0
+                for product in product_registry.TOSS_PRODUCTS:
+                    toss_entries[product.key], _dup = issued_orders.filter_entries_by_issued(
+                        toss_jeju.get(product.key, []), issued_excluded, skipped_names=dup_names,
+                        reissue_keys=reissue_keys, reissued=reissued,
+                    )
+                    toss_dup += _dup
+                dup_skipped += toss_dup
             except Exception as toss_exc:
                 toss_error = str(toss_exc)
-                logger.warning(f"토스 제주다팜(콜라비·미니밤호박·홍감자·백도·홍로·시나노골드·황금향·태추단감·감홍사과) 수집 실패(발주는 계속): {toss_exc}")
+                logger.warning(f"토스 제주다팜({product_registry.toss_labels()}) 수집 실패(발주는 계속): {toss_exc}")
 
-        results = kolrabi_order.process_outputs(
-            delivery_bytes,
-            toss_colrabi_entries=toss_colrabi_entries,
-            toss_bamhobak_entries=toss_bamhobak_entries,
-            toss_potato_entries=toss_potato_entries,
-            toss_baekdo_entries=toss_baekdo_entries,
-            toss_hongro_entries=toss_hongro_entries,
-            toss_shinano_entries=toss_shinano_entries,
-            toss_hwanggeum_entries=toss_hwanggeum_entries,
-            toss_taechu_entries=toss_taechu_entries,
-            toss_gamhong_entries=toss_gamhong_entries,
-        )
+        results = kolrabi_order.process_outputs(delivery_bytes, toss_entries=toss_entries)
         if not results:
             dup_note = f" (이전 발주분 {dup_skipped}건 자동 제외됨)" if dup_skipped else ""
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"제주다팜 발주로 출력할 콜라비·미니밤호박·홍감자·백도딱딱이복숭아·홍로사과·시나노골드사과·황금향·태추단감·감홍사과 주문을 찾지 못했습니다.{dup_note}" + (f" (토스 수집 실패 — {toss_error})" if toss_error else ""),
+                detail=f"제주다팜 발주로 출력할 {product_registry.toss_labels()} 주문을 찾지 못했습니다.{dup_note}" + (f" (토스 수집 실패 — {toss_error})" if toss_error else ""),
             )
 
         sales_ymd = _extract_ymd_from_filename(delivery_file.filename)
