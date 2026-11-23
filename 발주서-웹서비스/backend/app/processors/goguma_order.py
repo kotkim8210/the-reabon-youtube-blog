@@ -440,26 +440,59 @@ EVENT_SECTION = "goguma_event"
 _HAEDAL_GOGUMA_NAME = re.compile(r"꿀고구마 \d+Kg \(.+\)")
 
 
+def is_kkul_goguma_prize(prize: str) -> bool:
+    """꿀고구마 경품인지(호박고구마 제외) — 이 화면 해달 발주서에 넣는 당첨자."""
+    return "고구마" in re.sub(r"\s+", "", prize or "") and not is_hobak_goguma_text(prize)
+
+
+async def coupang_event_lookup(csv_bytes: bytes, client=None) -> dict[str, dict] | None:
+    """개인정보 미기재 꿀고구마 당첨자의 받는 사람·주소를 주문번호로 쿠팡 발주서 단건 조회해 찾는다(2026-11-23).
+
+    꿀고구마 화면은 DeliveryList 없이 API로 주문을 모으므로 DeliveryList 대신 쿠팡에 묻는다(조회만).
+    미기재 당첨자가 없으면 None(조회 안 함). 꿀고구마가 아닌 경품은 조회하지 않는다(해당 상품 페이지에서 발주).
+    반환은 prepare_event_entries(delivery_lookup=...)에 그대로 넘긴다.
+    """
+    from app.processors import event_order
+
+    missing = event_order.missing_info_winners(csv_bytes)
+    if not missing:
+        return None
+    targets = [m["order_id"] for m in missing if m["order_id"] and is_kkul_goguma_prize(m["prize"])]
+    lookup: dict[str, dict] = {}
+    if targets:
+        if client is None:
+            from app.coupang.client import coupang_goguma_client
+            client = coupang_goguma_client
+        lookup = await event_order.lookup_orders_from_coupang(targets, client)
+    for m in missing:
+        if m["order_id"] and m["order_id"] not in lookup:
+            lookup[m["order_id"]] = {"source": event_order.COUPANG_LOOKUP_LABEL, "error": "꿀고구마 경품이 아니라 조회 안 함"}
+    return lookup
+
+
 def prepare_event_entries(
     csv_bytes: bytes,
     exclude_keys=None,
     skipped_names: list[str] | None = None,
+    delivery_lookup: dict[str, dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """당첨자 CSV → 꿀고구마 경품 entries(append_entries_to_haedal 형식) + 처리 정보.
 
     CSV 읽기·환불/취소 제외·이름/주소 누락 표시는 event_order.parse_winners를 그대로 쓴다.
     경품명 '꿀고구마 중상 2kg' → 해달 품목명 '꿀고구마 2Kg (중상)'. 꿀고구마가 아닌 경품(호박고구마 포함)은
-    빼고 info['others']로 알린다. 당첨자 CSV엔 우편번호가 없어 비운다.
+    빼고 info['others']로 알린다. 당첨자 CSV엔 우편번호가 없어 비운다(주문 정보로 채운 당첨자는 넣는다).
     exclude_keys: 이미 발주한 당첨 키(주문아이디|품목명) — 같은 CSV 재업로드 시 중복 발송 방지.
+    delivery_lookup: coupang_event_lookup 결과 — 개인정보 미기재 당첨자를 쿠팡 주문 정보로 채운다.
     반환 info: refund_skipped, incomplete(이름·주소 누락), others(꿀고구마 아닌 경품),
-        unreadable(중량·등급 못 읽음 — 발주서엔 넣음), dup(이전 발주분 제외 수).
+        unreadable(중량·등급 못 읽음 — 발주서엔 넣음), dup(이전 발주분 제외 수), filled(주문 정보로 채운 당첨자).
     """
-    from app.processors.event_order import parse_winners
+    from app.processors.event_order import COUPANG_LOOKUP_LABEL, parse_winners
     from app.processors.issued_orders import KEY_SEP, make_order_key, normalize_order_id
 
-    winners = parse_winners(csv_bytes)
+    winners = parse_winners(csv_bytes, delivery_lookup, COUPANG_LOOKUP_LABEL)
     skipped_refund = winners[-1].get("_skipped_refund", 0) if winners else 0
     incomplete = list(winners[-1].get("_incomplete", []) if winners else [])
+    filled = list(winners[-1].get("_filled", []) if winners else [])
     keys = set(exclude_keys or ())
     composite = {k for k in keys if KEY_SEP in k}
     legacy = {k for k in keys if KEY_SEP not in k}
@@ -471,9 +504,10 @@ def prepare_event_entries(
     for w in winners:
         w.pop("_skipped_refund", None)
         w.pop("_incomplete", None)
+        w.pop("_filled", None)
         prize = w.get("product") or ""
         name = w.get("name") or "이름없음"
-        if "고구마" not in re.sub(r"\s+", "", prize) or is_hobak_goguma_text(prize):
+        if not is_kkul_goguma_prize(prize):
             others.append(f"{name}({prize}) — 꿀고구마 경품이 아니라 이 발주서에서 뺐습니다. 해당 상품 페이지에서 발주하세요")
             continue
         product = canonical_goguma_option(prize)
@@ -486,7 +520,7 @@ def prepare_event_entries(
             if skipped_names is not None:
                 skipped_names.append(w.get("name") or oid)
             continue
-        entries.append({**w, "product": product, "option": product, "zipcode": ""})
+        entries.append({**w, "product": product, "option": product, "zipcode": w.get("zipcode") or ""})
 
     info = {
         "refund_skipped": skipped_refund,
@@ -494,6 +528,7 @@ def prepare_event_entries(
         "others": others,
         "unreadable": unreadable,
         "dup": dup,
+        "filled": filled,
     }
     return entries, info
 

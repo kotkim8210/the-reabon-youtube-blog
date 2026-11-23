@@ -134,7 +134,7 @@ const productConfigs: Record<string, ProductConfig> = {
         { key: 'delivery', label: '쿠팡 DeliveryList 파일 (itsoft001 — 토스 주문만 있으면 비워도 됩니다)', optional: true },
         {
           key: 'winners',
-          label: '라이브 이벤트 당첨자 CSV (선택 — 올리면 같은 발주서에 합쳐짐)',
+          label: '라이브 이벤트 당첨자 CSV (선택 — 올리면 같은 발주서에 합쳐짐 · 개인정보 미기재는 위 DeliveryList 주문번호로 채움)',
           optional: true,
           accept: '.csv',
           acceptLabel: '.csv 파일',
@@ -295,7 +295,7 @@ function formatStats(stats: Record<string, unknown>): string[] {
     event: '이벤트 당첨자',
     refund_skipped: '환불·취소로 제외',
     winner_files: '당첨자 파일',
-    filled_from_delivery: '✅ DeliveryList에서 받는 사람·주소 채움',
+    filled_from_delivery: '✅ 주문번호로 받는 사람·주소 채움',
     options: '품목별 수량',
   };
   // 목록·객체 값은 읽을 수 있게 풀어 쓴다(종전엔 options가 '[object Object]'로 보였다)

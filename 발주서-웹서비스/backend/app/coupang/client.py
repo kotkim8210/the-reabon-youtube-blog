@@ -222,6 +222,15 @@ class CoupangClient:
             params["nextToken"] = next_token
         return await self._request("GET", path, query_params=params)
 
+    async def get_order_sheets_by_order_id(self, order_id: str) -> dict:
+        """발주서 단건 조회(orderId) — 주문 하나의 묶음배송별 받는 사람·주문 품목. 조회만 한다.
+
+        배송완료된 주문도 나온다(2026-11-23 실측). 다른 계정의 주문이면 HTTP 400
+        '다른 판매자의 주문을 조회할 수 없습니다.'
+        """
+        path = f"/v2/providers/openapi/apis/api/v4/vendors/{self.vendor_id}/{order_id}/ordersheets"
+        return await self._request("GET", path)
+
     # --- Return APIs ---
 
     async def get_return_requests(

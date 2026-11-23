@@ -76,6 +76,10 @@ function formatProcessStats(stats: Record<string, unknown>): string[] {
     if (key === 'needs_check' && Array.isArray(value)) {
       return value.length ? [`⚠️ 확인 필요: ${value.join(' / ')}`] : [];
     }
+    // 개인정보 미기재 당첨자를 주문번호(쿠팡 주문조회)로 채운 목록
+    if (key === 'filled_from_delivery' && Array.isArray(value)) {
+      return value.length ? [`✅ 주문번호로 받는 사람·주소 채움: ${value.join(' / ')}`] : [];
+    }
     if (Array.isArray(value) || typeof value === 'object') return [];
     if (key === 'toss' && Number(value) === 0) return [];
     const suffix = ['total', 'coupang', 'toss', 'event', 'refund_skipped'].includes(key) ? '건' : '';
@@ -377,7 +381,7 @@ function OrderCollectionTab() {
           </div>
           <div>
             <FileUpload
-              label="라이브 이벤트 당첨자 CSV (선택 — 올리면 같은 발주서에 합쳐짐)"
+              label="라이브 이벤트 당첨자 CSV (선택 — 올리면 같은 발주서에 합쳐짐 · 개인정보 미기재는 주문번호로 쿠팡 조회해 채움)"
               accept=".csv"
               acceptLabel="winners_raw (.csv 파일)"
               file={winnersFile}

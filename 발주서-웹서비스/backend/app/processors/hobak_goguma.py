@@ -224,24 +224,29 @@ def prepare_event_entries(
     exclude_keys=None,
     skipped_names: list[str] | None = None,
     skipped_keys: list[str] | None = None,
+    delivery_lookup: dict[str, dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """라이브 이벤트 당첨자 CSV(winners_raw) → 호박고구마 경품 발주 entries + 처리 정보.
 
     CSV 읽기·환불/취소 제외·이름/주소 누락 표시는 기존 이벤트 발주(event_order.parse_winners)를
     그대로 쓴다. 경품명 '호박고구마 2kg(중상)' → 해달 품목명 '호박고구마 2Kg (중상)'.
     호박고구마가 아닌 경품은 빼고 info['others']로 알린다(해당 상품 페이지에서 발주).
-    당첨자 CSV에는 우편번호 칸이 없어 해달 우편번호(선택)는 비운다.
+    당첨자 CSV에는 우편번호 칸이 없어 해달 우편번호(선택)는 비운다(DeliveryList로 채운 당첨자는 넣는다).
 
     exclude_keys: 직전 영업일까지 이미 발주한 당첨 키(주문아이디|품목명) — 같은 CSV 재업로드 시 중복 발송 방지.
-    반환 info: refund_skipped(환불·취소 제외 수), incomplete(이름·주소 누락), others(호박고구마 아닌 경품), dup(이전 발주분 제외 수).
+    delivery_lookup: event_order.build_delivery_lookup(itsoft001 DeliveryList) — 개인정보 미기재 당첨자를
+        주문번호로 찾아 채운다(2026-11-23). 호박고구마 주문 계정은 쿠팡 API 키가 없어 API 조회는 못 한다.
+    반환 info: refund_skipped(환불·취소 제외 수), incomplete(이름·주소 누락), others(호박고구마 아닌 경품), dup(이전 발주분 제외 수),
+        filled(DeliveryList로 채운 당첨자).
     entries가 비어도 예외를 내지 않는다(일반 주문과 한 파일로 합칠 때 당첨자 0명일 수 있음).
     """
     from app.processors.event_order import parse_winners
     from app.processors.issued_orders import KEY_SEP, make_order_key, normalize_order_id
 
-    winners = parse_winners(csv_bytes)
+    winners = parse_winners(csv_bytes, delivery_lookup)
     skipped_refund = winners[-1].get("_skipped_refund", 0) if winners else 0
     incomplete = list(winners[-1].get("_incomplete", []) if winners else [])
+    filled = list(winners[-1].get("_filled", []) if winners else [])
     keys = set(exclude_keys or ())
     composite = {k for k in keys if KEY_SEP in k}
     legacy = {k for k in keys if KEY_SEP not in k}
@@ -252,6 +257,7 @@ def prepare_event_entries(
     for w in winners:
         w.pop("_skipped_refund", None)
         w.pop("_incomplete", None)
+        w.pop("_filled", None)
         prize = w.get("product") or ""
         if not is_hobak_goguma_text(prize):
             others.append(f"{w.get('name') or '이름없음'}({prize}) — 호박고구마 경품이 아니라 이 발주서에서 뺐습니다. 해당 상품 페이지에서 발주하세요")
@@ -266,9 +272,11 @@ def prepare_event_entries(
             if skipped_keys is not None:
                 skipped_keys.append(key if key in composite else oid)
             continue
-        entries.append({**w, "product": product, "option": product, "zipcode": ""})
+        entries.append({**w, "product": product, "option": product, "zipcode": w.get("zipcode") or ""})
 
-    info = {"refund_skipped": skipped_refund, "incomplete": incomplete, "others": others, "dup": dup}
+    info = {
+        "refund_skipped": skipped_refund, "incomplete": incomplete, "others": others, "dup": dup, "filled": filled,
+    }
     return entries, info
 
 

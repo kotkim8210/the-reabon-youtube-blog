@@ -10,6 +10,7 @@ from app import email_service
 from app.auth import verify_token
 from app.coupang.client import CoupangApiError
 from app.processors import (
+    event_order,
     gaegeolmu_order,
     gaegeolmu_tracking,
     goguma_auto,
@@ -383,9 +384,12 @@ async def process_goguma_auto(
             event_excluded = await common._issued_exclusions(goguma_order.EVENT_SECTION, exclude_issued, reissue_stale=False)
             issued_dates = {**issued_dates, **await common._issued_exclusion_dates(goguma_order.EVENT_SECTION, exclude_issued)}
             event_notes: list[str] = []
+            # 개인정보 미기재 꿀고구마 당첨자는 주문번호로 쿠팡 발주서를 조회해 받는 사람·주소를 채운다(2026-11-23 —
+            # 이 화면은 DeliveryList 없이 API로 주문을 모은다). 조회 실패는 그 당첨자만 '확인 필요'로 남는다.
+            event_lookup = await goguma_order.coupang_event_lookup(winners_bytes)
             try:
                 event_entries, event_info = goguma_order.prepare_event_entries(
-                    winners_bytes, exclude_keys=event_excluded, skipped_names=dup_names
+                    winners_bytes, exclude_keys=event_excluded, skipped_names=dup_names, delivery_lookup=event_lookup,
                 )
             except ValueError as e:
                 # 당첨자 CSV가 깨졌거나 발주할 당첨자가 없어도 쿠팡·토스 발주는 그대로 낸다 — 사유는 화면에
@@ -396,6 +400,8 @@ async def process_goguma_auto(
             event_keys = [issued_orders.make_order_key(e.get("order_id"), e.get("product")) for e in event_entries]
             if event_info.get("refund_skipped"):
                 stats["refund_skipped"] = event_info["refund_skipped"]
+            if event_info.get("filled"):
+                stats["filled_from_delivery"] = list(event_info["filled"])
             event_notes = (
                 list(event_info.get("incomplete") or []) + list(event_info.get("others") or [])
                 + list(event_info.get("unreadable") or []) + event_notes
@@ -942,6 +948,8 @@ async def process_hobak_goguma_order(
         delivery_bytes = await delivery_file.read() if delivery_file else None
         if delivery_bytes:
             common._require_xlsx(delivery_bytes)
+        # 당첨자 주문번호 대조용 DeliveryList 원본 — 이전 발주분 제외(아래) 전에 잡는다(당첨 주문은 이미 발송됐을 수 있음)
+        raw_delivery_bytes = delivery_bytes
         winners_bytes = await winners_file.read() if winners_file else None
         issued_excluded = await common._issued_exclusions(section, exclude_issued)
         issued_dates = await common._issued_exclusion_dates(section, exclude_issued)
@@ -989,8 +997,11 @@ async def process_hobak_goguma_order(
             event_excluded = await common._issued_exclusions(hobak_goguma.EVENT_SECTION, exclude_issued, reissue_stale=False)
             issued_dates = {**issued_dates, **await common._issued_exclusion_dates(hobak_goguma.EVENT_SECTION, exclude_issued)}
             try:
+                # 개인정보 미기재 당첨자는 같이 올린 DeliveryList에서 주문번호로 찾아 채운다(2026-11-23).
+                # 호박고구마 주문 계정(itsoft001)은 쿠팡 API 키가 없어 꿀고구마처럼 API로 조회하지 못한다.
                 event_entries, event_info = hobak_goguma.prepare_event_entries(
-                    winners_bytes, exclude_keys=event_excluded, skipped_names=dup_names, skipped_keys=dup_keys
+                    winners_bytes, exclude_keys=event_excluded, skipped_names=dup_names, skipped_keys=dup_keys,
+                    delivery_lookup=event_order.build_delivery_lookup([raw_delivery_bytes]) if raw_delivery_bytes else None,
                 )
                 dup_skipped += int(event_info.get("dup") or 0)
             except ValueError as e:
@@ -1007,7 +1018,11 @@ async def process_hobak_goguma_order(
             stats.setdefault("event", len(event_entries))
             if event_info.get("refund_skipped"):
                 stats["refund_skipped"] = event_info["refund_skipped"]
+            if event_info.get("filled"):
+                stats["filled_from_delivery"] = list(event_info["filled"])
             extra = list(event_info.get("incomplete") or []) + list(event_info.get("others") or [])
+            if event_info.get("incomplete") and not raw_delivery_bytes:
+                extra.append("쿠팡 DeliveryList(itsoft001)를 같이 올리면 개인정보 미기재 당첨자를 주문번호로 찾아 채웁니다")
             if event_error:
                 extra.append("당첨자 CSV — " + event_error)
             if extra:

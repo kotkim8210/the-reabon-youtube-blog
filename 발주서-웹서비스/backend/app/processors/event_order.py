@@ -283,28 +283,114 @@ def _parse_amount(value: object) -> int:
         return 0
 
 
-def _match_delivery(order_id: str, names: list[str], amount: int, lookup: dict[str, dict]) -> tuple[dict | None, str]:
-    """당첨자 주문번호를 DeliveryList에서 찾아 같은 사람이면 (정보, 근거), 아니면 (None, 못 채운 이유)."""
-    record = lookup.get(order_id) if order_id else None
+def _match_delivery(
+    order_id: str, names: list[str], amount: int, lookup: dict[str, dict], label: str = "DeliveryList",
+) -> tuple[dict | None, str]:
+    """당첨자 주문번호를 주문 정보(DeliveryList·쿠팡 주문조회)에서 찾아 같은 사람이면 (정보, 근거), 아니면 (None, 못 채운 이유)."""
+    if not order_id:
+        return None, "당첨자 CSV에 주문번호 없음"
+    record = lookup.get(order_id)
     if record is None:
-        return None, "DeliveryList에 같은 주문번호 없음"
+        return None, f"{label}에 같은 주문번호 없음"
+    src = record.get("source") or label
+    if record.get("error"):
+        return None, f"{src} — {record['error']}"
     dl_names = [n for n in (record["buyer"], record["receiver"]) if n]
     score = max((_name_similarity(w, d) for w in names for d in dl_names), default=0.0)
     if not record["receiver"] or not record["address"]:
-        return None, "DeliveryList에도 받는 사람·주소가 비어 있음"
+        return None, f"{src}에도 받는 사람·주소가 비어 있음"
     if score >= NAME_MATCH_THRESHOLD:
         return record, f"이름 {round(score * 100)}% 일치"
     if amount > 0 and amount == record["amount"]:
         return record, "별명이 이름과 달라 주문번호·결제액 일치로 판정"
     return None, (
-        f"DeliveryList 주문번호는 있으나 이름({record['receiver']})·결제액({record['amount']:,}원)이 달라 확인 필요"
+        f"{src} 주문번호는 있으나 이름({record['receiver']})·결제액({record['amount']:,}원)이 달라 확인 필요"
     )
 
 
-def _parse_winners_detail(csv_bytes: bytes, delivery_lookup: dict[str, dict] | None = None) -> dict:
-    """당첨자 CSV 1개 → {entries, skipped_refund, incomplete, filled}.
+# 꿀고구마 화면은 DeliveryList 없이 쿠팡 API로 주문을 모은다 → 개인정보 미기재 당첨자는 주문번호로 쿠팡 발주서를
+# 단건 조회해 채운다(2026-11-23). 쿠팡 API 키가 꿀고구마 계정(알제이시스템즈)뿐이라 다른 계정 주문은 조회가 안 된다.
+COUPANG_LOOKUP_LABEL = "쿠팡 주문조회"
 
-    delivery_lookup(build_delivery_lookup)을 주면 이름·주소가 빈 당첨자를 주문번호로 찾아 채운다.
+
+def _coupang_order_record(sheets: list[dict]) -> dict:
+    """쿠팡 발주서 단건 조회 응답(묶음배송 목록) → build_delivery_lookup과 같은 모양의 받는 사람 정보."""
+    first = sheets[0]
+    receiver = first.get("receiver") or {}
+    orderer = first.get("orderer") or {}
+    items = [item for sheet in sheets for item in (sheet.get("orderItems") or [])]
+    if items and all(item.get("canceled") for item in items):
+        return {"source": COUPANG_LOOKUP_LABEL, "error": "취소된 주문"}
+    return {
+        "buyer": _norm(orderer.get("name")),
+        "receiver": _norm(receiver.get("name")),
+        "phone": _norm(receiver.get("safeNumber") or receiver.get("receiverPhoneNumber1")),
+        "zipcode": _norm(receiver.get("postCode")),
+        "address": _norm(f"{receiver.get('addr1') or ''} {receiver.get('addr2') or ''}"),
+        "memo": _norm(first.get("parcelPrintMessage")),
+        # 당첨자 CSV '구매 금액' = 품목 orderPrice 합(할인 전) — 2026-11-23 실측 13,700 = 13,700(할인 1,000 별도)
+        "amount": sum(_parse_amount(item.get("orderPrice")) for item in items),
+        "source": COUPANG_LOOKUP_LABEL,
+    }
+
+
+def _lookup_error_text(exc: Exception) -> str:
+    """쿠팡 조회 오류 → 짧은 사유. 다른 계정 주문이면 쿠팡 메시지('다른 판매자의 주문을 조회할 수 없습니다.') 그대로."""
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            message = response.json().get("message")
+        except Exception:
+            message = None
+        if message:
+            return str(message).strip()
+    detail = getattr(exc, "message", None) or str(exc) or type(exc).__name__
+    return f"조회 실패({str(detail)[:120]})"
+
+
+async def lookup_orders_from_coupang(order_ids: list[str], client) -> dict[str, dict]:
+    """주문번호들 → {주문번호: 받는 사람 정보 | {'error': 사유}} (쿠팡 발주서 단건 조회 — 조회만, 상태 변경 없음).
+
+    조회 실패는 그 당첨자만 '확인 필요'로 남기고 발주서 생성은 계속한다.
+    """
+    import asyncio
+
+    async def one(order_id: str) -> tuple[str, dict]:
+        try:
+            res = await client.get_order_sheets_by_order_id(order_id)
+        except Exception as exc:
+            return order_id, {"source": COUPANG_LOOKUP_LABEL, "error": _lookup_error_text(exc)}
+        data = res.get("data") if isinstance(res, dict) else None
+        sheets = [s for s in (data if isinstance(data, list) else [data]) if isinstance(s, dict)]
+        if not sheets:
+            return order_id, {"source": COUPANG_LOOKUP_LABEL, "error": "주문 정보 없음"}
+        return order_id, _coupang_order_record(sheets)
+
+    unique = list(dict.fromkeys(o for o in order_ids if o))
+    if not unique:
+        return {}
+    return dict(await asyncio.gather(*(one(o) for o in unique)))
+
+
+def missing_info_winners(csv_bytes: bytes) -> list[dict]:
+    """이름·주소가 빈(환불 아닌) 당첨자 [{order_id, prize}] — 주문 정보를 조회할 대상.
+
+    CSV를 못 읽으면 빈 목록(오류 안내는 parse_winners가 한다).
+    """
+    try:
+        return _parse_winners_detail(csv_bytes)["missing"]
+    except ValueError:
+        return []
+
+
+def _parse_winners_detail(
+    csv_bytes: bytes, delivery_lookup: dict[str, dict] | None = None, lookup_label: str = "DeliveryList",
+) -> dict:
+    """당첨자 CSV 1개 → {entries, skipped_refund, incomplete, filled, missing}.
+
+    delivery_lookup(build_delivery_lookup·lookup_orders_from_coupang)을 주면 이름·주소가 빈 당첨자를
+    주문번호로 찾아 채운다. lookup_label은 '못 찾음' 사유에 쓰는 출처 이름.
+    missing = 처음에 이름·주소가 비어 있던 당첨자 [{order_id, prize}](채웠는지와 무관).
     """
     text = _decode_csv(csv_bytes)
     rows = [r for r in csv.reader(StringIO(text)) if any(_norm(c) for c in r)]
@@ -331,7 +417,8 @@ def _parse_winners_detail(csv_bytes: bytes, delivery_lookup: dict[str, dict] | N
     entries: list[dict] = []
     skipped_refund = 0
     incomplete: list[str] = []   # 이름·주소가 비어 발주 불가한 당첨자(고객 확인 필요)
-    filled: list[str] = []       # DeliveryList에서 받는 사람·주소를 채운 당첨자
+    filled: list[str] = []       # 주문 정보(DeliveryList·쿠팡 주문조회)로 받는 사람·주소를 채운 당첨자
+    missing: list[dict] = []     # 처음에 이름·주소가 비어 있던 당첨자 — 주문 정보 조회 대상
     for row in rows[1:]:
         # 환불/취소 건 제외 — 개인정보가 비었어도 환불이면 채우지 않고 뺀다
         refund_date = _norm(cell(row, c_refund_date))
@@ -354,26 +441,29 @@ def _parse_winners_detail(csv_bytes: bytes, delivery_lookup: dict[str, dict] | N
         prize = _norm(cell(row, c_prize))
         order_id = _order_id_text(cell(row, c_order))
         if not name or not address:
+            missing.append({"order_id": order_id, "prize": prize})
             nickname = _norm(cell(row, c_nick))
             who = name or nickname or "이름없음"
             reason = ""
             if delivery_lookup is not None:
                 record, basis = _match_delivery(
                     order_id, [n for n in (name, nickname) if n], _parse_amount(cell(row, c_amount)), delivery_lookup,
+                    lookup_label,
                 )
                 if record:
                     name, address = record["receiver"], record["address"]
                     phone = record["phone"] or phone
                     zipcode = record["zipcode"]
                     memo = record["memo"] or memo
-                    filled.append(f"{who}({order_id}, {prize or '경품미상'}) → {name} · {basis}")
+                    source = f" · {record['source']}" if record.get("source") else ""
+                    filled.append(f"{who}({order_id}, {prize or '경품미상'}) → {name} · {basis}{source}")
                 else:
                     reason = f" · {basis}"
             if not name or not address:
                 # 개인정보 미확인/미제공(취소 의심) — 조용히 버리지 말고 화면에 알린다
-                missing = "이름·주소" if not name and not address else ("이름" if not name else "주소")
+                lacking = "이름·주소" if not name and not address else ("이름" if not name else "주소")
                 incomplete.append(
-                    f"{who}({order_id or _norm(cell(row, c_order)) or '주문번호없음'}, {prize or '경품미상'}) — {missing} 없음{reason}"
+                    f"{who}({order_id or _norm(cell(row, c_order)) or '주문번호없음'}, {prize or '경품미상'}) — {lacking} 없음{reason}"
                 )
                 continue
 
@@ -390,21 +480,27 @@ def _parse_winners_detail(csv_bytes: bytes, delivery_lookup: dict[str, dict] | N
             "order_id": order_id,
             "supplier": event_supplier(prize),
         })
-    return {"entries": entries, "skipped_refund": skipped_refund, "incomplete": incomplete, "filled": filled}
+    return {
+        "entries": entries, "skipped_refund": skipped_refund, "incomplete": incomplete, "filled": filled,
+        "missing": missing,
+    }
 
 
-def parse_winners(csv_bytes: bytes, delivery_lookup: dict[str, dict] | None = None) -> list[dict]:
+def parse_winners(
+    csv_bytes: bytes, delivery_lookup: dict[str, dict] | None = None, lookup_label: str = "DeliveryList",
+) -> list[dict]:
     """당첨자 CSV → entries (고구마·호박고구마 화면 호환 형식).
 
-    환불 제외 수·확인필요 목록은 마지막 entry의 _skipped_refund·_incomplete에 싣는다.
+    환불 제외 수·확인필요 목록·주문 정보로 채운 목록은 마지막 entry의 _skipped_refund·_incomplete·_filled에 싣는다.
     """
-    detail = _parse_winners_detail(csv_bytes, delivery_lookup)
+    detail = _parse_winners_detail(csv_bytes, delivery_lookup, lookup_label)
     entries, incomplete = detail["entries"], detail["incomplete"]
     # 환불 제외 수·확인필요 목록은 루프 종료 후 최종값으로 기록 (append 시점 스냅샷이면
     # 해당 행이 명단 끝에 있을 때 집계 누락)
     if entries:
         entries[-1]["_skipped_refund"] = detail["skipped_refund"]
         entries[-1]["_incomplete"] = incomplete
+        entries[-1]["_filled"] = detail["filled"]
     elif incomplete:
         # 발주 가능한 당첨자가 하나도 없어도 확인필요 사실은 알려야 한다
         raise ValueError(
