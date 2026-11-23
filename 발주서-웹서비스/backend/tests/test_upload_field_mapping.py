@@ -32,7 +32,8 @@ def _upload_keys() -> dict[str, str]:
 
 def _backend_upload_params() -> set[str]:
     src = "\n".join(path.read_text(encoding="utf-8") for path in BACKEND_ROUTE_FILES)
-    return set(re.findall(r"^\s*(\w+):\s*UploadFile", src, re.M))
+    # 여러 파일 칸(files: list[UploadFile] — 이벤트 당첨자 CSV 여러 개 + DeliveryList)도 센다
+    return set(re.findall(r"^\s*(\w+):\s*(?:list\[)?UploadFile", src, re.M))
 
 
 def test_every_upload_key_reaches_backend():

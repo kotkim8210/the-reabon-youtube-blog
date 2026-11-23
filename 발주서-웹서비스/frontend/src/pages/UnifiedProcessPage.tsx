@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Pencil, Check, X } from 'lucide-react';
 import FileUpload from '../components/FileUpload';
+import MultiFileUpload from '../components/MultiFileUpload';
 import {
   processFile, downloadBlob, ProcessResult, processTossWatermelonTracking, processDaangnOrder,
   sendOrderEmailFiles,
@@ -77,7 +78,22 @@ function EditableTitle({
 }
 
 // ── 타입 ──────────────────────────────────────────────────────────
-interface FileConfig { key: string; label: string; accept?: string; acceptLabel?: string; optional?: boolean; }
+interface FileConfig {
+  key: string; label: string; accept?: string; acceptLabel?: string; optional?: boolean;
+  multiple?: boolean;  // 한 칸에 여러 파일(같은 필드명으로 여러 번 전송)
+}
+
+// 이벤트 당첨자 카드 공용 업로드 칸 — 당첨자 CSV 여러 개 + DeliveryList를 한 번에(2026-11-23).
+// 개인정보 미기재 당첨자는 DeliveryList에서 주문번호로 찾아 받는 사람·주소를 채운다.
+const EVENT_WINNER_FILES: FileConfig[] = [
+  {
+    key: 'files',
+    label: '당첨자 CSV(winners_raw) 여러 개 + DeliveryList — 한 번에 드래그',
+    accept: '.csv,.xlsx',
+    acceptLabel: '.csv(당첨자 명단, 여러 개) · .xlsx(DeliveryList — 개인정보 미기재 당첨자를 주문번호로 찾아 채움)',
+    multiple: true,
+  },
+];
 
 interface SectionConfig {
   title: string;
@@ -194,9 +210,7 @@ const productConfigs: Record<string, ProductConfig> = {
       title: '라이브 이벤트 당첨자 발주서 생성 (햇밤 → 쥬얼리프룻, 그 밖의 경품 → 제주다팜 발주서 · 꿀·호박고구마는 고구마 화면에서)',
       icon: '🎉',
       apiToolId: 'event-winner-order',
-      files: [
-        { key: 'winners', label: '라이브 이벤트 당첨자 CSV (winners_raw)', accept: '.csv', acceptLabel: '.csv 파일' },
-      ],
+      files: EVENT_WINNER_FILES,
       buttonLabel: '이벤트 발주서 생성',
     },
   },
@@ -230,9 +244,7 @@ const productConfigs: Record<string, ProductConfig> = {
       title: '라이브 이벤트 당첨자 발주서 생성 (햇밤 → 쥬얼리프룻, 그 밖의 경품 → 제주다팜 발주서 · 꿀·호박고구마는 고구마 화면에서)',
       icon: '🎉',
       apiToolId: 'event-winner-order',
-      files: [
-        { key: 'winners', label: '라이브 이벤트 당첨자 CSV (winners_raw)', accept: '.csv', acceptLabel: '.csv 파일' },
-      ],
+      files: EVENT_WINNER_FILES,
       buttonLabel: '이벤트 발주서 생성',
     },
   },
@@ -266,9 +278,7 @@ const productConfigs: Record<string, ProductConfig> = {
       title: '라이브 이벤트 당첨자 발주서 생성 (청사과 → 제이비티 발주서)',
       icon: '🎉',
       apiToolId: 'event-winner-order',
-      files: [
-        { key: 'winners', label: '라이브 이벤트 당첨자 CSV (winners_raw)', accept: '.csv', acceptLabel: '.csv 파일' },
-      ],
+      files: EVENT_WINNER_FILES,
       buttonLabel: '이벤트 발주서 생성',
     },
   },
@@ -284,10 +294,33 @@ function formatStats(stats: Record<string, unknown>): string[] {
     needs_check: '⚠️ 확인 필요(발주서에 못 넣음)',
     event: '이벤트 당첨자',
     refund_skipped: '환불·취소로 제외',
+    winner_files: '당첨자 파일',
+    filled_from_delivery: '✅ DeliveryList에서 받는 사람·주소 채움',
+    options: '품목별 수량',
   };
-  return Object.entries(stats).map(([key, value]) =>
-    typeof value === 'number' ? `${labels[key] || key}: ${value}건` : `${labels[key] || key}: ${value}`
-  );
+  // 목록·객체 값은 읽을 수 있게 풀어 쓴다(종전엔 options가 '[object Object]'로 보였다)
+  const text = (v: unknown): string => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const o = v as Record<string, unknown>;
+      const name = o.vendor_option_name ?? o.coupang_option_keyword ?? o.name;
+      if (name != null) return o.quantity != null ? `${name} ×${o.quantity}` : String(name);
+      return Object.entries(o).map(([k, x]) => `${k} ${x}`).join(', ');
+    }
+    return String(v);
+  };
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(stats)) {
+    const label = labels[key] || key;
+    if (Array.isArray(value) && value.length > 1) {
+      lines.push(`${label}:`);
+      for (const item of value) lines.push(`· ${text(item)}`);
+    } else if (Array.isArray(value)) {
+      lines.push(`${label}: ${value.map(text).join('')}`);
+    } else {
+      lines.push(typeof value === 'number' ? `${label}: ${value}건` : `${label}: ${text(value)}`);
+    }
+  }
+  return lines;
 }
 
 function localDateString(offsetDays = 0): string {
@@ -308,6 +341,7 @@ function ProcessSection({
   onTitleSave: (next: string) => void;
 }) {
   const [files, setFiles] = useState<Record<string, File | null>>({});
+  const [multiFiles, setMultiFiles] = useState<Record<string, File[]>>({});
   const [extraValues, setExtraValues] = useState<Record<string, string>>(() => {
     // 발주 섹션은 '이전 발주분 자동 제외(중복발주 방지)' 기본 ON
     const init: Record<string, string> = section.apiToolId.endsWith('-order') ? { exclude_issued: 'true' } : {};
@@ -348,12 +382,19 @@ function ProcessSection({
     section.tossDateRange && section.files.every((f) => f.optional)
     && extraValues.toss_from_date && extraValues.toss_to_date,
   );
+  const hasFile = (f: FileConfig) => (f.multiple ? (multiFiles[f.key]?.length ?? 0) > 0 : files[f.key] != null);
   const allUploaded = requiredFiles.length > 0
-    ? requiredFiles.every((f) => files[f.key] != null)
-    : section.files.some((f) => files[f.key] != null) || tossOnlyReady;
+    ? requiredFiles.every(hasFile)
+    : section.files.some(hasFile) || tossOnlyReady;
 
   const handleFileSelect = (key: string) => (file: File) => {
     setFiles((prev) => ({ ...prev, [key]: file || null }));
+    setResult(null);
+    setError('');
+  };
+
+  const handleMultiChange = (key: string) => (next: File[]) => {
+    setMultiFiles((prev) => ({ ...prev, [key]: next }));
     setResult(null);
     setError('');
   };
@@ -363,9 +404,12 @@ function ProcessSection({
     setError('');
     setResult(null);
     try {
-      const fileMap: Record<string, File> = {};
+      const fileMap: Record<string, File | File[]> = {};
       for (const [k, f] of Object.entries(files)) {
         if (f) fileMap[k] = f;
+      }
+      for (const [k, list] of Object.entries(multiFiles)) {
+        if (list.length) fileMap[k] = list;
       }
       const res = await processFile(section.apiToolId, fileMap, extraValues);
       setResult(res);
@@ -378,11 +422,13 @@ function ProcessSection({
 
   const handleReset = () => {
     setFiles({});
+    setMultiFiles({});
     setResult(null);
     setError('');
   };
 
-  const hasAny = Object.keys(files).length > 0 || !!result || !!error;
+  const hasAny = Object.keys(files).length > 0
+    || Object.values(multiFiles).some((list) => list.length > 0) || !!result || !!error;
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-4">
@@ -398,7 +444,16 @@ function ProcessSection({
 
       {/* 파일 업로드 */}
       <div className="space-y-4">
-        {section.files.map((f) => (
+        {section.files.map((f) => (f.multiple ? (
+          <MultiFileUpload
+            key={f.key}
+            label={f.label}
+            accept={f.accept}
+            acceptLabel={f.acceptLabel}
+            files={multiFiles[f.key] || []}
+            onChange={handleMultiChange(f.key)}
+          />
+        ) : (
           <FileUpload
             key={f.key}
             label={f.label}
@@ -407,7 +462,7 @@ function ProcessSection({
             file={files[f.key] || null}
             onFileSelect={handleFileSelect(f.key)}
           />
-        ))}
+        )))}
       </div>
 
       {section.tossDateRange && (

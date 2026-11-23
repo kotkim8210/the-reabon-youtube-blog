@@ -170,7 +170,142 @@ def _find_col(headers: list[str], *needles_groups) -> int | None:
     return None
 
 
-def parse_winners(csv_bytes: bytes) -> list[dict]:
+# ── DeliveryList로 개인정보 미기재 당첨자 채우기 (2026-11-23) ──────────────────────
+# 라이브 당첨자 중 '개인 식별 정보 확인'을 안 한 사람은 이름·연락처·주소가 비어 온다. 하지만 주문 아이디(G열)는
+# 쿠팡 주문번호라, 같은 주문을 DeliveryList(C열 주문번호)에서 찾으면 받는 사람·주소가 있다.
+# 같은 사람 판정: 당첨자 이름/별명이 DeliveryList 구매자/수취인 이름과 70% 이상 같으면(사용자 기준).
+# 별명이 '제타로스'처럼 이름과 무관하면 비교가 안 되므로, 그때는 구매 금액 = 결제액까지 같을 때만 채운다
+# (주문번호는 주문마다 하나라 금액까지 맞으면 같은 주문 — 2026-11-23 실제 명단 2건이 모두 이 경우).
+NAME_MATCH_THRESHOLD = 0.7
+
+# 쿠팡 DeliveryList 표준 열(1부터) — 머리글을 못 찾을 때만 쓴다.
+_DL_DEFAULT_COLS = {
+    "order": 3, "amount": 19, "buyer": 25, "receiver": 27, "phone": 28, "zipcode": 29, "address": 30, "memo": 31,
+}
+_DL_HEADER_NEEDLES = {
+    "order": ("주문번호",),
+    "amount": ("결제액",),
+    "buyer": ("구매자",),
+    "receiver": ("수취인이름",),
+    "phone": ("수취인전화번호",),
+    "zipcode": ("우편번호",),
+    "address": ("수취인주소",),
+    "memo": ("배송메세지",),
+}
+
+
+def is_delivery_list(xlsx_bytes: bytes) -> bool:
+    """쿠팡 DeliveryList(주문번호·수취인 열이 있는 엑셀)인지 — 여러 파일을 한 칸에 올릴 때 구분용."""
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    try:
+        wb = load_workbook(filename=BytesIO(xlsx_bytes), read_only=True, data_only=True)
+    except Exception:
+        return False
+    try:
+        first = next(wb.active.iter_rows(min_row=1, max_row=1, values_only=True), ())
+    finally:
+        wb.close()
+    header = "".join(_norm(h).replace(" ", "") for h in first if h is not None)
+    return "주문번호" in header and "수취인" in header
+
+
+def build_delivery_lookup(delivery_files: list[bytes] | None) -> dict[str, dict]:
+    """DeliveryList 여러 개 → {주문번호: 받는 사람 정보}. 한 주문이 여러 줄이면 결제액은 더한다."""
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    from app.processors.issued_orders import normalize_order_id
+
+    lookup: dict[str, dict] = {}
+    for data in delivery_files or []:
+        wb = load_workbook(filename=BytesIO(data), read_only=True, data_only=True)
+        try:
+            rows = wb.active.iter_rows(values_only=True)
+            header = [(_norm(h).replace(" ", "")) for h in next(rows, ())]
+            cols: dict[str, int] = {}
+            for field, needles in _DL_HEADER_NEEDLES.items():
+                idx = next((i for i, h in enumerate(header) if h and all(n in h for n in needles)), None)
+                cols[field] = idx if idx is not None else _DL_DEFAULT_COLS[field] - 1
+
+            def get(row, field):
+                i = cols[field]
+                return row[i] if i < len(row) else None
+
+            for row in rows:
+                oid = normalize_order_id(get(row, "order"))
+                if not oid:
+                    continue
+                try:
+                    amount = int(float(str(get(row, "amount") or "0").replace(",", "")))
+                except ValueError:
+                    amount = 0
+                if oid in lookup:
+                    lookup[oid]["amount"] += amount
+                    continue
+                lookup[oid] = {
+                    "buyer": _norm(get(row, "buyer")),
+                    "receiver": _norm(get(row, "receiver")),
+                    "phone": _norm(get(row, "phone")),
+                    "zipcode": _norm(get(row, "zipcode")),
+                    "address": _norm(get(row, "address")),
+                    "memo": _norm(get(row, "memo")),
+                    "amount": amount,
+                }
+        finally:
+            wb.close()
+    return lookup
+
+
+def _name_similarity(a: str, b: str) -> float:
+    """이름 유사도 0~1. 당첨자 별명이 '유*희'처럼 가려져 오면 '*'는 아무 글자와 같다고 본다."""
+    from difflib import SequenceMatcher
+
+    a = re.sub(r"[\s()]", "", str(a or ""))
+    b = re.sub(r"[\s()]", "", str(b or ""))
+    if not a or not b:
+        return 0.0
+    if ("*" in a or "*" in b) and len(a) == len(b):
+        real = sum(1 for x, y in zip(a, b) if x == y and x != "*")
+        if real == 0:
+            return 0.0
+        return sum(1 for x, y in zip(a, b) if x == y or x == "*" or y == "*") / len(a)
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _parse_amount(value: object) -> int:
+    try:
+        return int(float(_norm(value).replace(",", "") or "0"))
+    except ValueError:
+        return 0
+
+
+def _match_delivery(order_id: str, names: list[str], amount: int, lookup: dict[str, dict]) -> tuple[dict | None, str]:
+    """당첨자 주문번호를 DeliveryList에서 찾아 같은 사람이면 (정보, 근거), 아니면 (None, 못 채운 이유)."""
+    record = lookup.get(order_id) if order_id else None
+    if record is None:
+        return None, "DeliveryList에 같은 주문번호 없음"
+    dl_names = [n for n in (record["buyer"], record["receiver"]) if n]
+    score = max((_name_similarity(w, d) for w in names for d in dl_names), default=0.0)
+    if not record["receiver"] or not record["address"]:
+        return None, "DeliveryList에도 받는 사람·주소가 비어 있음"
+    if score >= NAME_MATCH_THRESHOLD:
+        return record, f"이름 {round(score * 100)}% 일치"
+    if amount > 0 and amount == record["amount"]:
+        return record, "별명이 이름과 달라 주문번호·결제액 일치로 판정"
+    return None, (
+        f"DeliveryList 주문번호는 있으나 이름({record['receiver']})·결제액({record['amount']:,}원)이 달라 확인 필요"
+    )
+
+
+def _parse_winners_detail(csv_bytes: bytes, delivery_lookup: dict[str, dict] | None = None) -> dict:
+    """당첨자 CSV 1개 → {entries, skipped_refund, incomplete, filled}.
+
+    delivery_lookup(build_delivery_lookup)을 주면 이름·주소가 빈 당첨자를 주문번호로 찾아 채운다.
+    """
     text = _decode_csv(csv_bytes)
     rows = [r for r in csv.reader(StringIO(text)) if any(_norm(c) for c in r)]
     if len(rows) < 2:
@@ -179,9 +314,11 @@ def parse_winners(csv_bytes: bytes) -> list[dict]:
     header = rows[0]
     c_prize = _find_col(header, ["경품"], ["상품명"])
     c_name = _find_col(header, ["이름"], ["수령인"], ["받는분"])
+    c_nick = _find_col(header, ["별명"], ["닉네임"])
     c_phone = _find_col(header, ["연락처"], ["전화"])
     c_addr = _find_col(header, ["주소"])
     c_order = _find_col(header, ["주문아이디"], ["주문번호"], ["주문"])
+    c_amount = _find_col(header, ["구매", "금액"])
     c_refund_amt = _find_col(header, ["환불", "금액"], ["취소", "금액"])
     c_refund_date = _find_col(header, ["환불", "날짜"], ["환불", "시간"])
 
@@ -194,18 +331,9 @@ def parse_winners(csv_bytes: bytes) -> list[dict]:
     entries: list[dict] = []
     skipped_refund = 0
     incomplete: list[str] = []   # 이름·주소가 비어 발주 불가한 당첨자(고객 확인 필요)
+    filled: list[str] = []       # DeliveryList에서 받는 사람·주소를 채운 당첨자
     for row in rows[1:]:
-        name = _norm(cell(row, c_name))
-        address = _norm(cell(row, c_addr))
-        if not name or not address:
-            # 개인정보 미확인/미제공(취소 의심) — 조용히 버리지 말고 화면에 알린다
-            order_id = _norm(cell(row, c_order)) or "주문번호없음"
-            prize_text = _norm(cell(row, c_prize)) or "경품미상"
-            missing = "이름·주소" if not name and not address else ("이름" if not name else "주소")
-            incomplete.append(f"{name or '이름없음'}({order_id}, {prize_text}) — {missing} 없음")
-            continue
-
-        # 환불/취소 건 제외
+        # 환불/취소 건 제외 — 개인정보가 비었어도 환불이면 채우지 않고 뺀다
         refund_date = _norm(cell(row, c_refund_date))
         refund_amt_raw = _norm(cell(row, c_refund_amt)).replace(",", "")
         refunded = bool(refund_date)
@@ -218,24 +346,64 @@ def parse_winners(csv_bytes: bytes) -> list[dict]:
             skipped_refund += 1
             continue
 
+        name = _norm(cell(row, c_name))
+        address = _norm(cell(row, c_addr))
+        phone = _norm(cell(row, c_phone))
+        zipcode = ""
+        memo = "문 앞"
         prize = _norm(cell(row, c_prize))
+        order_id = _order_id_text(cell(row, c_order))
+        if not name or not address:
+            nickname = _norm(cell(row, c_nick))
+            who = name or nickname or "이름없음"
+            reason = ""
+            if delivery_lookup is not None:
+                record, basis = _match_delivery(
+                    order_id, [n for n in (name, nickname) if n], _parse_amount(cell(row, c_amount)), delivery_lookup,
+                )
+                if record:
+                    name, address = record["receiver"], record["address"]
+                    phone = record["phone"] or phone
+                    zipcode = record["zipcode"]
+                    memo = record["memo"] or memo
+                    filled.append(f"{who}({order_id}, {prize or '경품미상'}) → {name} · {basis}")
+                else:
+                    reason = f" · {basis}"
+            if not name or not address:
+                # 개인정보 미확인/미제공(취소 의심) — 조용히 버리지 말고 화면에 알린다
+                missing = "이름·주소" if not name and not address else ("이름" if not name else "주소")
+                incomplete.append(
+                    f"{who}({order_id or _norm(cell(row, c_order)) or '주문번호없음'}, {prize or '경품미상'}) — {missing} 없음{reason}"
+                )
+                continue
+
         product = event_product_name(prize)
         entries.append({
             "name": name,
-            "phone": _norm(cell(row, c_phone)),
+            "phone": phone,
+            "zipcode": zipcode,
             "address": address,
             "product": product,
             "option": product,
             "qty": "1",
-            "memo": "문 앞",
-            "order_id": _order_id_text(cell(row, c_order)),
+            "memo": memo,
+            "order_id": order_id,
             "supplier": event_supplier(prize),
         })
+    return {"entries": entries, "skipped_refund": skipped_refund, "incomplete": incomplete, "filled": filled}
 
+
+def parse_winners(csv_bytes: bytes, delivery_lookup: dict[str, dict] | None = None) -> list[dict]:
+    """당첨자 CSV → entries (고구마·호박고구마 화면 호환 형식).
+
+    환불 제외 수·확인필요 목록은 마지막 entry의 _skipped_refund·_incomplete에 싣는다.
+    """
+    detail = _parse_winners_detail(csv_bytes, delivery_lookup)
+    entries, incomplete = detail["entries"], detail["incomplete"]
     # 환불 제외 수·확인필요 목록은 루프 종료 후 최종값으로 기록 (append 시점 스냅샷이면
     # 해당 행이 명단 끝에 있을 때 집계 누락)
     if entries:
-        entries[-1]["_skipped_refund"] = skipped_refund
+        entries[-1]["_skipped_refund"] = detail["skipped_refund"]
         entries[-1]["_incomplete"] = incomplete
     elif incomplete:
         # 발주 가능한 당첨자가 하나도 없어도 확인필요 사실은 알려야 한다
@@ -324,17 +492,21 @@ def _build_jbt_event_workbook(entries: list[dict], today: str) -> tuple[bytes, s
 
 
 def process(
-    csv_bytes: bytes,
+    csv_bytes: bytes | list[bytes],
     exclude_keys=None,
     skipped_names: list[str] | None = None,
     skipped_keys: list[str] | None = None,
     issued_keys: list[str] | None = None,
+    delivery_files: list[bytes] | None = None,
+    csv_names: list[str] | None = None,
 ) -> list[tuple[bytes, str, dict]]:
-    """당첨자 CSV → 발주처별 발주서.
+    """당첨자 CSV(여러 개 가능) → 발주처별 발주서.
 
     경품의 실제 발주처를 따라간다(2026-08-31): 청사과(아오리)는 **제이비티 양식**, 햇밤은 쥬얼리프룻,
     그 밖의 경품은 제주다팜 양식. 발주처가 섞이면 파일이 여러 개 나온다.
-    이름·주소가 비어 발주할 수 없는 당첨자는 stats['needs_check']로 화면에 표시한다.
+    당첨자 CSV를 여러 개 주면 한데 모아 발주처별로 한 장씩 만든다(2026-11-23 — 라이브마다 따로 만들던 것).
+    delivery_files(DeliveryList)를 주면 이름·주소가 빈 당첨자를 주문번호로 찾아 채운다(_match_delivery).
+    그래도 발주할 수 없는 당첨자는 stats['needs_check']로 화면에 표시한다.
 
     꿀·호박고구마 경품은 해달 발주(고구마·호박고구마 화면 당첨자 칸)라 빼고 needs_check로 알린다
     — 종전엔 경품명 그대로 제주다팜 발주서에 들어가 해달과 이중 발주될 수 있었다(2026-11-16 리뷰).
@@ -345,12 +517,41 @@ def process(
     from app.processors.issued_orders import KEY_SEP, make_order_key, normalize_order_id
     from app.processors.kolrabi_order import _build_jejudapam_order
 
-    entries = parse_winners(csv_bytes)
-    skipped_refund = entries[-1].get("_skipped_refund", 0) if entries else 0
-    incomplete = entries[-1].get("_incomplete", []) if entries else []
+    csv_list = [csv_bytes] if isinstance(csv_bytes, (bytes, bytearray)) else list(csv_bytes)
+    if not csv_list:
+        raise ValueError("라이브 이벤트 당첨자 CSV(winners_raw)를 올려주세요.")
+    lookup = build_delivery_lookup(delivery_files) if delivery_files else None
+    entries: list[dict] = []
+    skipped_refund = 0
+    incomplete: list[str] = []
+    filled: list[str] = []
+    for i, data in enumerate(csv_list):
+        try:
+            detail = _parse_winners_detail(data, lookup)
+        except ValueError as exc:
+            if len(csv_list) == 1:
+                raise
+            name = (csv_names or [])[i] if csv_names and i < len(csv_names) else f"{i + 1}번째 당첨자 파일"
+            raise ValueError(f"{name}: {exc}") from exc
+        entries.extend(detail["entries"])
+        skipped_refund += detail["skipped_refund"]
+        incomplete.extend(detail["incomplete"])
+        filled.extend(detail["filled"])
+
+    # 같은 명단을 두 번 올린 경우 — 같은 주문아이디·경품은 한 번만
+    seen_keys: set[str] = set()
+    same_batch_dups: list[str] = []
+    unique: list[dict] = []
     for e in entries:
-        e.pop("_skipped_refund", None)
-        e.pop("_incomplete", None)
+        oid = normalize_order_id(e.get("order_id"))
+        key = make_order_key(oid, e.get("product")) if oid else ""
+        if key and key in seen_keys:
+            same_batch_dups.append(e.get("name") or oid)
+            continue
+        if key:
+            seen_keys.add(key)
+        unique.append(e)
+    entries = unique
 
     goguma_names = [
         f"{e.get('name') or '이름없음'}({e.get('product')})" for e in entries if is_goguma_prize(e.get("product"))
@@ -390,6 +591,8 @@ def process(
             reasons.append(goguma_note)
         if incomplete:
             reasons.append(f"개인정보 미기재 {len(incomplete)}건: " + " / ".join(incomplete))
+            if lookup is None:
+                reasons.append(_DL_HINT)
         if reasons:
             raise ValueError("발주할 이벤트 당첨자가 없습니다. (" + " / ".join(reasons) + ")")
         raise ValueError("발주할 이벤트 당첨자가 없습니다. (환불/취소 건만 있거나 빈 파일)")
@@ -453,11 +656,22 @@ def process(
     # 환불 제외·확인필요는 첫 파일 통계에 싣는다(화면에 한 번만 보이게)
     first_stats = results[0][2]
     first_stats["skipped_refund"] = skipped_refund
+    if len(csv_list) > 1:
+        first_stats["winner_files"] = len(csv_list)
+    if filled:
+        first_stats["filled_from_delivery"] = filled
     notes = []
     if incomplete:
         notes.append(f"{len(incomplete)}건 발주 제외(개인정보 미기재): " + " / ".join(incomplete))
+        if lookup is None:
+            notes.append(_DL_HINT)
+    if same_batch_dups:
+        notes.append(f"같은 당첨자가 두 번 올라와 {len(same_batch_dups)}건은 한 번만 넣음: {', '.join(same_batch_dups)}")
     if goguma_note:
         notes.append(goguma_note)
     if notes:
         first_stats["needs_check"] = " / ".join(notes)
     return results
+
+
+_DL_HINT = "DeliveryList(xlsx)를 당첨자 CSV와 같이 올리면 주문번호로 받는 사람·주소를 찾아 채웁니다"

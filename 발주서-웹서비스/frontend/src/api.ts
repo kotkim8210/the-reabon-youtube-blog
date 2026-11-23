@@ -386,7 +386,7 @@ export interface DanharuProcessResult extends ProcessResult {
 
 export async function processFile(
   toolId: string,
-  files: Record<string, File>,
+  files: Record<string, File | File[]>,
   extraValues?: Record<string, string>,
 ): Promise<ProcessResult> {
   // Map frontend field names to backend field names
@@ -410,7 +410,10 @@ export async function processFile(
   const formData = new FormData();
   for (const [key, file] of Object.entries(files)) {
     const backendKey = fieldNameMap[key] || key;
-    formData.append(backendKey, file);
+    // 여러 파일 칸(예: 이벤트 당첨자 CSV 여러 개 + DeliveryList)은 같은 이름으로 여러 번 붙인다
+    for (const f of Array.isArray(file) ? file : [file]) {
+      formData.append(backendKey, f);
+    }
   }
   // Append extra string values (e.g. delivery_company)
   if (extraValues) {

@@ -282,29 +282,62 @@ async def process_myeongi_order(
         )
 
 
+async def _split_event_uploads(uploads: list) -> tuple[list[bytes], list[str], list[bytes]]:
+    """한 칸에 함께 올린 파일들 → (당첨자 CSV들, 그 파일명들, DeliveryList들). 엑셀은 머리글로 DeliveryList인지 확인."""
+    csv_list: list[bytes] = []
+    csv_names: list[str] = []
+    delivery_list: list[bytes] = []
+    for upload in uploads:
+        name = str(getattr(upload, "filename", "") or "")
+        data = await upload.read()
+        if not data:
+            continue
+        lower = name.lower()
+        if lower.endswith((".xlsx", ".xlsm")):
+            if not event_order.is_delivery_list(data):
+                raise ValueError(f"{name}: DeliveryList(주문번호·수취인 열)가 아닌 엑셀입니다. 당첨자 명단은 원본 CSV로 올려주세요.")
+            delivery_list.append(data)
+        elif lower.endswith(".csv") or not lower:
+            csv_list.append(data)
+            csv_names.append(name or f"{len(csv_list)}번째 당첨자 파일")
+        else:
+            raise ValueError(f"{name}: 당첨자 CSV(.csv)나 DeliveryList(.xlsx)만 올릴 수 있습니다.")
+    return csv_list, csv_names, delivery_list
+
+
 @router.post("/api/process/event-winner-order")
 async def process_event_winner_order(
-    winners_file: UploadFile = File(...),
+    winners_file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
     exclude_issued: str = Form("true"),
     user: dict = Depends(verify_token),
 ):
     """라이브 이벤트 당첨자 CSV → 발주처별 발주서(제주다팜·쥬얼리프룻·제이비티, 2곳 이상이면 zip).
 
+    files: 당첨자 CSV 여러 개 + DeliveryList(xlsx)를 한 번에 받는다(2026-11-23). 당첨자는 한데 모아 발주처별로 한 장,
+    이름·주소가 빈 당첨자는 DeliveryList에서 주문번호로 찾아 채운다. winners_file은 예전 화면 호환용.
     꿀·호박고구마 경품은 고구마 화면에서 해달로 발주하므로 여기선 뺀다(event_order.process).
     같은 명단을 다시 올려도 이전에 발주한 당첨자는 영구 제외한다(event_order.EVENT_SECTION) — 종전엔 화면의
     '이전 발주분 자동 제외' 체크박스를 백엔드가 받지 않아 재업로드하면 전원 다시 발주됐다(2026-11-16 리뷰).
     """
     section = event_order.EVENT_SECTION
     try:
-        csv_bytes = await winners_file.read()
+        # 함수를 직접 부를 때(테스트)는 기본값이 File(None) 객체라 업로드만 골라낸다
+        uploads = [f for f in (files if isinstance(files, list) else []) if hasattr(f, "read")]
+        if hasattr(winners_file, "read"):
+            uploads.insert(0, winners_file)
+        csv_list, csv_names, delivery_list = await _split_event_uploads(uploads)
+        if not csv_list:
+            raise ValueError("라이브 이벤트 당첨자 CSV(winners_raw)를 올려주세요. DeliveryList만으로는 만들 수 없습니다.")
         issued_excluded = await common._issued_exclusions(section, exclude_issued, reissue_stale=False)
         issued_dates = await common._issued_exclusion_dates(section, exclude_issued)
         dup_names: list[str] = []
         dup_keys: list[str] = []
         event_keys: list[str] = []
         results = event_order.process(
-            csv_bytes, exclude_keys=issued_excluded, skipped_names=dup_names,
+            csv_list, exclude_keys=issued_excluded, skipped_names=dup_names,
             skipped_keys=dup_keys, issued_keys=event_keys,
+            delivery_files=delivery_list, csv_names=csv_names,
         )
         if len(results) == 1:
             output_bytes, filename, stats = results[0]
@@ -317,7 +350,7 @@ async def process_event_winner_order(
                 "suppliers": ", ".join((s or {}).get("supplier", "") for _, _, s in results),
             }
             # 환불 제외·확인필요는 event_order가 첫 파일에만 싣는다 → zip 응답에도 옮겨 화면에 보이게
-            for key in ("skipped_refund", "needs_check"):
+            for key in ("skipped_refund", "winner_files", "filled_from_delivery", "needs_check"):
                 if first.get(key):
                     stats[key] = first[key]
         if isinstance(stats.get("needs_check"), str):
