@@ -67,8 +67,13 @@ DELIVERY_HEADERS = [
 
 GAEGEOLMU_PRODUCT_NAME = "식품애착 게걸무씨앗기름 폐 기침 기관지"
 
-# 위탁발송 정산 단가 — 1병 4만원 (2026-09-07 사용자 확인). 바뀌면 여기만 고치면 된다.
-UNIT_PRICE_PER_BOTTLE = 40000
+# 위탁발송 정산 단가(건당) — 1병 옵션 37,000원 · 2병 옵션 75,000원 (2026-11-23 사용자 확인, 이전엔 1병 4만원).
+# 바뀌면 여기만 고치면 된다. 표에 없는 병수(아직 없는 옵션)는 1병 단가 × 병수로 계산한다.
+PRICE_PER_ORDER_BY_BOTTLES = {1: 37000, 2: 75000}
+
+
+def _settlement_unit_price(bottles: int) -> int:
+    return PRICE_PER_ORDER_BY_BOTTLES.get(bottles) or bottles * PRICE_PER_ORDER_BY_BOTTLES[1]
 
 
 def normalize(value) -> str:
@@ -489,10 +494,10 @@ def build_settlement_text(
         9/7 게걸무 위탁발송
         쿠팡 6건
 
-        1병. 2건= 8만원
-        2병. 4건= 32만원 송금예정
+        1병. 2건= 74,000원
+        2병. 4건= 30만원 송금예정
 
-        총 40만원 송금예정
+        총 374,000원 송금예정
     """
     lines = [f"{now.month}/{now.day} 게걸무 위탁발송"]
     lines.extend(f"{label} {count}건" for label, count in source_counts if count)
@@ -510,7 +515,7 @@ def build_settlement_text(
     for bottles, count in buckets:
         if not count:
             continue
-        won = bottles * count * UNIT_PRICE_PER_BOTTLE
+        won = count * _settlement_unit_price(bottles)
         total_won += won
         option_lines.append(f"{bottles}병. {count}건= {_settlement_money_text(won)}")
     if option_lines:

@@ -130,7 +130,7 @@ def test_gmarket_rows_skip_non_gaegeolmu():
 
 # ── 거래처 전달용 정산 요약 (2026-09-07) ──
 def test_settlement_text_matches_vendor_format():
-    """1병 4만원 기준. 사용자가 쓰던 문구 그대로 나와야 복붙이 된다."""
+    """건당 1병 37,000원 · 2병 75,000원 기준(2026-11-23). 사용자가 쓰던 문구 그대로 나와야 복붙이 된다."""
     from datetime import datetime
 
     from app.processors.gaegeolmu_order import build_settlement_text
@@ -144,10 +144,10 @@ def test_settlement_text_matches_vendor_format():
         "9/7 게걸무 위탁발송",
         "쿠팡 6건",
         "",
-        "1병. 2건= 8만원",
-        "2병. 4건= 32만원 송금예정",
+        "1병. 2건= 74,000원",
+        "2병. 4건= 30만원 송금예정",
         "",
-        "총 40만원 송금예정",
+        "총 374,000원 송금예정",
     ])
 
 
@@ -164,7 +164,7 @@ def test_settlement_text_lists_gmarket_separately():
         option_totals, [("쿠팡", 1), ("지마켓", 1)], datetime(2026, 9, 7)
     )
     assert "쿠팡 1건" in text and "지마켓 1건" in text
-    assert "총 12만원 송금예정" in text
+    assert "총 112,000원 송금예정" in text
 
 
 # ── 이전 발주분 자동 제외 (2026-09-17) ──
@@ -253,6 +253,6 @@ def test_process_puts_settlement_text_in_stats():
     _out, _fn, stats = G.process(payload)
     text = stats["copy_text"]
     assert "게걸무 위탁발송" in text
-    assert "1병. 1건= 4만원" in text
-    assert "2병. 1건= 8만원 송금예정" in text
-    assert "총 12만원 송금예정" in text
+    assert "1병. 1건= 37,000원" in text
+    assert "2병. 1건= 75,000원 송금예정" in text
+    assert "총 112,000원 송금예정" in text
